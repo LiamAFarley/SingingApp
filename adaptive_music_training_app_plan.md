@@ -1,1431 +1,686 @@
-# Adaptive Singing, Ear-Training, Transcription, and Absolute-Pitch Platform
-## Consolidated implementation plan
+# Singing, Ear-Training and Absolute-Pitch Trainer
+## Implementation plan (revision 2)
 
-**Purpose:** Build a local-first music-training platform that can measure musical performance, ingest real music, generate exercises, track a learner model, and expose the whole system to an agent through MCP for adaptive practice planning.
+**Purpose:** A Windows desktop app for singing, ear training and absolute-pitch (AP) training. It plays stimuli and captures the voice through ASIO on a Focusrite Scarlett, grades every attempt deterministically, logs everything, and exposes the history plus exercise and session generation to an LLM through MCP. The LLM reads the results and writes the next sessions; the app runs and grades them.
 
-**Design principle:** The application should behave like an experimental learning platform rather than a static exercise library. Every exercise should have a clear target, deterministic grading where possible, logged conditions, planned progression, transfer tests, and retention tests.
-
----
-
-## 1. Product scope
-
-The system combines:
-
-- Singing practice and objective vocal feedback
-- Absolute-pitch training
-- Relative-pitch and functional ear training
-- Sight singing
-- Melodic, harmonic, and rhythmic dictation
-- Repertoire-derived exercises
-- Automatic source separation
-- Automatic music transcription
-- Drum-kit separation and drum-to-MIDI transcription
-- Low-latency ASIO audio on Windows
-- Shared desktop/mobile learner history
-- Hands-free headphone practice
-- Agent-driven adaptive session planning through MCP
-
-The desktop application is the authoritative environment for low-latency audio, detailed analysis, repertoire ingestion, transcription correction, and analytics.
-
-The phone client is intentionally smaller and optimized for hands-free practice, short active drills, microphone pitch exercises, and offline execution of precompiled sessions.
-
----
-
-# 2. Foundational separation of responsibilities
-
-The system should have four major layers:
+**Core loop:**
 
 ```text
-                         ┌─────────────────────┐
-                         │     MCP Agent       │
-                         │ planner / coach     │
-                         └──────────┬──────────┘
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     TRAINING CORE                           │
-│ exercises · grading · learner state · sessions · library   │
-└──────────────┬───────────────────────────────┬──────────────┘
-               │                               │
-               ▼                               ▼
-┌───────────────────────────┐       ┌─────────────────────────┐
-│ Native realtime engine    │       │ Offline ML worker       │
-│ C++ / JUCE                │       │ Python / PyTorch        │
-│                           │       │                         │
-│ ASIO / WASAPI             │       │ source separation       │
-│ recording/playback        │       │ transcription           │
-│ realtime F0               │       │ high-quality F0         │
-│ MIDI / metronome          │       │ beat/key analysis       │
-└───────────┬───────────────┘       └───────────┬─────────────┘
-            │                                   │
-            └─────────────────┬─────────────────┘
-                              ▼
-                    ┌───────────────────┐
-                    │ Desktop UI        │
-                    │ React / Tauri     │
-                    └───────────────────┘
+LLM (MCP) reads results → writes session JSON → app validates and queues it
+→ user practises (headphones, Scarlett) → engine plays and captures → deterministic grading
+→ trials logged → LLM reads results → …
 ```
 
-### Hard rule for realtime audio
+**Principles:**
 
-Nothing potentially blocking belongs in the audio callback.
-
-Do **not** perform in the callback:
-
-- Python calls
-- neural inference
-- file I/O
-- database transactions
-- logging
-- UI work
-- heap allocation where avoidable
-- network requests
-- mutex acquisition
-- transcription
-- source separation
-
-Use lock-free or bounded queues to move audio and state into analysis workers.
+- The app measures and grades; the LLM plans. Grading is always deterministic code.
+- Every trial is logged append-only with its full conditions (stimulus, timbre, pool, feedback mode, mask, protocol, calibration).
+- Intonation is judged on the note centre; vibrato is described separately.
+- AP progress is judged on holdout stimuli, transfer (octave, timbre, context) and retention, never on training-set accuracy alone.
+- Nothing that can block runs in the audio callback.
 
 ---
 
-# 3. Desktop audio engine
+## 0. Decisions
 
-Use **JUCE C++** for the native audio engine.
-
-Preferred Windows backend order:
-
-1. Native hardware **ASIO**
-2. WASAPI Exclusive
-3. Low-latency WASAPI Shared
-4. Ordinary shared audio for noninteractive playback
-
-The device page should expose:
-
-- driver type
-- physical interface
-- input channels
-- output channels
-- sample rate
-- buffer size
-- measured round-trip latency
-- monitoring mode
-- microphone level
-- calibration offset
-- input/output test
-- underrun/xrun count
-
-Use **48 kHz** internally for interactive audio when supported.
-
-Typical interactive buffers may be 64–256 samples, but the app must query supported sizes from the driver.
-
----
-
-# 4. Latency calibration and timing correctness
-
-Rhythm grading requires device-latency compensation.
-
-Provide a calibration routine that plays a short transient and detects its return using loopback or microphone capture.
-
-Persist calibration per device configuration:
-
-```text
-device_id
-driver
-sample_rate
-buffer_size
-input_latency_samples
-output_latency_samples
-measured_roundtrip_samples
-manual_offset_samples
-calibration_timestamp
-```
-
-All performed-note and rhythm timestamps should be normalized onto the application's master timeline before scoring.
-
-A switch from ASIO to WASAPI must not silently alter measured performance.
-
----
-
-# 5. Realtime versus authoritative offline analysis
-
-Use two different analysis paths.
-
-## Realtime path
-
-Goals:
-
-- immediate tuner
-- live cents display
-- voiced/unvoiced state
-- metronome synchronization
-- interactive pitch targeting
-
-Candidate native methods:
-
-- YIN
-- pYIN-inspired online estimator
-- McLeod Pitch Method
-- another low-cost native F0 algorithm
-
-Suggested operating target:
-
-```text
-audio callback      small hardware-sized blocks
-F0 analysis window  ~20–50 ms
-pitch updates       ~10 ms
-UI updates          30–60 Hz
-```
-
-## Offline authoritative path
-
-After an attempt, rerun the recording with a more accurate F0 model such as torchcrepe/CREPE-class analysis.
-
-Retain the **continuous F0 trajectory**, not only note labels.
-
-For accompanied or noisy material, support an RMVPE-like specialized F0 backend.
-
----
-
-# 6. Objective vocal metrics
-
-Store multiple independent dimensions rather than one "singing score."
-
-For each sung note or phrase calculate where applicable:
-
-| Metric | Description |
+| Topic | Decision |
 |---|---|
-| initial pitch error | cents error at first reliable vocal onset |
-| settling time | time to enter and remain near target |
-| settled pitch error | median pitch error after onset transient |
-| note-center error | target versus estimated central pitch |
-| pitch drift | change in central pitch across sustained note |
-| pitch spread | variability around central pitch |
-| onset timing | performed versus expected onset |
-| release timing | performed versus expected release |
-| duration error | note-length discrepancy |
-| voiced continuity | interruptions/unvoiced gaps |
-| interval accuracy | produced versus expected interval |
-| dynamic trajectory | relative loudness contour |
-| vibrato rate | cycles per second |
-| vibrato extent | pitch excursion |
-| vibrato regularity | cycle-to-cycle consistency |
-| vibrato onset delay | note onset to stable modulation |
-| vibrato center drift | slow movement underneath modulation |
-
-### Critical scoring rule
-
-Do not penalize a singer simply because instantaneous F0 leaves a narrow cents window during vibrato.
-
-Estimate a slowly varying note center for intonation scoring and characterize vibrato separately.
-
-This prevents a good sustained note from being marked wrong by a naive tuner.
+| Platform | Windows desktop only. No mobile app, no sync. |
+| Audio | ASIO first (Focusrite Scarlett), WASAPI fallback. 48 kHz. |
+| Listening | Always headphones. Playback never reaches the mic, so sing-along, drone and accompaniment exercises are graded without bleed handling. |
+| Monitoring | The singer hears their own voice through the Scarlett's direct monitor (zero latency). The app outputs prompts, references, drones, clicks and accompaniment. Optional software monitoring, off by default. |
+| Language | Rust for the audio engine, DSP, grading, storage and MCP server. TypeScript/React for the UI only (Tauri 2 webview). Python only in Part 2, for ML models. |
+| Adaptivity | No built-in adaptive-difficulty engine or learner-state model. The LLM decides progression from logged results; the app provides parameterised generators, deterministic grading and aggregate queries. |
+| Exchange formats | Sessions and exercises: JSON validated against the Rust types. Notation: MusicXML. The LLM writes and edits scores and transcriptions as MusicXML or compact note JSON via MCP. |
+| Part 1 (V1) | Foundation → full AP suite → MCP → relative pitch and singing → sight singing and dictation (generated melodies + open MusicXML/MIDI) → hands-free. |
+| Part 2 (V2) | Song import → vocal separation → vocal F0 and transcription → LLM-corrected MusicXML → repertoire exercises. |
+| Deferred | Drum and other-instrument transcription, full-mix multi-instrument transcription. |
+| Outside the app | The Physical Vocal Practice Reference is a document given directly to the LLM for drafting off-app physical practice. The app does not implement or serve it. |
 
 ---
 
-# 7. Feedback scheduling
+## 1. Scope
 
-Research on feedback-guided vocal training supports realtime visual feedback as useful, but continuous feedback can create dependency.
+### Part 1 (V1)
 
-Therefore every exercise template should support a feedback schedule:
+- ASIO/WASAPI engine, device page, latency calibration
+- Live tuner and real-time pitch display
+- Post-trial pitch analysis and grading
+- Full AP suite: identification, production, cross-octave and cross-timbre transfer, speeded identification, passive pairing, incidental pairing, anchor songs, tonal-centre identification, assessment battery
+- Relative pitch: intervals, chords, scale degrees, cadences and progressions, tonic finding
+- Singing: pitch matching, sustain, interval singing, patterns, harmony against drones and chords, echo, range profile, own-voice references
+- Rhythm reproduction against a click
+- Sight singing from generated, LLM-authored and imported melodies; melodic, rhythmic and harmonic dictation
+- Hands-free sessions
+- MCP server: read results, generate and queue sessions, author scores, keep coach notes
 
-```text
-continuous
-intermittent
-after-note
-after-phrase
-end-of-exercise
-none
-```
+### Part 2 (V2)
 
-The progression hierarchy should be:
+- Song import and vocal/accompaniment separation
+- Vocal F0 and note transcription → MusicXML with per-note confidence
+- LLM correction of transcriptions via MCP; user verification by listening
+- Repertoire exercises: sing-along, karaoke, echo, phrase sight-reading; grading against corrected notes or directly against the original vocal contour
+- Passage search by musical features
 
-1. **Guided acquisition** — frequent feedback
-2. **Independent performance** — delayed feedback
-3. **Generalization** — new pitch/timbre/key/range/context
-4. **Retention** — delayed revisit without recent cues
+### Deferred (not planned)
 
-The learner should not be considered to have mastered a skill merely because it works while watching a moving pitch line.
-
----
-
-# 8. Master musical representation
-
-Every imported or generated musical item should normalize into one common representation.
-
-```text
-Piece
-  ├─ metadata
-  ├─ original audio
-  ├─ stems
-  ├─ tempo map
-  ├─ meter map
-  ├─ tonal/key annotations
-  ├─ symbolic tracks
-  │    └─ note events
-  │         pitch
-  │         onset
-  │         offset
-  │         velocity
-  │         instrument
-  │         confidence
-  │         provenance
-  └─ score
-       MusicXML
-```
-
-Trust order:
-
-1. user-corrected score/transcription
-2. trusted MusicXML/MIDI reference
-3. consensus automatic transcription
-4. individual model output
-
-Never silently overwrite user-corrected symbolic data with a later model rerun.
+- Drum separation and transcription, kit-piece MIDI
+- Other-instrument and full-mix multi-instrument transcription
+- Spoken note-name answers (speech recognition)
+- Pitch-shifted own-voice references
+- Formant and resonance analytics
 
 ---
 
-# 9. Automatic repertoire ingestion
+## 2. Architecture
 
 ```text
-audio
-  │
-  ├──► decode / normalize
-  │
-  ├──► full-mix transcription
-  │
-  ├──► source separation
-  │      vocals
-  │      drums
-  │      bass
-  │      other
-  │
-  ├──► stem-specific transcription
-  │
-  ├──► beat / tempo / meter
-  │
-  ├──► tonal analysis
-  │
-  ├──► confidence reconciliation
-  │
-  └──► editable canonical score
-              │
-              ▼
-       exercise extraction
+┌────────────────────────┐   stdio (MCP)   ┌──────────────────────────────┐
+│ LLM client             │◄───────────────►│ trainer-mcp (Rust, rmcp)     │
+│ Claude Code / Desktop  │                 │ links trainer-core           │
+└────────────────────────┘                 └──────────────┬───────────────┘
+                                                          │
+                                       SQLite (WAL) + data directory
+                                                          │
+┌─────────────────────────────────────────────────────────┴────────────────┐
+│ trainer-app (Tauri 2, Rust): session runner, queue watcher, library      │
+│                                                                          │
+│  ┌──────────────────────────┐  commands,   ┌──────────────────────────┐  │
+│  │ trainer-audio (Rust)     │  events,     │ UI (React + TS webview)  │  │
+│  │ cpal ASIO → Scarlett     │◄────────────►│ tuner, trial views       │  │
+│  │ scheduler, recorder      │  pitch and   │ OSMD scores, charts      │  │
+│  │ live pitch, synth        │  meter data  │                          │  │
+│  └──────────────────────────┘              └──────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────────────┘
+         Part 2: ml/ Python worker (subprocess, JSON job in, files out)
 ```
 
-The ingestion system should treat automatic transcription as uncertain evidence, not ground truth.
+### Processes
 
-Every automated analysis run should log:
+- **trainer-app** — the desktop app. Owns the audio device and runs sessions.
+- **trainer-mcp** — stdio MCP server launched by the LLM client. Reads and writes the same SQLite database and data directory and links the same `trainer-core` crate (schema, generators, grading, analysis, stats). Works whether or not the app is open.
+- The app polls `PRAGMA data_version` (~500 ms) and refreshes its queue when the MCP server writes a session.
+- Part 2: the `ml/` Python worker is run as a subprocess with a JSON job manifest and writes results into the data directory.
+- Audio never passes through the webview. The UI receives compact pitch and meter frames (Tauri `ipc::Channel`, batched per ~16 ms) and renders at display rate.
 
-```text
-model_name
-model_version
-checkpoint_hash
-configuration
-input_asset_hash
-timestamp
-confidence outputs
-```
+### Language choice
+
+Rust for everything except the UI:
+
+- ASIO needs native code; `cpal`'s `asio` feature gives Rust a direct ASIO host.
+- The audio callback must be free of GC pauses, locks and allocation; Rust plus `rtrb` ring buffers makes that straightforward.
+- Tauri's backend is already Rust, so the engine, app and MCP server share one `trainer-core` crate and one set of schema types. MCP tool schemas (`schemars`) and UI types (`ts-rs`) are generated from the same structs.
+- Pitch detection itself is cheap in any language; the gains are ASIO access, real-time safety and one shared codebase.
+- The UI stays TypeScript because MusicXML rendering (OSMD) and canvas drawing live there.
+
+### Libraries
+
+| Concern | Choice |
+|---|---|
+| Audio I/O | `cpal` with the `asio` feature (ASIO host on Windows, WASAPI fallback, other hosts for development elsewhere) |
+| Real-time queues | `rtrb` SPSC ring buffers |
+| FFT | `rustfft` |
+| Live pitch | McLeod Pitch Method (NSDF via FFT): `pitch-detection` crate or in-house |
+| Post-trial pitch | pYIN with Viterbi smoothing: `pyin` crate (librosa port) |
+| Synthesis | `rustysynth` (SoundFont, General MIDI) + in-house oscillators and Shepard tones |
+| MIDI files / MIDI input | `midly` / `midir` |
+| MusicXML | `roxmltree` (read), `quick-xml` (write), `zip` (.mxl) |
+| Audio files | `hound` (WAV); Part 2: `symphonia` (decode), `rubato` (resample) |
+| Storage | `rusqlite` (bundled, JSON1) + `rusqlite_migration` |
+| Schema and validation | `serde`, `schemars`, `serde_path_to_error`, `ts-rs` |
+| MCP | `rmcp` (features `server`, `transport-io`, `macros`, `schemars`) |
+| Plots for the LLM | `plotters` (PNG pitch trace vs target) |
+| Spoken prompts | Windows `SpeechSynthesizer` via the `windows` crate, rendered to buffers and cached |
+| App shell | Tauri 2 |
+| UI | React + TypeScript + Vite, `opensheetmusicdisplay`, custom canvas pitch view, `uplot` |
+| Part 2 ML | Python (uv): `audio-separator`, `torchcrepe` or RMVPE, `basic-pitch`, `beat-this` |
+
+**Build prerequisites (Windows):** Rust stable (MSVC toolchain), Node 22, LLVM/Clang (for cpal's ASIO bindings), ASIO SDK (cpal fetches it automatically or uses `CPAL_ASIO_DIR`), Focusrite ASIO driver.
 
 ---
 
-# 10. Source separation
+## 3. Audio engine
 
-Make the separator pluggable.
+### Device
 
-Initial backend family support should include modern architectures such as:
+- Host preference: ASIO → WASAPI → other cpal hosts (development only).
+- 48 kHz; 44.1 kHz accepted (all processing is sample-rate agnostic).
+- Buffer size: the driver's size by default. On the Scarlett the ASIO buffer size is set in Focusrite Control; the app displays it and requests a fixed size only when the driver accepts one. Target 64–128 frames.
+- Input: one mono mic channel (Scarlett input 1 or 2, selectable). Output: stereo headphones.
 
-- SCNet / Huge-SCNet
-- BS-RoFormer
-- MelBand-RoFormer
-- MDX23C
-- Demucs-family models as a mature fallback
+The device page shows: host, device, sample rate, buffer size, input channel, input meter with clip indicator, output test tone, measured round-trip latency, calibration status, suspected xruns (callback timing gaps) and callback load (% of buffer period).
 
-Suggested quality presets:
+### Real-time rules
 
-```text
-FAST
-  lightweight separator
+The audio callback never allocates, locks, does I/O, logs, makes system calls or runs analysis. It only:
 
-QUALITY
-  strongest general 4-stem model available locally
+- copies input samples into an SPSC ring, tagged with the master frame counter,
+- mixes scheduled pre-rendered buffers and the click into the output,
+- reads commands from an SPSC command ring (play buffer at frame N, stop, set gain),
+- writes compact events to an event ring (buffer started or finished at frame N, timing gap detected).
 
-SPECIALIZED
-  target-specific separator
-```
+**Master clock:** one frame counter advanced by the output callback. ASIO delivers input and output in the same buffer switch, so input blocks carry the same counter. On WASAPI, input blocks are mapped to the counter using stream timestamps. Calibration absorbs the remaining constant offset. Every prompt, click, capture and response timestamp is stored in master frames.
 
-The application should not hard-code assumptions about one model family because separation models are changing rapidly.
+### Playback
 
----
+- Prompts, references, drones, masks, clicks and accompaniment are rendered off the audio thread (rustysynth, oscillators, TTS cache) into pre-allocated buffers before they are needed, then scheduled at exact frames.
+- On-demand sounds (replay reference, on-screen keyboard) render on a worker thread in a few milliseconds and are scheduled immediately.
+- Buses: prompt, reference/accompaniment, click, optional software voice monitoring.
+- Answer input never makes sound unless the block's feedback mode allows it (use a MIDI controller with local sound off), so answering cannot leak a reference.
 
-# 11. General automatic music transcription
+### Capture and recording
 
-Use a modern multi-instrument AMT backend such as **MuScriptor** as a primary full-mix transcription route when its licensing and model availability fit the deployment.
-
-Normalize every transcription backend into:
-
-```text
-pitch
-onset
-offset
-instrument
-velocity_if_available
-confidence
-provenance
-```
-
-Support lighter stem-level systems such as **Basic Pitch** for isolated or nearly isolated melodic stems.
-
-Use multiple evidence streams when possible:
-
-```text
-full-mix transcription
-stem-level transcription
-continuous F0 support
-beat-grid support
-music-theory plausibility
-```
-
-Consensus raises confidence; disagreements are flagged for review.
+- An analysis thread drains the input ring, feeds the live pitch tracker and appends to the current trial's capture buffer.
+- Each trial's response window is saved as 16-bit 48 kHz mono WAV with its start frame.
+- Stream errors (device unplugged, driver reset after a buffer or sample-rate change in Focusrite Control) tear down and rebuild the streams; the current trial is marked `interrupted`.
 
 ---
 
-# 12. Vocal-stem transcription
+## 4. Latency calibration
 
-A vocal stem should support two simultaneous representations:
+Needed for every timing grade: rhythm, sight-singing onsets and sung-response latency.
 
-1. dense continuous F0 for analysis
-2. segmented symbolic notes for score/exercise generation
-
-The segmentation stage must be conservative around:
-
-- vibrato
-- slides
-- scoops
-- melisma
-- ornaments
-- breathy/unvoiced transitions
-- backing vocals
-
-When uncertain, keep the dense F0 representation and lower note-boundary confidence instead of forcing clean discrete notes.
+- **Loopback (preferred):** cable from a Scarlett output to a line input. The app plays a click train, detects the clicks in the input and stores the median round-trip offset in frames.
+- **Tap-along (fallback):** the user taps the mic or says "ta" on the clicks; median offset after outlier rejection. Stored as lower precision.
+- Stored per (device, host, sample rate, buffer size). If the configuration changes without a new calibration, the app warns and timing metrics are flagged `uncalibrated` instead of being silently shifted.
+- A performed onset is compared to its scheduled frame after subtracting the round-trip offset.
 
 ---
 
-# 13. Drum transcription and kit-component extraction
+## 5. Pitch analysis
 
-Provide a dedicated drum pipeline.
+Two passes over the same audio. The live pass drives the display; the post-trial pass produces the grade. The grade always comes from the post-trial pass, so the two never conflict.
 
-```text
-full mix
-   │
-   ▼
-drum stem
-   │
-   ├──► direct drum transcription
-   │
-   └──► kit-component separation
-           kick
-           snare
-           toms
-           hi-hat
-           ride
-           crash/cymbal
-                 │
-                 ▼
-             onsets
-                 │
-                 ▼
-             drum MIDI
-```
+### Live (display)
 
-Useful backend classes:
+- MPM/NSDF on the analysis thread, 2048-sample window (~43 ms at 48 kHz, covers F0 down to ~50 Hz), 480-sample hop (100 updates/s).
+- Frames: `{frame, f0_hz, clarity, rms_db}`.
+- Voicing gate on clarity and RMS; octave-jump guard (ignore jumps over ~700 cents unless sustained for 3 frames).
+- Target display latency ~40–50 ms end to end at 128-frame buffers.
 
-- ADTOF-style direct drum transcription
-- DrumSep/MDX-family kit-piece separation
-- newer separate-and-detect research pipelines
+### Post-trial (authoritative)
 
-The normalized output should support at minimum:
-
-```text
-kick
-snare
-toms
-closed/open hi-hat where reliable
-ride
-crash/cymbal
-velocity
-onset confidence
-```
-
-Do not require perfect audio isolation for MIDI creation. Direct symbolic transcription and separated-stem evidence can be combined.
+- pYIN with Viterbi smoothing over the trial capture, 10 ms hop, fmin/fmax from the singer's range profile plus a margin. Takes well under 100 ms for a typical trial, so after-trial feedback is effectively immediate.
+- Output: dense trace (cents relative to A4 as f32, voicing probability as u8) stored as a compact blob.
+- Optional later: a neural F0 backend (CREPE, RMVPE or FCPE as ONNX via `ort`) behind the same `F0Estimator` trait, if pYIN struggles on the user's voice. A dry, close-miked vocal with headphones should not need it.
 
 ---
 
-# 14. Transcription review UI
+## 6. Grading
 
-The editor should synchronize:
+Grading is a pure function: `grade(block_spec, stimulus, trace, calibration, responses) → metrics`. It lives in `trainer-core`, is used by the app and by `trainer-mcp` (re-grading), and is covered by golden tests.
 
-- waveform
-- spectrogram
-- source stem
-- piano roll
-- notation
-- playhead
-- confidence overlays
+Units: `midi = 69 + 12·log2(f / A4)`, cents = 100 × midi. A4 defaults to 440 Hz (configurable).
 
-Editing operations:
+### Note segmentation (sung responses)
 
-- insert note
-- delete note
-- change pitch
-- change onset
-- change offset
-- change instrument
-- change drum class
-- mark uncertain
-- mark verified
+- Voiced regions from pYIN voicing, split at sustained pitch changes (> ~60 cents held > 60 ms) and at energy re-onsets (repeated same-pitch notes).
+- Melodies are sung on a syllable with a consonant ("da", "la", solfège) so repeated notes separate cleanly; exercise instructions say so.
 
-A verified segment becomes eligible for high-confidence exercise generation.
+### Per-note metrics
 
----
+| Metric | Definition |
+|---|---|
+| onset latency | prompt end (or expected onset) → first reliably voiced frame |
+| initial error | median cents error over the first 50–100 ms of voicing |
+| settling time | time until the note centre enters `stable_tol` and stays there ≥ `hold_ms` |
+| centre error | median of the note centre over the settled region |
+| drift | slope of the note centre over the settled region (cents/s) |
+| stability | SD of the note centre over the settled region |
+| vibrato | rate (Hz), extent (± cents) and regularity (cycle-to-cycle CV) of the residual, when it is periodic in ~4–8 Hz |
+| duration and release | performed vs expected (timed exercises) |
+| continuity | unvoiced gaps inside the note |
 
-# 15. Score support and sight singing
+**Note centre vs vibrato:** the centre is a zero-phase low-pass (~3 Hz) of the trace; vibrato is the residual. Intonation is scored on the centre only, so a well-centred note with ±50-cent vibrato counts as in tune. Vibrato is reported, never scored as good or bad.
 
-Use MusicXML as the rich score interchange format.
+### Pitch reference modes
 
-Display notation interactively and color-code grading.
+| Mode | Use |
+|---|---|
+| `absolute` | error vs the target pitch (pitch matching, sustain, AP production with octave) |
+| `pitch_class` | absolute with octave ignored (AP production; octave reported separately) |
+| `relative_to_first` | targets re-anchored to the singer's first note (interval singing, melodies without a given pitch) |
+| `relative_drift_tolerant` | a global offset and a drift line are fitted across the phrase and reported separately from per-note errors (long unaccompanied melodies) |
 
-Example:
+`tuning: equal | just` — for harmony against a drone or chord, targets can be just-intonation ratios relative to the sounding root.
 
-```text
-green   correct
-yellow  marginal
-red     incorrect
-blue    current
-gray    omitted
-```
+### Melodies (sight singing, echo, sung dictation)
 
-The score renderer should never own grading logic.
+- Detect performed note candidates and align them to the expected notes with dynamic programming. Costs: pitch mismatch (in the chosen reference mode), onset error, duration error, insertion, deletion. One missed note does not shift every later score.
+- Per expected note: matched or missed, pitch error, onset error. Per attempt: extra notes, overall offset, drift (cents per bar).
 
----
+### Identification responses
 
-# 16. Sight-singing alignment
+Correct or incorrect, signed category error (answer − actual; for pitch classes wrapped to −6…+5 semitones), response time from stimulus onset on the audio clock, timeout flag.
 
-Use three separate timelines:
+### Defaults (overridable per block)
 
-```text
-REFERENCE SCORE
-expected pitch + timing
+`category_tol 50¢`, `in_tune_tol 20¢`, `stable_tol 25¢`, `hold_ms 400`, `onset_tol 60 ms`, response deadline per exercise type.
 
-PERFORMANCE
-dense F0 + voiced/unvoiced trajectory
-
-ALIGNMENT
-mapping between expected and performed events
-```
-
-Do not segment solely by expected note boundaries.
-
-Instead detect performed note candidates and align them with dynamic programming or DTW-like sequence alignment using costs for:
-
-- pitch mismatch
-- onset error
-- duration error
-- insertion
-- deletion
-
-This prevents one missed note from shifting every later score.
+Loudness is relative only: the Scarlett's gain setting is arbitrary, so no SPL claims are made.
 
 ---
 
-# 17. Exercise schema
+## 7. Stimuli
 
-All exercises should be declarative, reproducible, and agent-generatable.
+### Timbres
 
-Example:
+- `gm:<program>` — General MIDI SoundFont via rustysynth (default bank FluidR3_GM, MIT licence): piano, strings, winds, brass, organ, guitar, choir "aahs", voice "oohs", synths.
+- `synth:<sine|triangle|saw|square|pulse>` with optional filter and envelope.
+- `shepard` — octave-ambiguous Shepard tones (chroma without height).
+- `own_voice` — the user's best stored takes of that exact pitch.
+- Extra SF2 banks can be added to the library.
+
+Per-stimulus parameters: pitch, timbre, duration, loudness, attack shape, optional detune (default 0 cents).
+
+### Training and holdout pools
+
+- Each (timbre, octave) combination is tagged `training` or `holdout` in a pool configuration. Defaults: a fixed set of holdout timbres never used in training (e.g. four GM programs plus `synth:pulse`) and holdout octaves 2 and 6.
+- Training blocks never draw holdout stimuli; assessment blocks draw only holdout stimuli. The validator rejects violations unless the session explicitly overrides them.
+
+### Masks between trials
+
+A mask between AP trials stops the next trial being solved by relative pitch from the previous, labelled one: `none | noise | random_tones | chromatic_cluster`. The default is `random_tones` (~1.5 s of random pitches across the range) whenever feedback reveals answers.
+
+### Reference-exposure log
+
+Each trial records `secs_since_labeled_reference`: time since the app last played a tone whose name the user was told. Assessment blocks warn when it is under 5 minutes. The LLM uses it to place assessments at the start of sessions.
+
+### Spoken prompts
+
+Windows `SpeechSynthesizer` renders text to WAV, cached by text hash and played through the engine (same clock, same headphones). Covers note names (spelled for the context), interval and chord names, numbers and feedback phrases.
+
+---
+
+## 8. Exercise and session model
+
+### Concepts
+
+- **Session** — an ordered list of blocks, written by the LLM (via MCP), taken from a preset, or set up by the user.
+- **Block** — one exercise type + generator params (or explicit items) + count + feedback mode + grading overrides + seed + tags.
+- **Trial** — one concrete stimulus and response, generated deterministically from (block, seed, index) in `trainer-core`, so `validate_session` previews exactly what the app will play. Logged append-only.
+- New exercise types are added in code. The LLM composes existing types through params and explicit items.
+
+### Feedback modes (per block)
+
+`continuous` (live pitch line visible) · `after_trial` · `after_block` · `end_of_session` · `none`.
+Fading feedback is the LLM's job: it picks the mode per block, and every trial logs the mode it ran under.
+
+### Example session
 
 ```json
 {
-  "type": "sing_note",
-  "target": {
-    "midi": 66,
-    "label": "F#4"
-  },
-  "prompt": {
-    "mode": "spoken_label"
-  },
-  "response": {
-    "mode": "voice",
-    "timeout_ms": 4000
-  },
-  "feedback_schedule": "after-note",
-  "grading": {
-    "attack_tolerance_cents": 35,
-    "stable_tolerance_cents": 20,
-    "required_hold_ms": 600
-  },
-  "skills": [
-    "absolute_pitch.production.F#",
-    "voice.pitch_targeting"
+  "title": "AP stage 2 + no-reference production",
+  "protocol": "ap_progressive",
+  "planned_minutes": 20,
+  "blocks": [
+    {
+      "type": "pitch_id",
+      "count": 60,
+      "seed": 1842,
+      "feedback": "after_trial",
+      "params": {
+        "classes": ["C", "E", "G#"],
+        "out_of_set_rate": 0.15,
+        "octaves": [3, 4, 5],
+        "timbres": ["gm:0", "gm:48", "synth:triangle"],
+        "pool": "training",
+        "duration_ms": 1000,
+        "deadline_ms": 3000,
+        "mask": "random_tones",
+        "answer": "pitch_class"
+      }
+    },
+    {
+      "type": "sing_pitch",
+      "count": 12,
+      "feedback": "after_trial",
+      "params": {
+        "classes": "all",
+        "prompt": "speech+text",
+        "response_ms": 4000,
+        "pre_mask": "random_tones",
+        "reveal_target_after": true
+      },
+      "grading": { "mode": "pitch_class", "category_tol_cents": 50, "in_tune_tol_cents": 20 }
+    }
   ]
 }
 ```
 
-The engine, not the LLM, executes and grades this object.
+### Example block with an LLM-authored melody
 
----
-
-# 18. Absolute-pitch skill model
-
-Do not represent absolute pitch as a single boolean.
-
-Track separately:
-
-```text
-absolute pitch memory
-pitch-class identification
-pitch labeling
-absolute pitch production
-cross-octave transfer
-cross-timbre transfer
-pitch recognition in musical context
-response latency / automaticity
-retention
+```json
+{
+  "type": "sight_sing",
+  "count": 1,
+  "feedback": "after_trial",
+  "items": [
+    {
+      "score": {
+        "notes_json": {
+          "key": "D", "mode": "major", "time": "4/4", "tempo_bpm": 84, "clef": "treble",
+          "notes": [["D4","q"], ["F#4","q"], ["A4","h"], ["G4","q"], ["E4","q"], ["C#4","q"], ["D4","q"]]
+        }
+      },
+      "given_start_pitch": false,
+      "count_in_bars": 1
+    }
+  ],
+  "grading": { "mode": "relative_drift_tolerant" }
+}
 ```
 
-Relative pitch remains a separate skill family.
+**Compact note JSON:** `[pitch, duration]` pairs. Pitch is scientific notation with `#`/`b` (`##`/`bb` allowed) or `r` for a rest. Duration codes: `w h q e s`, `.` for dotted, `~` to tie into the next note. An optional third element is a lyric or solfège syllable. Items can also reference a stored score by `score_id`.
 
----
-
-# 19. Absolute-pitch training protocols
-
-## A. Progressive pitch-category training
-
-This should be the central explicit AP mode.
-
-Key protocol features to support:
-
-- begin with a restricted pitch-class set
-- progressively add categories
-- use several octaves
-- include out-of-set distractors
-- vary feedback availability
-- tighten response deadlines
-- require repeated successful sessions
-- remediate weak pitch classes
-- test transfer on unseen timbres and octaves
-
-Provide both:
+### Trial record
 
 ```text
-research-faithful protocol
-adaptive experimental protocol
+trial_id, session_id, block_idx, trial_idx, type, protocol, tags[],
+stimulus (resolved JSON), pool, feedback_mode, mask,
+response (answer, rt_ms | recording ref), metrics (JSON), correct (bool | null),
+trace_id, recording_path, started_at (UTC), start_frame,
+device_profile_id, calibrated (bool), secs_since_labeled_reference, interrupted (bool)
 ```
 
-The software must log which protocol produced which results.
+All statistics are computed from this log on demand. Nothing else stores "skill state".
 
-## B. Cross-octave and cross-timbre generalization
+### Skill tags
 
-A pitch category is not mastered because one specific piano note is memorized.
+Dotted tags for filtering and grouping, e.g. `ap.id`, `ap.id.octave_transfer`, `ap.id.timbre_transfer`, `ap.production`, `ap.context`, `rp.interval.melodic`, `rp.interval.harmonic`, `rp.chord`, `rp.scale_degree`, `rp.function`, `voice.pitch_match`, `voice.sustain`, `voice.interval`, `voice.harmony`, `voice.sight_singing`, `rhythm.reproduction`, `dictation.melodic`. Each exercise type has default tags; blocks can add more.
 
-Training and testing should vary:
+### Validation
 
-- octave
-- instrument
-- synthesis timbre
-- attack shape
-- loudness
-- speaker/headphone context where practical
-
-Reserve holdout stimuli never used in training.
-
-## C. Incidental associative learning
-
-Support as an experimental mode, especially for hands-free practice.
-
-Examples:
-
-- recurring tones paired with visual/symbolic categories
-- pitch cues embedded in another classification task
-- passive category-name pairing
-- Shepard-tone experiments
-
-Do **not** count performance within these tasks as evidence of transferable AP.
-
-Evaluate transfer separately using ordinary unseen tones.
-
-## D. Absolute pitch production
-
-Prompt:
-
-> Sing E-flat.
-
-No reference tone is played.
-
-Measure:
-
-- initial produced pitch
-- settled pitch
-- response latency
-- stability
-- effect of distractors/delay
-
-## E. Familiar-song pitch anchoring
-
-Optionally use familiar original-key recordings to test and exploit absolute musical memory.
-
-Treat this as a bridge into pitch-category learning, not proof of generalized AP.
+Sessions deserialize into strongly typed Rust structs (`serde_path_to_error` gives exact JSON paths for errors), then pass semantic checks: known timbres, pool rules, notes within the range profile (warning), consistent params, estimated duration. The app and the MCP server use the same validator.
 
 ---
 
-# 20. Absolute-pitch assessment
+## 9. Absolute-pitch suite (first feature set)
 
-Avoid declaring "you have perfect pitch."
+### Skill dimensions (tagged and reported separately)
 
-Report a profile:
+Pitch-class identification · note labelling with octave · AP production · cross-octave transfer · cross-timbre transfer · AP in musical context · response latency · retention. Relative pitch is a separate family. The app never reports a single "you have perfect pitch" verdict.
 
-| Test | Measures |
-|---|---|
-| blind 12-class identification | no-reference note naming |
-| cross-octave identification | chroma invariance |
-| cross-timbre identification | timbral independence |
-| response latency | automaticity |
-| semitone confusion matrix | systematic category errors |
-| delayed retest | retention |
-| no-reference singing | absolute production |
-| unfamiliar-music pitch naming | practical transfer |
+### Exercise types
 
-Maintain a reserved evaluation stimulus bank that never appears during training.
-
-Record recent reference exposure because it can contaminate "absolute" tests.
-
----
-
-# 21. Relative pitch, harmony, audiation, and solfège
-
-Provide full tracks for:
-
-- melodic intervals
-- harmonic intervals
-- chord qualities
-- chord inversions
-- scale degrees
-- functional harmony
-- cadence recognition
-- key/tonic recognition
-- melodic dictation
-- harmonic dictation
-- rhythmic dictation
-- audiation
-- sight singing
-
-Support:
-
-- movable-do
-- fixed-do
-- numeric scale degrees
-- note names
-
-Do not assume one solfège system is a universal solution.
-
----
-
-# 22. Vocal imitation and personalized references
-
-The exercise engine should support targets rendered as:
-
-- piano
-- synthesized tone
-- professional voice
-- user's own previously successful voice sample
-- pitch-shifted user voice
-
-The user's own successful productions may be useful reference material for later imitation and should be a first-class target type.
-
-This allows experiments comparing which reference timbre produces the best pitch matching.
-
----
-
-# 23. Singing difficulty matrix
-
-Do not reduce singing difficulty to note range.
-
-Tag each exercise along dimensions such as:
-
-| Dimension | Easier | Harder |
+| Type | What happens | Key params |
 |---|---|---|
-| target | sustained note | unfamiliar phrase |
-| reference | sing-along | delayed memory |
-| tempo | slow | fast |
-| articulation | legato | staccato/mixed |
-| range | comfortable middle | extreme tessitura |
-| intervals | steps | large leaps |
-| feedback | continuous | none |
-| direction | ascending | descending |
-| tonality | diatonic | chromatic/modulating |
+| `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). Optional "not in set" answer for out-of-set distractors. | classes, out_of_set_rate, octaves, timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
+| `sing_pitch` | Named prompt ("Sing E♭"), no reference → user sings; graded by pitch class, octave reported. | classes, prompt (text, speech or both), response_ms, delay_ms, pre_mask, distractor (tones or music before the prompt), reveal_target_after |
+| `pitch_pairing` | Passive: tone → pause → spoken and/or visual label. No response. Logged as exposure, never counted as AP evidence. | classes, timbres, octaves, gap_ms, rate |
+| `incidental_pairing` | Secondary visual task (e.g. press the colour shown) in which each colour is consistently accompanied by one pitch class. Logged as exposure; transfer is measured only with ordinary `pitch_id`. | class-to-colour map, timbres, octaves |
+| `anchor_song` | User-defined anchors (song + original-key first pitch, optional MIDI). Mode A: "Sing the first note of <song>", graded absolute. Mode B: "Original key or shifted?" for a melody played at 0/±1/±2 semitones. | anchors, mode, shift set |
+| `tonal_center_id` | Short unfamiliar progression or melody (generated, or a library piece transposed to a random key) → name the tonic or key, or a chord's root. Without reference it is AP-in-context; with `reference: true` it is relative tonic finding. | source, keys, length, timbres, reference, answer |
 
-This is critical for useful error clustering.
+Identification response times are measured from stimulus onset on the audio clock; a missed deadline logs a `timeout` trial.
 
----
+### Assessment battery (preset `ap_assessment`)
 
-# 24. Range and tessitura tracking
+All holdout stimuli, no feedback, masks between trials, placed first in a session:
 
-Distinguish:
+1. 12-class identification, octaves 3–5, holdout piano-like timbre — 48 trials
+2. Cross-octave identification, octaves 2 and 6 — 24 trials
+3. Cross-timbre identification, all holdout timbres including `shepard` and `synth:sine` — 36 trials
+4. Speeded identification, 1500 ms deadline — 24 trials
+5. No-reference production, each pitch class once in random order, masked — 12 trials
+6. Tonal-centre identification on unfamiliar excerpts, no reference — 12 trials
 
-```text
-available range
-usable range
-comfortable tessitura
-reliable exercise range
-```
+The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, median response time, 12×12 confusion matrix, signed-error histogram (systematic sharp or flat category bias), accuracy by timbre and by octave, production category accuracy and median |cents|, and comparison with earlier battery runs (retention when the gap is long).
 
-Never expand difficulty merely because an extreme note was produced once.
+### Presets shipped with the app
 
-Range progression should consider:
+- `ap_assessment` — the battery above.
+- `ap_progressive/stage_NN` — starts with three classes spread across the octave (e.g. C, E, G♯) plus out-of-set distractors; each stage adds one class; deadlines tighten from 4 s to 2 s. Suggested criterion: ≥ 90 % over two sessions. Stats tools report the criterion; the LLM (or the user) moves to the next stage.
+- `ap_daily` — short mixed identification and production block.
+- `ap_passive` — hands-free pairing block.
 
-- repeatability
-- pitch accuracy
-- continuity
-- user comfort
-- absence of strain flags
-
-The app can measure acoustics but should not claim to diagnose registration physiology.
+Presets and "repeat last session" work without the LLM.
 
 ---
 
-# 25. Vibrato analysis
+## 10. Relative pitch, harmony and rhythm
 
-Vibrato needs a dedicated second-stage analyzer.
-
-Workflow:
-
-1. estimate dense F0
-2. fit/estimate slowly varying pitch center
-3. subtract center
-4. analyze residual modulation
-5. classify periodicity only when confidence is sufficient
-
-Useful analysis band: roughly the region in which normal vocal vibrato often occurs, but avoid enforcing one style-specific target.
-
-Track:
-
-- rate
-- extent
-- regularity
-- onset delay
-- duration
-- center drift
-- loudness modulation
-
-Do not provide one universal "vibrato quality score."
-
-Allow style/genre profiles.
-
----
-
-# 26. Hands-free mode
-
-A deterministic session player should support:
-
-```text
-PROMPT
-→ RESPONSE WINDOW
-→ optional MICROPHONE CAPTURE
-→ ANSWER / FEEDBACK
-→ NEXT
-```
-
-Examples:
-
-### Passive
-
-```text
-[tone]
-3 second pause
-"E-flat."
-```
-
-### Active singing
-
-```text
-"Sing F-sharp."
-[microphone opens]
-"Correct. Twelve cents sharp."
-```
-
-### Active spoken identification
-
-Optional speech recognition can record spoken note names, but manual/tap responses should remain available for noisy environments.
-
-Hands-free listening is supplemental exposure and should not be credited the same as attention-demanding active trials.
-
----
-
-# 27. Mobile client
-
-The mobile app should execute precompiled sessions offline.
-
-Heavy separation/transcription remains desktop/server-side.
-
-Mobile capabilities:
-
-- background headphone playback
-- active ear training
-- AP drills
-- note production
-- simple microphone pitch feedback
-- hands-free responses
-- sync attempts/results
-- download prepared repertoire snippets
-
-Native audio paths:
-
-- Android: Oboe / AAudio
-- iOS: CoreAudio / AVAudioSession
-
-Do not depend on a browser tab for background audio.
-
----
-
-# 28. Learner-state model
-
-Each skill should track more than accuracy.
-
-```text
-skill_id
-attempt_count
-recent_attempt_count
-accuracy_posterior
-median_response_time
-response_time_distribution
-mean_error
-error_distribution
-last_practiced
-retention_estimate
-learning_rate
-difficulty_range
-confidence_in_estimate
-```
-
-Skills are hierarchical.
-
-```text
-pitch
- ├─ absolute
- │   ├─ recognition
- │   ├─ production
- │   ├─ cross_octave
- │   └─ cross_timbre
- └─ relative
-     ├─ interval
-     ├─ scale_degree
-     └─ function
-
-voice
- ├─ pitch_targeting
- ├─ stabilization
- ├─ sustained_intonation
- ├─ rhythm
- ├─ range
- ├─ agility
- └─ sight_singing
-```
-
-One attempt may update several skills.
-
----
-
-# 29. Error clustering
-
-Aggregate raw attempts into interpretable patterns.
-
-Example:
-
-```text
-descending m6 accuracy = 58%
-ascending m6 accuracy = 91%
-
-descending m6 above C5 = 49%
-descending m6 after stepwise passage = 72%
-
-incorrect descending m6 responses:
-  → P5 63%
-  → M6 24%
-  → other 13%
-```
-
-The agent should receive this structured analysis rather than thousands of raw attempts.
-
----
-
-# 30. Adaptive agent
-
-The LLM/agent decides:
-
-- which weaknesses to target
-- which exercise templates to instantiate
-- how to vary context
-- when to remediate
-- when to retest
-- how much time to allocate
-- when to return to repertoire
-
-The agent does **not** decide:
-
-- whether the note was in tune
-- whether the rhythm was correct
-- whether AP identification was correct
-- whether vibrato was "healthy"
-- whether the singer has a medical voice problem
-
-Those are deterministic measurement or external-professional domains.
-
----
-
-# 31. MCP surface
-
-Suggested tools:
-
-```text
-get_skill_profile
-get_skill_history
-get_recent_attempts
-get_error_clusters
-get_training_load
-get_repertoire
-search_music_library
-get_piece_analysis
-find_passages
-
-generate_exercise
-generate_variations
-compile_session
-schedule_review
-
-import_music
-separate_asset
-transcribe_asset
-create_excerpt
-
-grade_attempt
-compare_attempts
-analyze_session
-```
-
-Useful MCP resources:
-
-```text
-skills://
-sessions://
-exercises://
-pieces://
-transcriptions://
-protocols://
-```
-
-The MCP layer should expose domain objects, not raw SQL or unrestricted filesystem access.
-
----
-
-# 32. Practice-session architecture
-
-A default focused session may contain:
-
-| Block | Typical role |
+| Type | Description |
 |---|---|
-| vocal calibration | pitch centering/control |
-| AP | recognition + production |
-| relative/functional ear | relationships and tonality |
-| sight singing | notation → audiation → voice |
-| transcription | auditory decoding |
-| adaptive weakness block | targeted remediation |
-| repertoire transfer | apply isolated work to real music |
+| `interval_id` | Melodic ascending/descending or harmonic intervals → name the interval. Params: interval set, directions, register, root range, timbres, compound intervals. |
+| `chord_id` | Quality (major, minor, diminished, augmented, suspended, sevenths, …) and/or inversion; close or open voicing; register. |
+| `scale_degree_id` | Key established by a cadence or drone, then a tone → name the degree. |
+| `progression_id` | Identify a cadence type or Roman-numeral progression. |
+| `rhythm_reproduce` | Hear or see a rhythm → reproduce it by tapping the mic, a MIDI pad or key, or singing "ta". Onsets come from the audio input or MIDI timestamps on the same clock as the click and are graded by alignment. |
 
-Exact durations should be adaptive and should not be treated as scientifically fixed.
-
-The app should support **vocal-load-aware sessions** where microphone-heavy work can be reduced while ear training continues.
+Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per block: note names, movable-do, fixed-do or scale-degree numbers.
 
 ---
 
-# 33. Repertoire-derived exercise mining
+## 11. Singing exercises
 
-Imported music should become searchable by musical features.
+| Type | Description | Grading mode |
+|---|---|---|
+| `pitch_match` | Hear a reference → sing it (together with it or after it). | absolute |
+| `sustain` | Hold a note for N seconds, optionally over a drone. | absolute; centre error, drift, stability, vibrato |
+| `sing_interval` | From a start note (played or self-chosen), sing an interval up or down. | relative_to_first or absolute |
+| `pattern` | Scales, arpeggios, slides and vocalise patterns, transposed stepwise through a range. | absolute or relative |
+| `harmony` | Sing a given line or interval against a drone, chord or melody. | absolute, equal or just tuning |
+| `echo` | Hear a phrase → sing it back. | melody alignment |
+| `range_finder` | Guided slides and steps to find lowest and highest reachable and comfortable notes. | proposes a range-profile update the user confirms |
+| `own_voice_match` | Match a stored best take of your own voice. | absolute |
 
-Example query:
+### Range profile
 
-```text
-find vocal phrases
-duration 2–8 bars
-contains descending minor sixth
-moderate tempo
-high transcription confidence
-within comfortable tessitura
-difficulty near current ability
-```
-
-Drum example:
-
-```text
-find drum excerpts
-4/4
-90–120 BPM
-16th-note hi-hat
-simple kick/snare
-high onset confidence
-```
-
-Generated exercise types:
-
-- isolated note targeting
-- difficult interval extraction
-- phrase sing-back
-- sight singing from generated notation
-- transcription from stem
-- rhythm-only dictation
-- drum-groove reproduction
-- accompaniment practice
-- missing-note completion
-- harmony singing
+`lowest_reachable`, `highest_reachable`, `comfortable_low`, `comfortable_high` (MIDI), plus `updated_at` and `source` (`range_finder`, `manual`, `llm`). Generators keep melodies inside the comfortable range unless a block opts out. The LLM can read and set it. A single extreme note never updates it automatically.
 
 ---
 
-# 34. Database
+## 12. Sight singing and dictation
 
-SQLite is sufficient initially.
+### Melody sources
 
-Core tables/entities:
+1. **Generator** (`trainer-core`, deterministic from a seed). Params: key, mode, meter, bars, tempo, range (defaults to the comfortable range), rhythm vocabulary, max leap, step/leap mix, interval weights (e.g. emphasise descending minor sixths), chromatic-note rate, start and end degrees, final cadence, phrase structure (e.g. AABA). Shared by sight singing and dictation.
+2. **LLM-authored**: compact note JSON or MusicXML via MCP (`create_score`).
+3. **Library**: imported MusicXML (`.musicxml`, `.mxl`) and MIDI, with part selection (e.g. the soprano line of a chorale). Sources: the OpenScore Lieder Corpus (CC0 MusicXML), and the music21 corpus (Bach chorale voice parts, Essen folk melodies) exported once to MusicXML with a small music21 script. MIDI import supports quantised single-line material; spelling comes from the key-signature event or key estimation.
 
-```text
-Piece
-AudioAsset
-Stem
-SymbolicTrack
-NoteEvent
-Score
-AnalysisRun
-ExerciseTemplate
-ExerciseInstance
-Attempt
-PitchTrace
-Skill
-SkillEvidence
-SkillState
-Session
-SessionPlan
-Protocol
-Stimulus
-Calibration
-DeviceProfile
-```
+### Internal representation
 
-Important provenance fields:
+`Score { meta, key/time/tempo maps, parts[ notes { pitch, spelling, onset_ticks, dur_ticks, tie, lyric? } ] }`, converted to and from MusicXML (rendering, LLM editing) and compact note JSON (LLM authoring). Grading uses the internal form.
 
-```text
-source_type
-human_verified
-model_name
-model_version
-checkpoint_hash
-confidence
-created_at
-supersedes
-```
+### Rendering
 
----
+OSMD renders MusicXML. During an attempt the cursor follows the click; after grading, noteheads are coloured from the grading result (green correct, yellow marginal, red wrong, grey missed). The renderer never grades.
 
-# 35. Research/experiment support
+### Exercise types
 
-The app should be able to compare protocols within one learner.
-
-Useful built-in experiments:
-
-- fixed AP category order vs adaptive category order
-- explicit vs incidental AP practice
-- immediate vs intermittent vs delayed vocal feedback
-- piano target vs professional voice vs user's own voice
-- assisted vs unassisted sight singing
-- realtime visual feedback vs post-trial review
-
-Results should emphasize within-user performance and transfer.
-
-Do not make causal scientific claims from uncontrolled personal usage.
-
----
-
-# 36. Safety and comfort state
-
-The app can collect a short pre/post subjective status:
-
-```text
-comfortable
-mild fatigue
-discomfort
-pain
-new hoarseness / voice change
-```
-
-Behavior:
-
-- comfortable → normal progression
-- mild fatigue → reduce vocal load
-- discomfort → avoid demanding range/intensity work
-- pain/new significant voice change → suspend demanding vocal exercises and recommend appropriate professional evaluation if persistent or concerning
-
-The application must never treat a correct pitch as proof an uncomfortable technique was successful.
-
-It should not diagnose vocal pathology.
-
----
-
-# 37. Acoustic limitations
-
-Important constraints:
-
-- microphone level is not absolute SPL unless the chain is calibrated
-- spectral features depend strongly on microphone, distance, room, vowel, and style
-- formants/resonance can be displayed but should not be reduced to universal good/bad scores
-- pitch correction or processed reference audio can corrupt training targets
-- source-separation artifacts should lower transcription confidence
-- accompaniment can produce octave and F0-tracking errors
-- vibrato analysis requires high-resolution F0 without excessive smoothing
-
----
-
-# 38. Repository layout
-
-```text
-music-trainer/
-│
-├─ apps/
-│  ├─ desktop-ui/
-│  └─ mobile/
-│
-├─ native/
-│  └─ audio-engine/
-│
-├─ services/
-│  ├─ training-core/
-│  ├─ ml-worker/
-│  └─ mcp-server/
-│
-├─ packages/
-│  ├─ music-model/
-│  ├─ exercise-schema/
-│  ├─ learner-model/
-│  ├─ score-analysis/
-│  ├─ protocol-library/
-│  └─ protocol/
-│
-├─ models/
-│  └─ manifests/
-│
-├─ data/
-│  ├─ database/
-│  ├─ audio/
-│  ├─ stems/
-│  ├─ transcription/
-│  ├─ stimuli/
-│  └─ cache/
-│
-└─ tests/
-   ├─ audio/
-   ├─ grading/
-   ├─ transcription/
-   ├─ protocols/
-   └─ golden/
-```
-
----
-
-# 39. Desktop IPC
-
-Do not stream audio through the web UI.
-
-```text
-UI
- │
- │ control/status IPC
- ▼
-native audio engine
-
-native engine
- │
- │ ring buffers / recording files
- ▼
-analysis workers
-```
-
-UI state such as meters and pitch can be sent as compact timestamped packets at 30–60 Hz.
-
----
-
-# 40. Testing strategy
-
-Create synthetic golden signals where pitch/timing are known exactly.
-
-Example:
-
-```text
-target: A4
-signal: 444.01 Hz
-known error: +15.7 cents
-attack delay: 70 ms
-drift: -4 cents/sec
-```
-
-Validate:
-
-- realtime F0
-- offline F0
-- onset detection
-- note-center estimation
-- vibrato estimation
-- timing compensation
-- DTW/alignment
-- MIDI output
-
-Also maintain a small manually annotated set of real singing and music excerpts as regression tests.
-
-Stress-test:
-
-- ASIO device changes
-- buffer underruns
-- sample-rate switches
-- interface disconnect/reconnect
-- long recordings
-- background GPU analysis
-- simultaneous recording and UI rendering
-
----
-
-# 41. Implementation sequence
-
-| Phase | Deliverable |
+| Type | Description |
 |---|---|
-| 0 | canonical schemas + SQLite |
-| 1 | JUCE ASIO/WASAPI engine |
-| 2 | realtime + offline F0 |
-| 3 | deterministic exercise engine |
-| 4 | AP recognition/production protocols |
-| 5 | relative-pitch / rhythm engine |
-| 6 | MusicXML/MIDI sight singing |
-| 7 | learner model + error clustering |
-| 8 | hands-free desktop mode |
-| 9 | source separation |
-| 10 | general transcription |
-| 11 | drum-specific pipeline |
-| 12 | transcription correction UI |
-| 13 | repertoire exercise mining |
-| 14 | MCP server |
-| 15 | adaptive planner |
-| 16 | mobile client |
-| 17 | advanced vibrato / resonance analytics |
-
-Dependency priority remains:
-
-```text
-audio
-→ grading
-→ exercises
-→ learner model
-→ agent
-→ repertoire automation
-```
-
-Do not start with the agent.
+| `sight_sing` | Score shown → count-in → sing. Start pitch given or not (no-reference sight singing doubles as AP practice). Optional click, drone or accompaniment. |
+| `melodic_dictation` | Melody played N times → answer on a MIDI or on-screen keyboard (pitches in order, optionally rhythm by playing in time to the click) or by singing it back. |
+| `rhythmic_dictation` | Rhythm played → tap it back or choose the notation. |
+| `harmonic_dictation` | Progression played → bass line plus chord qualities or Roman numerals. |
+| `audiation` | Score shown, tonic given, silence → sing a requested note or bar on cue. |
 
 ---
 
-# 42. V1 definition
+## 13. Hands-free mode
 
-V1 is useful when it can do all of the following reliably:
-
-- ASIO/WASAPI recording/playback
-- latency calibration
-- live tuner
-- offline pitch grading
-- pitch-target singing
-- interval recognition and singing
-- absolute-pitch recognition and production
-- cross-octave/cross-timbre AP testing
-- MusicXML/MIDI import
-- score rendering
-- sight-singing alignment
-- rhythm grading
-- detailed attempt history
-- learner-state updates
-- error clustering
-- hands-free sessions
-- MCP session planning
+The same session runner with audio-only prompts and feedback: "Sing F-sharp." → mic opens → "Twelve cents sharp." Sung responses are graded automatically; a MIDI pedal or keys handle skip and repeat. Passive blocks (`pitch_pairing`) are logged as exposure. A queued session can be flagged `hands_free`; once started, it needs no screen interaction.
 
 ---
 
-# 43. V2 definition
+## 14. MCP server
 
-V2 adds the repertoire-intelligence loop:
+### Process and setup
+
+`trainer-mcp.exe` is a stdio server built on `rmcp`.
+
+- Claude Code: `claude mcp add singing-trainer -- "C:\path\to\trainer-mcp.exe"`
+- Claude Desktop: add the same command to `claude_desktop_config.json`.
+- Uses the app's data directory by default; `--data-dir` overrides it.
+
+### Design
+
+- Tools return compact JSON plus a short deterministic text summary. No raw SQL and no arbitrary file access.
+- Tool input schemas are generated from the same Rust types the app uses, so the LLM sees exact field names and enums.
+- Outputs are bounded: pagination, downsampled traces, top-N lists.
+
+### Read tools
+
+| Tool | Returns |
+|---|---|
+| `get_overview` | recent sessions, practice totals by tag over 7 and 30 days, latest comfort reports, range profile, coach-notes digest, queued sessions |
+| `get_session_report(session_id)` | per-block summaries: accuracy, response times, cents-error statistics, notable trials |
+| `query_trials(filters, limit, cursor)` | trial rows with stimulus, response and key metrics |
+| `get_stats(filters, group_by[])` | counts, accuracy, median response time, median and mean \|cents\|, signed bias, grouped by any stimulus, param or tag field (e.g. `stimulus.pitch_class`, `stimulus.timbre`, `params.interval`, `params.direction`, `feedback_mode`, `protocol`, `week`). This replaces a built-in error-clustering model. |
+| `get_confusion_matrix(filters, field)` | confusion matrix for identification tasks (pitch class, interval, chord) |
+| `get_trial_detail(trial_id)` | full metrics, per-note results, alignment, downsampled trace (cents vs target at 20 Hz), text summary |
+| `get_trial_plot(trial_id)` | PNG image: pitch trace, note centre, target band, onsets |
+| `get_ap_profile(battery_run_id?)` | battery report (§9) and comparison with earlier runs |
+| `get_range_profile` | current range profile |
+| `list_exercise_types` | every type with its params schema, defaults, tags and an example |
+| `list_timbres` | timbres with their pool (training or holdout) |
+| `search_scores(filters)` / `get_score(id, format)` | library search by key, meter, range, length, contained intervals and source; a score as MusicXML or note JSON |
+| `get_coach_notes(tags?)` | notes the LLM saved in earlier conversations |
+
+### Write tools
+
+| Tool | Effect |
+|---|---|
+| `validate_session(session)` | errors with JSON paths, warnings, estimated duration, preview of the first trials |
+| `queue_session(session, start_now?)` | validates and adds to the app's "Up next"; `start_now` brings the app forward with a Start prompt |
+| `save_preset(name, session_or_block)` | stores a reusable template |
+| `generate_melodies(params, n)` | generator candidates (note JSON + summary) to review before use |
+| `create_score(musicxml \| notes_json, meta)` | validates, normalises and stores; returns id, range, key and an interval summary |
+| `update_score(id, musicxml \| notes_json, reason)` | stores a new version with provenance; earlier versions are kept |
+| `regrade(filters, grading_overrides, persist?)` | re-scores stored traces with different tolerances; results are returned and stored only when `persist` is set |
+| `set_range_profile(...)` | updates the range profile with `source = llm` |
+| `save_coach_note(text, tags)` | persists plans and observations across conversations |
+
+Part 2 adds `import_audio`, `separate`, `transcribe_vocals`, `get_transcription`, `update_transcription`, `create_excerpt` and `search_passages`.
+
+### Server instructions (sent on connect)
+
+- The app grades. Use its metrics; never re-judge pitch or rhythm yourself.
+- Use holdout pools only for assessment and schedule assessments at the start of a session. Fade feedback (continuous → after_trial → none) as accuracy stabilises. Test transfer (new octaves, timbres, keys) before calling something learned, and retest after gaps for retention.
+- Passive and incidental exposure is not evidence of AP.
+- Respect comfort reports: mild fatigue → fewer sung blocks; discomfort → no range or intensity work; pain or new hoarseness → no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence of healthy technique.
+- Keep melodies inside the comfortable range unless deliberately extending it.
+
+### Typical loop
 
 ```text
-real audio
-→ source separation
-→ full-mix + stem transcription
-→ confidence reconciliation
-→ manual correction where needed
-→ musical feature tagging
-→ exercise mining
-→ adaptive scheduling
-→ measured transfer back to repertoire
-```
-
----
-
-# 44. End-state workflow
-
-A user asks:
-
-> Give me 35 minutes. Prioritize singing. Keep absolute pitch daily, but otherwise decide what I need.
-
-The planner sees that recent sight-singing errors cluster around descending chromatic leaps.
-
-It generates prerequisite interval drills, then short melodies in several keys.
-
-The user improves.
-
-The system retests without realtime feedback.
-
-Later an imported song is separated and transcribed. The repertoire engine detects the same difficult interval in a vocal phrase and schedules the phrase as transfer practice.
-
-During work, the phone executes a long hands-free AP/ear-training session.
-
-Everything returns to the same learner model.
-
-The core product loop is:
-
-```text
-real music
-→ analysis
-→ measured learner state
-→ adaptive practice
-→ objective grading
-→ transfer/retention tests
-→ revised learner state
+get_overview → get_stats / get_confusion_matrix (weak spots)
+→ generate_melodies / create_score (if needed) → validate_session → queue_session
+→ [user practises] → get_session_report → save_coach_note
 ```
 
 ---
 
-# 45. Research-informed implementation notes incorporated into this plan
+## 15. Data
 
-The research review motivating this design emphasizes several distinctions that should remain explicit in the software:
+SQLite (WAL mode, JSON1) in the app data directory (`%APPDATA%\SingingTrainer\`), plus files.
 
-- absolute-pitch memory, pitch-class identification, labeling, production, and relative pitch are not interchangeable
-- adult AP training appears possible for at least some learners, but transfer and long-term generalization are critical
-- cross-octave and cross-timbre tests are necessary to avoid overestimating learning
-- response latency matters in addition to accuracy
-- feedback should be faded rather than left permanently continuous
-- sight singing and vocal accuracy should be analyzed by task dimensions rather than one average score
-- user comfort and repeatability matter when expanding range
-- vibrato should be analyzed separately from note-center intonation
-- automatic transcription must remain uncertainty-aware
-- hands-free exposure should not be counted as equivalent to concentrated active testing
-- app-based acoustic metrics should not be treated as diagnosis or proof of healthy technique
+**Tables:** `sessions`, `blocks`, `trials`, `traces`, `recordings`, `regrades`, `queue`, `presets`, `scores`, `score_versions`, `timbres`, `stimulus_pools`, `range_profile`, `anchors`, `comfort_reports`, `coach_notes`, `device_profiles`, `calibrations`, `battery_runs`.
+Part 2 adds `assets`, `stems`, `analysis_runs`.
 
-The separate **Physical Vocal Practice Reference** should be used by the planning agent for off-app warm-ups, SOVT work, mobility, breath coordination, range exploration, and other physical practice that the software cannot directly supervise.
+**Provenance:** `score_versions.source` is `generated | imported | llm | model | user_verified`, with `supersedes` and `created_at`. `analysis_runs` records model name, version, checkpoint hash, configuration, input hash and timestamp.
+
+**Files:** `recordings/YYYY/MM/<trial_id>.wav`, `scores/<id>/<version>.musicxml`, `soundfonts/`, `tts-cache/`, `assets/` (Part 2).
+
+**Retention:** traces are kept forever (a few KB per trial). WAV recordings are kept for 60 days by default, except pinned takes (own-voice references and takes the user flags).
+
+**Append-only:** trials are never edited. Persisted re-grades go to `regrades (trial_id, grading_config, metrics, created_at)`.
+
+**Comfort:** an optional one-tap check before and after a session (comfortable / mild fatigue / discomfort / pain / new hoarseness) plus a free-text note to the coach.
+
+---
+
+## 16. UI
+
+| View | Contents |
+|---|---|
+| Audio setup | device page (§3) and calibration |
+| Tuner | live pitch line over a note grid, cents readout, voicing, optional drone |
+| Up next | queued sessions from the LLM and presets; start, skip, delete |
+| Session runner | per-type trial views (answer pads, score view, pitch display according to feedback mode), progress, pause |
+| Results | session summary, trial list, trial detail (trace plot, per-note table, replay recording against target) |
+| History | accuracy, response-time and cents trends by tag |
+| Library | scores, presets, timbres and pools, anchor songs |
+| Settings | A4, note spelling, solfège system, keyboard mapping, MIDI device, retention |
+
+All 12-class answers have computer-keyboard shortcuts in piano layout; a MIDI keyboard works wherever the answer is a note.
+
+---
+
+## 17. Part 2 — Repertoire pipeline
+
+```text
+audio file → decode and normalise (symphonia, rubato) → hash
+  → vocal separation (ml/: audio-separator; RoFormer vocal model by default, Demucs fallback)
+  → vocal F0 (torchcrepe or RMVPE), dense trace kept
+  → beats and downbeats (beat-this) → tempo and bar grid
+  → note segmentation (F0 + onsets; basic-pitch on the stem as a second opinion) → notes with confidence
+  → quantise to the grid → MusicXML + per-note confidence and F0 summary
+  → LLM review and correction via MCP (MusicXML)
+  → user listens (transcription synth over the stem) and marks it verified
+  → excerpts → repertoire exercises
+```
+
+- Every run is logged in `analysis_runs`.
+- Trust order: user-verified > LLM-corrected > model output. Re-running a model never overwrites a higher-trust version.
+- `get_transcription` gives the LLM per-note pitch, timing, confidence and F0 median/spread, and flags low-confidence regions, so corrections rest on evidence (the LLM cannot hear the audio).
+- Exercise modes: sing along with the original (vocal at reduced level), karaoke (instrumental stem), echo, sight-read the phrase from notation.
+- Grading: against the corrected notes (melody alignment) and/or directly against the original singer's F0 contour (DTW-aligned cents error with optional key and octave normalisation). Contour grading needs no transcription at all.
+- `search_passages` filters excerpts by range, contained intervals, tempo, length and confidence, e.g. "vocal phrases, 2–8 bars, containing a descending minor sixth, inside the comfortable range, confidence ≥ 0.8".
+
+---
+
+## 18. Testing
+
+- **Golden synthetic signals**, generated in the tests: harmonic tones with known F0 offsets, onset delays, glides, drift, vibrato (e.g. 5.5 Hz ±50 cents), breath noise and gaps. Assert: centre error within ±1 cent, settling time within ±20 ms, vibrato rate within ±0.2 Hz, onset within ±5 ms.
+- **Alignment:** melodies with inserted, deleted and shifted notes; transposed and drifting performances.
+- **Calibration:** simulated loopback with a known delay.
+- **Generators:** property tests (range, leap limits, determinism from seed, pool rules).
+- **Validator:** valid and invalid sessions, with the expected error paths.
+- **MusicXML and MIDI:** round-trips on library samples.
+- **MCP:** contract tests calling each tool against a temporary database; snapshot outputs.
+- **Real voice:** a small set of the user's own recordings with hand-checked notes as regression tests.
+- **Engine checklist on the Scarlett (manual):** unplug and replug, buffer and sample-rate changes in Focusrite Control, a 60-minute session without xruns or clock drift, recording while the UI renders.
+- **CI:** Windows build with the `asio` feature; `trainer-core` tests on every push.
+
+---
+
+## 19. Build phases
+
+Each phase ends with something usable. "Done when" items are acceptance checks.
+
+| Phase | Deliverables | Done when |
+|---|---|---|
+| 1. Foundation | Cargo workspace, Tauri shell, `trainer-core` types, SQLite and migrations, cpal ASIO engine, device page, calibration, live tuner, pYIN post-analysis, single-note grading, golden tests | The tuner runs on the Scarlett via ASIO at 128 frames with no xruns; golden tests pass; a loopback calibration is stored |
+| 2. AP suite | Stimulus engine (SoundFont, synth, Shepard, masks, pools), session runner, every §9 exercise type, assessment battery, presets, results view | A full `ap_assessment` and an `ap_progressive` stage run end to end and log trials |
+| 3. MCP | `trainer-mcp` with the read and write tools, server instructions, queue watcher in the app | From Claude: read the last session, queue a new AP session, run it in the app, read its report |
+| 4. Relative pitch and singing | §10 and §11 types, range profile, own-voice references, rhythm reproduction | Each type runs from an MCP-queued session and grades correctly on golden tests |
+| 5. Sight singing and dictation | Melody generator, score model, MusicXML/MIDI import, OSMD rendering with colouring, melody alignment, §12 types, `generate_melodies` and `create_score` | Generated and LLM-authored melodies are sung and graded; a CC0 MusicXML import works |
+| 6. Hands-free | TTS cache, audio-only runner, passive blocks | A hands-free AP session runs start to finish without touching the screen |
+| 7. Part 2 ingest | `ml/` worker, import, separation, vocal F0, beat grid | A song produces a vocal stem, an F0 trace and a bar grid |
+| 8. Part 2 transcription | Notes → MusicXML with confidence, MCP transcription tools, listen-and-verify view | The LLM corrects a transcription via MCP and the user marks it verified |
+| 9. Part 2 repertoire | Excerpts, sing-along/karaoke/echo/sight-read modes, contour grading, passage search | A phrase from an imported song is practised and graded against the original vocal |
+
+V1 = phases 1–6. V2 = phases 7–9.
+
+---
+
+## 20. Repository layout
+
+```text
+SingingApp/
+├─ Cargo.toml              workspace
+├─ crates/
+│  ├─ trainer-core/        schema, theory, generators, scores (MusicXML/MIDI), analysis
+│  │                       (pYIN, segmentation, alignment), grading, storage, stats
+│  ├─ trainer-audio/       cpal engine, scheduler, recorder, live pitch, synth, TTS cache
+│  ├─ trainer-app/         Tauri 2 app: commands, session runner, queue watcher
+│  └─ trainer-mcp/         stdio MCP server (rmcp)
+├─ ui/                     React + TypeScript + Vite (OSMD, canvas tuner, uPlot)
+├─ presets/                ap_assessment.json, ap_progressive/*.json, ap_daily.json, …
+├─ assets/                 soundfonts (FluidR3_GM), default stimulus pools
+├─ ml/                     Part 2 Python worker (uv project)
+└─ docs/
+```
