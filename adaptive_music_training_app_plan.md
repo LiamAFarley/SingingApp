@@ -32,8 +32,10 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 | Language | Rust for the audio engine, DSP, grading, storage and MCP server. TypeScript/React for the UI only (Tauri 2 webview). Python only in Part 2, for ML models. |
 | Adaptivity | No built-in adaptive-difficulty engine or learner-state model. The LLM decides progression from logged results; the app provides parameterised generators, deterministic grading and aggregate queries. |
 | Exchange formats | Sessions and exercises: JSON validated against the Rust types. Notation: MusicXML. The LLM writes and edits scores and transcriptions as MusicXML or compact note JSON via MCP. |
-| Part 1 (V1) | Foundation → full AP suite → MCP → relative pitch and singing → sight singing and dictation (generated melodies + open MusicXML/MIDI) → hands-free. |
+| LLM agent | OpenCode or Hermes Agent, connected to the app's MCP server (any MCP client works). For now the agent runs in its own window; hosting it inside the app via ACP is a future addition (§17). |
+| Part 1 (V1) | Foundation → full AP suite → MCP → relative pitch and singing → sight singing and dictation (generated melodies + open MusicXML/MIDI). |
 | Part 2 (V2) | Song import → vocal separation → vocal F0 and transcription → LLM-corrected MusicXML → repertoire exercises. |
+| Future app (§17) | In-app coach panel via ACP, hands-free mode for practice away from the PC, phone client. |
 | Deferred | Drum and other-instrument transcription, full-mix multi-instrument transcription. |
 | Outside the app | The Physical Vocal Practice Reference is a document given directly to the LLM for drafting off-app physical practice. The app does not implement or serve it. |
 
@@ -51,7 +53,6 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 - Singing: pitch matching, sustain, interval singing, patterns, harmony against drones and chords, echo, range profile, own-voice references
 - Rhythm reproduction against a click
 - Sight singing from generated, LLM-authored and imported melodies; melodic, rhythmic and harmonic dictation
-- Hands-free sessions
 - MCP server: read results, generate and queue sessions, author scores, keep coach notes
 
 ### Part 2 (V2)
@@ -62,11 +63,17 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 - Repertoire exercises: sing-along, karaoke, echo, phrase sight-reading; grading against corrected notes or directly against the original vocal contour
 - Passage search by musical features
 
+### Future app (§17)
+
+- In-app coach panel: OpenCode or Hermes hosted in the app window over ACP
+- Hands-free mode: audio-only sessions with spoken prompts and feedback, for practice away from the PC
+- Spoken note-name answers (speech recognition)
+- Phone client
+
 ### Deferred (not planned)
 
 - Drum separation and transcription, kit-piece MIDI
 - Other-instrument and full-mix multi-instrument transcription
-- Spoken note-name answers (speech recognition)
 - Pitch-shifted own-voice references
 - Formant and resonance analytics
 
@@ -76,8 +83,8 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 
 ```text
 ┌────────────────────────┐   stdio (MCP)   ┌──────────────────────────────┐
-│ LLM client             │◄───────────────►│ trainer-mcp (Rust, rmcp)     │
-│ Claude Code / Desktop  │                 │ links trainer-core           │
+│ LLM agent              │◄───────────────►│ trainer-mcp (Rust, rmcp)     │
+│ OpenCode / Hermes      │                 │ links trainer-core           │
 └────────────────────────┘                 └──────────────┬───────────────┘
                                                           │
                                        SQLite (WAL) + data directory
@@ -98,7 +105,7 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 ### Processes
 
 - **trainer-app** — the desktop app. Owns the audio device and runs sessions.
-- **trainer-mcp** — stdio MCP server launched by the LLM client. Reads and writes the same SQLite database and data directory and links the same `trainer-core` crate (schema, generators, grading, analysis, stats). Works whether or not the app is open.
+- **trainer-mcp** — stdio MCP server launched by the LLM agent (OpenCode, Hermes or any other MCP client). Reads and writes the same SQLite database and data directory and links the same `trainer-core` crate (schema, generators, grading, analysis, stats). Works whether or not the app is open.
 - The app polls `PRAGMA data_version` (~500 ms) and refreshes its queue when the MCP server writes a session.
 - Part 2: the `ml/` Python worker is run as a subprocess with a JSON job manifest and writes results into the data directory.
 - Audio never passes through the webview. The UI receives compact pitch and meter frames (Tauri `ipc::Channel`, batched per ~16 ms) and renders at display rate.
@@ -130,7 +137,6 @@ Rust for everything except the UI:
 | Schema and validation | `serde`, `schemars`, `serde_path_to_error`, `ts-rs` |
 | MCP | `rmcp` (features `server`, `transport-io`, `macros`, `schemars`) |
 | Plots for the LLM | `plotters` (PNG pitch trace vs target) |
-| Spoken prompts | Windows `SpeechSynthesizer` via the `windows` crate, rendered to buffers and cached |
 | App shell | Tauri 2 |
 | UI | React + TypeScript + Vite, `opensheetmusicdisplay`, custom canvas pitch view, `uplot` |
 | Part 2 ML | Python (uv): `audio-separator`, `torchcrepe` or RMVPE, `basic-pitch`, `beat-this` |
@@ -163,7 +169,7 @@ The audio callback never allocates, locks, does I/O, logs, makes system calls or
 
 ### Playback
 
-- Prompts, references, drones, masks, clicks and accompaniment are rendered off the audio thread (rustysynth, oscillators, TTS cache) into pre-allocated buffers before they are needed, then scheduled at exact frames.
+- Prompts, references, drones, masks, clicks and accompaniment are rendered off the audio thread (rustysynth, oscillators) into pre-allocated buffers before they are needed, then scheduled at exact frames.
 - On-demand sounds (replay reference, on-screen keyboard) render on a worker thread in a few milliseconds and are scheduled immediately.
 - Buses: prompt, reference/accompaniment, click, optional software voice monitoring.
 - Answer input never makes sound unless the block's feedback mode allows it (use a MIDI controller with local sound off), so answering cannot leak a reference.
@@ -286,10 +292,6 @@ A mask between AP trials stops the next trial being solved by relative pitch fro
 
 Each trial records `secs_since_labeled_reference`: time since the app last played a tone whose name the user was told. Assessment blocks warn when it is under 5 minutes. The LLM uses it to place assessments at the start of sessions.
 
-### Spoken prompts
-
-Windows `SpeechSynthesizer` renders text to WAV, cached by text hash and played through the engine (same clock, same headphones). Covers note names (spelled for the context), interval and chord names, numbers and feedback phrases.
-
 ---
 
 ## 8. Exercise and session model
@@ -337,7 +339,7 @@ Fading feedback is the LLM's job: it picks the mode per block, and every trial l
       "feedback": "after_trial",
       "params": {
         "classes": "all",
-        "prompt": "speech+text",
+        "prompt": "text",
         "response_ms": 4000,
         "pre_mask": "random_tones",
         "reveal_target_after": true
@@ -406,8 +408,8 @@ Pitch-class identification · note labelling with octave · AP production · cro
 | Type | What happens | Key params |
 |---|---|---|
 | `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). Optional "not in set" answer for out-of-set distractors. | classes, out_of_set_rate, octaves, timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
-| `sing_pitch` | Named prompt ("Sing E♭"), no reference → user sings; graded by pitch class, octave reported. | classes, prompt (text, speech or both), response_ms, delay_ms, pre_mask, distractor (tones or music before the prompt), reveal_target_after |
-| `pitch_pairing` | Passive: tone → pause → spoken and/or visual label. No response. Logged as exposure, never counted as AP evidence. | classes, timbres, octaves, gap_ms, rate |
+| `sing_pitch` | Named prompt ("Sing E♭"), no reference → user sings; graded by pitch class, octave reported. | classes, prompt (on-screen text; speech arrives with hands-free mode, §17), response_ms, delay_ms, pre_mask, distractor (tones or music before the prompt), reveal_target_after |
+| `pitch_pairing` | Passive: tone → pause → on-screen label (spoken labels arrive with hands-free mode, §17). No response. Logged as exposure, never counted as AP evidence. | classes, timbres, octaves, gap_ms, rate |
 | `incidental_pairing` | Secondary visual task (e.g. press the colour shown) in which each colour is consistently accompanied by one pitch class. Logged as exposure; transfer is measured only with ordinary `pitch_id`. | class-to-colour map, timbres, octaves |
 | `anchor_song` | User-defined anchors (song + original-key first pitch, optional MIDI). Mode A: "Sing the first note of <song>", graded absolute. Mode B: "Original key or shifted?" for a melody played at 0/±1/±2 semitones. | anchors, mode, shift set |
 | `tonal_center_id` | Short unfamiliar progression or melody (generated, or a library piece transposed to a random key) → name the tonic or key, or a chord's root. Without reference it is AP-in-context; with `reference: true` it is relative tonic finding. | source, keys, length, timbres, reference, answer |
@@ -432,7 +434,6 @@ The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, m
 - `ap_assessment` — the battery above.
 - `ap_progressive/stage_NN` — starts with three classes spread across the octave (e.g. C, E, G♯) plus out-of-set distractors; each stage adds one class; deadlines tighten from 4 s to 2 s. Suggested criterion: ≥ 90 % over two sessions. Stats tools report the criterion; the LLM (or the user) moves to the next stage.
 - `ap_daily` — short mixed identification and production block.
-- `ap_passive` — hands-free pairing block.
 
 Presets and "repeat last session" work without the LLM.
 
@@ -499,27 +500,45 @@ OSMD renders MusicXML. During an attempt the cursor follows the click; after gra
 
 ---
 
-## 13. Hands-free mode
-
-The same session runner with audio-only prompts and feedback: "Sing F-sharp." → mic opens → "Twelve cents sharp." Sung responses are graded automatically; a MIDI pedal or keys handle skip and repeat. Passive blocks (`pitch_pairing`) are logged as exposure. A queued session can be flagged `hands_free`; once started, it needs no screen interaction.
-
----
-
-## 14. MCP server
+## 13. MCP server
 
 ### Process and setup
 
-`trainer-mcp.exe` is a stdio server built on `rmcp`.
+`trainer-mcp.exe` is a stdio server built on `rmcp`. Any MCP-capable agent can use it; the main candidates are OpenCode and Hermes Agent.
 
-- Claude Code: `claude mcp add singing-trainer -- "C:\path\to\trainer-mcp.exe"`
-- Claude Desktop: add the same command to `claude_desktop_config.json`.
-- Uses the app's data directory by default; `--data-dir` overrides it.
+OpenCode (`opencode.json`):
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "singing-trainer": {
+      "type": "local",
+      "command": ["C:\\path\\to\\trainer-mcp.exe"],
+      "enabled": true
+    }
+  }
+}
+```
+
+Hermes Agent (`config.yaml`, in `%LOCALAPPDATA%\hermes\` on native Windows or `~/.hermes/` under WSL2):
+
+```yaml
+mcp_servers:
+  singing-trainer:
+    command: 'C:\path\to\trainer-mcp.exe'
+```
+
+- Other MCP clients (Claude Code, Claude Desktop, …) take the same command.
+- The server uses the app's data directory by default; `--data-dir` overrides it.
+- An agent running under WSL2 can launch the Windows executable through its `/mnt/c/...` path; it still runs as a Windows process and uses the Windows data directory.
 
 ### Design
 
 - Tools return compact JSON plus a short deterministic text summary. No raw SQL and no arbitrary file access.
-- Tool input schemas are generated from the same Rust types the app uses, so the LLM sees exact field names and enums.
+- Tool input schemas are generated from the same Rust types the app uses, so the agent sees exact field names and enums.
 - Outputs are bounded: pagination, downsampled traces, top-N lists.
+- The same server will back the in-app coach panel (§17), so nothing here changes when ACP is added.
 
 ### Read tools
 
@@ -551,7 +570,7 @@ The same session runner with audio-only prompts and feedback: "Sing F-sharp." �
 | `update_score(id, musicxml \| notes_json, reason)` | stores a new version with provenance; earlier versions are kept |
 | `regrade(filters, grading_overrides, persist?)` | re-scores stored traces with different tolerances; results are returned and stored only when `persist` is set |
 | `set_range_profile(...)` | updates the range profile with `source = llm` |
-| `save_coach_note(text, tags)` | persists plans and observations across conversations |
+| `save_coach_note(text, tags)` | persists plans and observations across conversations, stored with the training data whichever agent is used (complements the agent's own memory) |
 
 Part 2 adds `import_audio`, `separate`, `transcribe_vocals`, `get_transcription`, `update_transcription`, `create_excerpt` and `search_passages`.
 
@@ -573,7 +592,7 @@ get_overview → get_stats / get_confusion_matrix (weak spots)
 
 ---
 
-## 15. Data
+## 14. Data
 
 SQLite (WAL mode, JSON1) in the app data directory (`%APPDATA%\SingingTrainer\`), plus files.
 
@@ -582,7 +601,7 @@ Part 2 adds `assets`, `stems`, `analysis_runs`.
 
 **Provenance:** `score_versions.source` is `generated | imported | llm | model | user_verified`, with `supersedes` and `created_at`. `analysis_runs` records model name, version, checkpoint hash, configuration, input hash and timestamp.
 
-**Files:** `recordings/YYYY/MM/<trial_id>.wav`, `scores/<id>/<version>.musicxml`, `soundfonts/`, `tts-cache/`, `assets/` (Part 2).
+**Files:** `recordings/YYYY/MM/<trial_id>.wav`, `scores/<id>/<version>.musicxml`, `soundfonts/`, `assets/` (Part 2).
 
 **Retention:** traces are kept forever (a few KB per trial). WAV recordings are kept for 60 days by default, except pinned takes (own-voice references and takes the user flags).
 
@@ -592,7 +611,7 @@ Part 2 adds `assets`, `stems`, `analysis_runs`.
 
 ---
 
-## 16. UI
+## 15. UI
 
 | View | Contents |
 |---|---|
@@ -609,7 +628,7 @@ All 12-class answers have computer-keyboard shortcuts in piano layout; a MIDI ke
 
 ---
 
-## 17. Part 2 — Repertoire pipeline
+## 16. Part 2 — Repertoire pipeline
 
 ```text
 audio file → decode and normalise (symphonia, rubato) → hash
@@ -629,6 +648,43 @@ audio file → decode and normalise (symphonia, rubato) → hash
 - Exercise modes: sing along with the original (vocal at reduced level), karaoke (instrumental stem), echo, sight-read the phrase from notation.
 - Grading: against the corrected notes (melody alignment) and/or directly against the original singer's F0 contour (DTW-aligned cents error with optional key and octave normalisation). Contour grading needs no transcription at all.
 - `search_passages` filters excerpts by range, contained intervals, tempo, length and confidence, e.g. "vocal phrases, 2–8 bars, containing a descending minor sixth, inside the comfortable range, confidence ≥ 0.8".
+
+---
+
+## 17. Future app
+
+Not part of V1 or V2. Each item reuses the engine, session runner, MCP server and data model as they are.
+
+### In-app coach panel (ACP)
+
+Hosts the agent inside the app window instead of a separate terminal or chat window, using the Agent Client Protocol (ACP), the protocol Zed, JetBrains IDEs and several Neovim plugins use to host external agents.
+
+- **Agents:** OpenCode (`opencode acp`) and Hermes Agent (`hermes acp`) both run as ACP servers over stdio. Hosted this way, Hermes keeps its own memory, skills and provider setup. The agent command is a setting, so any other ACP agent can be swapped in.
+- **Client:** `trainer-app` acts as the ACP client using the Rust `agent-client-protocol` crate and spawns the agent as a subprocess.
+- **Tools:** `session/new` passes `trainer-mcp` in `mcpServers` (Hermes adds client-provided servers to each session); alternatively the agent keeps it in its own MCP config (§13). `cwd` is a coach folder the user picks, where reference documents can live.
+- **Permissions:** the client advertises no file-system or terminal capabilities. `trainer-mcp` tool calls are approved according to a user setting; any other permission request is shown to the user. The agent's own tools can be trimmed for coach sessions in its config (e.g. Hermes `platform_toolsets.acp`).
+- **Panel:** streams messages, tool calls and plans. Context buttons ("ask about this trial", "plan my next session") insert trial or session ids into the prompt. Sessions the agent queues reach "Up next" through the existing queue watcher.
+- **References:** Zed's agent panel and the example clients in the `agent-client-protocol` crate. Zed is GPL-licensed, so use it as a reference rather than copying code.
+
+### Hands-free mode
+
+For practice away from the PC (around the house, and later on the phone client). The same session runner with audio-only prompts and feedback.
+
+- **Flow:** prompt → response window → mic capture → spoken feedback → next. "Sing F-sharp." → mic opens → "Correct. Twelve cents sharp."
+- **Spoken prompts:** Windows `SpeechSynthesizer` (via the `windows` crate) renders text to WAV, cached by text hash in `tts-cache/` and played through the engine (same clock, same headphones). Covers note names (spelled for the context), interval and chord names, numbers and feedback phrases. This also enables speech prompts for `sing_pitch` and spoken labels for `pitch_pairing`.
+- **Responses:** sung answers are graded as usual; a MIDI pedal or keys handle skip and repeat. Spoken note-name answers via speech recognition are optional, with tap or key answers kept for noisy rooms.
+- **Passive exposure:** `pitch_pairing` blocks with spoken labels (preset `ap_passive`) are logged as exposure and never credited like active trials.
+- A queued session can be flagged `hands_free`; once started, it needs no screen interaction.
+
+### Phone client
+
+For hands-free practice and short drills away from the PC:
+
+- Runs sessions prepared on the PC offline and syncs trials back; because the trial log is append-only, sync is just appending.
+- Native audio for background headphone playback (Oboe/AAudio on Android, AVAudioSession/Core Audio on iOS), not a browser tab.
+- AP and ear-training drills, simple mic pitch feedback, hands-free sessions.
+- Heavy analysis (separation, transcription) stays on the PC.
+- Grading and generators live in `trainer-core`, so the same Rust code can be built for the phone.
 
 ---
 
@@ -655,15 +711,22 @@ Each phase ends with something usable. "Done when" items are acceptance checks.
 |---|---|---|
 | 1. Foundation | Cargo workspace, Tauri shell, `trainer-core` types, SQLite and migrations, cpal ASIO engine, device page, calibration, live tuner, pYIN post-analysis, single-note grading, golden tests | The tuner runs on the Scarlett via ASIO at 128 frames with no xruns; golden tests pass; a loopback calibration is stored |
 | 2. AP suite | Stimulus engine (SoundFont, synth, Shepard, masks, pools), session runner, every §9 exercise type, assessment battery, presets, results view | A full `ap_assessment` and an `ap_progressive` stage run end to end and log trials |
-| 3. MCP | `trainer-mcp` with the read and write tools, server instructions, queue watcher in the app | From Claude: read the last session, queue a new AP session, run it in the app, read its report |
+| 3. MCP | `trainer-mcp` with the read and write tools, server instructions, queue watcher in the app | From OpenCode or Hermes: read the last session, queue a new AP session, run it in the app, read its report |
 | 4. Relative pitch and singing | §10 and §11 types, range profile, own-voice references, rhythm reproduction | Each type runs from an MCP-queued session and grades correctly on golden tests |
 | 5. Sight singing and dictation | Melody generator, score model, MusicXML/MIDI import, OSMD rendering with colouring, melody alignment, §12 types, `generate_melodies` and `create_score` | Generated and LLM-authored melodies are sung and graded; a CC0 MusicXML import works |
-| 6. Hands-free | TTS cache, audio-only runner, passive blocks | A hands-free AP session runs start to finish without touching the screen |
-| 7. Part 2 ingest | `ml/` worker, import, separation, vocal F0, beat grid | A song produces a vocal stem, an F0 trace and a bar grid |
-| 8. Part 2 transcription | Notes → MusicXML with confidence, MCP transcription tools, listen-and-verify view | The LLM corrects a transcription via MCP and the user marks it verified |
-| 9. Part 2 repertoire | Excerpts, sing-along/karaoke/echo/sight-read modes, contour grading, passage search | A phrase from an imported song is practised and graded against the original vocal |
+| 6. Part 2 ingest | `ml/` worker, import, separation, vocal F0, beat grid | A song produces a vocal stem, an F0 trace and a bar grid |
+| 7. Part 2 transcription | Notes → MusicXML with confidence, MCP transcription tools, listen-and-verify view | The LLM corrects a transcription via MCP and the user marks it verified |
+| 8. Part 2 repertoire | Excerpts, sing-along/karaoke/echo/sight-read modes, contour grading, passage search | A phrase from an imported song is practised and graded against the original vocal |
 
-V1 = phases 1–6. V2 = phases 7–9.
+V1 = phases 1–5. V2 = phases 6–8.
+
+Future app items (§17) have no fixed position:
+
+| Item | Deliverables | Done when |
+|---|---|---|
+| F1. In-app coach | ACP client, coach panel, permission handling | OpenCode or Hermes runs in the app window, reads the last session and queues the next one |
+| F2. Hands-free | TTS cache, audio-only runner, passive blocks, `ap_passive` preset | A hands-free AP session runs start to finish without touching the screen |
+| F3. Phone client | Offline session player, trial sync, native audio | A session prepared on the PC runs on the phone and its trials appear in the PC history |
 
 ---
 
@@ -675,7 +738,7 @@ SingingApp/
 ├─ crates/
 │  ├─ trainer-core/        schema, theory, generators, scores (MusicXML/MIDI), analysis
 │  │                       (pYIN, segmentation, alignment), grading, storage, stats
-│  ├─ trainer-audio/       cpal engine, scheduler, recorder, live pitch, synth, TTS cache
+│  ├─ trainer-audio/       cpal engine, scheduler, recorder, live pitch, synth
 │  ├─ trainer-app/         Tauri 2 app: commands, session runner, queue watcher
 │  └─ trainer-mcp/         stdio MCP server (rmcp)
 ├─ ui/                     React + TypeScript + Vite (OSMD, canvas tuner, uPlot)
