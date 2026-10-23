@@ -1,0 +1,4 @@
+{
+  "title": "Intervals: harmonic",
+  "blocks": [{ "type": "interval_id", "count": 30, "params": { "directions": ["harmonic"] } }]
+}

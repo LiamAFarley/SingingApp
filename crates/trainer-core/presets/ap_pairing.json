@@ -1,0 +1,6 @@
+{
+  "title": "Note pairing (listening)",
+  "protocol": "ap_pairing",
+  "notes": "Passive exposure. Logged, but not counted as evidence of absolute pitch.",
+  "blocks": [{ "type": "pitch_pairing", "count": 48, "params": {} }]
+}

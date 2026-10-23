@@ -1,0 +1,7 @@
+{
+  "title": "Key without a reference",
+  "protocol": "ap_context",
+  "blocks": [
+    { "type": "tonal_center_id", "count": 20, "params": { "modes": ["major", "minor"], "mask": "random_tones" } }
+  ]
+}

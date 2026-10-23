@@ -1,0 +1,8 @@
+{
+  "title": "Absolute pitch: daily",
+  "protocol": "ap_daily",
+  "blocks": [
+    { "type": "pitch_id", "title": "Name the note", "count": 36, "params": { "mask": "random_tones" } },
+    { "type": "sing_pitch", "title": "Sing the note", "count": 12, "params": { "pre_mask": "random_tones" } }
+  ]
+}

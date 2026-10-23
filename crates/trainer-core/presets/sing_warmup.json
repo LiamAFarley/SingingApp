@@ -1,0 +1,32 @@
+{
+  "title": "Warm-up patterns",
+  "notes": "Five-note scales and arpeggios moving up a semitone each time. Stop if anything feels strained.",
+  "blocks": [
+    {
+      "type": "pattern",
+      "title": "Five-note scale, sing along",
+      "count": 8,
+      "feedback": "continuous",
+      "params": {
+        "pattern": { "degrees": { "degrees": [1, 2, 3, 4, 5, 4, 3, 2, 1] } },
+        "keys": "ascending",
+        "tempo_bpm": 110,
+        "reference": "guided",
+        "backing": "melody"
+      }
+    },
+    {
+      "type": "pattern",
+      "title": "Major arpeggio, echo",
+      "count": 6,
+      "feedback": "continuous",
+      "params": {
+        "pattern": { "degrees": { "degrees": [1, 3, 5, 8, 5, 3, 1] } },
+        "keys": "ascending",
+        "tempo_bpm": 96,
+        "reference": "echo",
+        "backing": "click"
+      }
+    }
+  ]
+}

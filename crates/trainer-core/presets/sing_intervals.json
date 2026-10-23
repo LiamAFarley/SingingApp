@@ -1,0 +1,4 @@
+{
+  "title": "Interval singing",
+  "blocks": [{ "type": "sing_interval", "count": 16, "feedback": "continuous", "params": { "tempo_bpm": 80 } }]
+}

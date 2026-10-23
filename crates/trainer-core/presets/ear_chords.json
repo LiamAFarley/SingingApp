@@ -1,0 +1,18 @@
+{
+  "title": "Chords: triads and inversions",
+  "blocks": [
+    { "type": "chord_id", "title": "Triads", "count": 20, "params": {} },
+    {
+      "type": "chord_id",
+      "title": "Major and minor inversions",
+      "count": 20,
+      "params": { "qualities": ["major", "minor"], "inversions": [0, 1, 2], "answer_inversion": true, "style": "block_then_arpeggio" }
+    },
+    {
+      "type": "chord_id",
+      "title": "Seventh chords",
+      "count": 20,
+      "params": { "qualities": ["dominant7", "major7", "minor7", "half_diminished7", "diminished7"] }
+    }
+  ]
+}

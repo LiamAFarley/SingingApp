@@ -1,0 +1,7 @@
+{
+  "title": "Pitch matching and sustain",
+  "blocks": [
+    { "type": "pitch_match", "title": "Match the note", "count": 15, "feedback": "continuous", "params": {} },
+    { "type": "sustain", "title": "Hold steadily", "count": 4, "feedback": "continuous", "params": { "hold_ms": 5000 } }
+  ]
+}

@@ -1,0 +1,9 @@
+/target
+/node_modules
+/dist
+*.log
+.DS_Store
+# Large binaries fetched by scripts/fetch-soundfont.*
+/crates/trainer-app/resources/soundfonts/*.sf2
+/crates/trainer-app/binaries/trainer-mcp-*
+/crates/trainer-app/gen

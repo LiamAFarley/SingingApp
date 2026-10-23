@@ -1,0 +1,4 @@
+{
+  "title": "Find the key (with reference)",
+  "blocks": [{ "type": "tonal_center_id", "count": 20, "params": { "reference": true, "modes": ["major", "minor"], "mask": "none" } }]
+}

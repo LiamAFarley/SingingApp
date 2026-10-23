@@ -1,0 +1,12 @@
+{
+  "title": "Scales and modes",
+  "blocks": [
+    { "type": "scale_id", "title": "Major and minor", "count": 20, "params": {} },
+    {
+      "type": "scale_id",
+      "title": "Modes",
+      "count": 20,
+      "params": { "scales": ["major", "dorian", "phrygian", "lydian", "mixolydian", "natural_minor", "locrian"] }
+    }
+  ]
+}

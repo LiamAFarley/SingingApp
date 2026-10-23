@@ -1,0 +1,19 @@
+{
+  "title": "Scales: listen and repeat",
+  "blocks": [
+    {
+      "type": "pattern",
+      "title": "Major scale",
+      "count": 4,
+      "feedback": "continuous",
+      "params": { "pattern": { "scale": { "kind": "major", "shape": "up_down" } }, "tempo_bpm": 96, "reference": "echo" }
+    },
+    {
+      "type": "pattern",
+      "title": "Natural minor scale",
+      "count": 4,
+      "feedback": "continuous",
+      "params": { "pattern": { "scale": { "kind": "natural_minor", "shape": "up_down" } }, "tempo_bpm": 96, "reference": "echo" }
+    }
+  ]
+}
