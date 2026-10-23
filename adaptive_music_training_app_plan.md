@@ -25,7 +25,10 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 
 | Topic | Decision |
 |---|---|
-| Platform | Windows desktop only. No mobile app, no sync. |
+| Platform | Windows 10/11 desktop only. No mobile app, no sync. |
+| Licensing | Personal tool. Any licence is acceptable, GPL included; getting it running and functional comes first. What can be redistributed is decided at the end. |
+| UI style | Clean, professional light mode with a sans-serif system font (Segoe UI). No marketing-site tropes (§15). |
+| Exercise conventions | Modelled on EarMaster's tools, which follow the standard aural-skills curriculum (§8). |
 | Audio | ASIO first (Focusrite Scarlett), WASAPI fallback. 48 kHz. |
 | Listening | Always headphones. Playback never reaches the mic, so sing-along, drone and accompaniment exercises are graded without bleed handling. |
 | Monitoring | The singer hears their own voice through the Scarlett's direct monitor (zero latency). The app outputs prompts, references, drones, clicks and accompaniment. Optional software monitoring, off by default. |
@@ -128,8 +131,8 @@ Rust for everything except the UI:
 | Real-time queues | `rtrb` SPSC ring buffers |
 | FFT | `rustfft` |
 | Live pitch | McLeod Pitch Method (NSDF via FFT): `pitch-detection` crate or in-house |
-| Post-trial pitch | pYIN with Viterbi smoothing: `pyin` crate (librosa port) |
-| Synthesis | `rustysynth` (SoundFont, General MIDI) + in-house oscillators and Shepard tones |
+| Post-trial pitch | In-house pYIN-style tracker: per-frame MPM period candidates + Viterbi smoothing |
+| Synthesis | `rustysynth` (SoundFont, General MIDI; default bank GeneralUser GS) + in-house oscillators and Shepard tones |
 | MIDI files / MIDI input | `midly` / `midir` |
 | MusicXML | `roxmltree` (read), `quick-xml` (write), `zip` (.mxl) |
 | Audio files | `hound` (WAV); Part 2: `symphonia` (decode), `rubato` (resample) |
@@ -206,7 +209,7 @@ Two passes over the same audio. The live pass drives the display; the post-trial
 
 ### Post-trial (authoritative)
 
-- pYIN with Viterbi smoothing over the trial capture, 10 ms hop, fmin/fmax from the singer's range profile plus a margin. Takes well under 100 ms for a typical trial, so after-trial feedback is effectively immediate.
+- pYIN-style tracking over the trial capture: per-frame MPM period candidates with clarity, then Viterbi smoothing across frames (pitch-jump and voicing-switch costs) to remove octave errors and spurious frames. 10 ms hop, fmin/fmax from the singer's range profile plus a margin. Takes well under 100 ms for a typical trial, so after-trial feedback is effectively immediate.
 - Output: dense trace (cents relative to A4 as f32, voicing probability as u8) stored as a compact blob.
 - Optional later: a neural F0 backend (CREPE, RMVPE or FCPE as ONNX via `ort`) behind the same `F0Estimator` trait, if pYIN struggles on the user's voice. A dry, close-miked vocal with headphones should not need it.
 
@@ -271,11 +274,11 @@ Loudness is relative only: the Scarlett's gain setting is arbitrary, so no SPL c
 
 ### Timbres
 
-- `gm:<program>` — General MIDI SoundFont via rustysynth (default bank FluidR3_GM, MIT licence): piano, strings, winds, brass, organ, guitar, choir "aahs", voice "oohs", synths.
+- `gm:<program>` — General MIDI SoundFont via rustysynth (default bank GeneralUser GS, bundled into the Windows build by CI): piano, strings, winds, brass, organ, guitar, choir "aahs", voice "oohs", synths.
 - `synth:<sine|triangle|saw|square|pulse>` with optional filter and envelope.
 - `shepard` — octave-ambiguous Shepard tones (chroma without height).
 - `own_voice` — the user's best stored takes of that exact pitch.
-- Extra SF2 banks can be added to the library.
+- Extra SF2 banks (e.g. free instrument banks from music-production libraries) go in the library's `soundfonts/` folder and show up as `sf:<bank>:<program>`. SFZ libraries would need an SFZ player (e.g. sfizz) and are added only if needed.
 
 Per-stimulus parameters: pitch, timbre, duration, loudness, attack shape, optional detune (default 0 cents).
 
@@ -307,6 +310,22 @@ Each trial records `secs_since_labeled_reference`: time since the app last playe
 
 `continuous` (live pitch line visible) · `after_trial` · `after_block` · `end_of_session` · `none`.
 Fading feedback is the LLM's job: it picks the mode per block, and every trial logs the mode it ran under.
+
+### Backing and guide (sung multi-note exercises)
+
+Every sung exercise with more than one note (pitch matching sequences, patterns, interval singing, echo, harmony, sight singing, repertoire phrases) runs against the metronome and can play a backing:
+
+- `backing`: `none | click | drone | chords | melody | melody_and_chords`, with `backing_volume`, `tempo_bpm` and `count_in_bars`. Chords come from the score's harmony when it has any, otherwise from a simple diatonic harmonisation of the melody per bar.
+- After an attempt, the trial view offers **Listen** (play the target), **Sing along** (retry with the melody guide audible) and **Retry** (unassisted). This is the path after a failed sight-singing attempt.
+- Assisted attempts are logged as separate trials with `assisted: true` and the backing used, so statistics always separate assisted from unassisted performance.
+
+### Exercise conventions (EarMaster-style)
+
+- **Question controls** on every trial: Replay, Reference (A4, tonic, or cadence as the exercise defines), Show answer (plays and displays the correct answer), Next. All have keyboard shortcuts.
+- **Answer inputs**, chosen per exercise: on-screen piano, note-name or solfège buttons, interval/chord/scale name buttons, MIDI keyboard, microphone (sung answers), tap (rhythm via keyboard, MIDI pad or mic).
+- **Lessons:** a block can set `pass_mark` (fraction correct) and `min_trials`; results show pass or fail. The LLM decides what happens next; the app never auto-advances.
+- **Sing in your range:** melodies and patterns are transposed into the singer's comfortable range unless a block pins the key.
+- **Statistics** per exercise type and per answer category (e.g. accuracy per interval), available in the app and through MCP.
 
 ### Example session
 
@@ -446,8 +465,13 @@ Presets and "repeat last session" work without the LLM.
 | `interval_id` | Melodic ascending/descending or harmonic intervals → name the interval. Params: interval set, directions, register, root range, timbres, compound intervals. |
 | `chord_id` | Quality (major, minor, diminished, augmented, suspended, sevenths, …) and/or inversion; close or open voicing; register. |
 | `scale_degree_id` | Key established by a cadence or drone, then a tone → name the degree. |
+| `interval_comparison` | Two intervals → which is larger (or are they the same). |
+| `scale_id` | Scale or mode played → name it (major, natural/harmonic/melodic minor, modes, pentatonics, blues, …). |
 | `progression_id` | Identify a cadence type or Roman-numeral progression. |
-| `rhythm_reproduce` | Hear or see a rhythm → reproduce it by tapping the mic, a MIDI pad or key, or singing "ta". Onsets come from the audio input or MIDI timestamps on the same clock as the click and are graded by alignment. |
+| `rhythm_reproduce` | Hear a rhythm → reproduce it by tapping the mic, a MIDI pad or key, or singing "ta" (EarMaster's rhythm imitation). Onsets come from the audio input or MIDI timestamps on the same clock as the click and are graded by alignment. |
+| `rhythm_reading` | See a rhythm in notation → tap it in time with the metronome. |
+| `rhythm_error_detection` | See a rhythm and hear a performance of it → mark the beats or bars that differ. |
+| `melody_error_detection` | See a melody and hear a performance of it → mark the notes that differ in pitch or rhythm. |
 
 Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per block: note names, movable-do, fixed-do or scale-degree numbers.
 
@@ -465,6 +489,12 @@ Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per b
 | `echo` | Hear a phrase → sing it back. | melody alignment |
 | `range_finder` | Guided slides and steps to find lowest and highest reachable and comfortable notes. | proposes a range-profile update the user confirms |
 | `own_voice_match` | Match a stored best take of your own voice. | absolute |
+
+### Live tuner and follow-along display
+
+- **Tuner** (its own view, and available in any free-singing moment): large note name, cents meter, frequency, a scrolling pitch history, and an optional reference tone or drone. Uses the live pitch pass (§5).
+- **Follow-along pitch lane** for every sung exercise with more than one note: target notes are bars on a semitone grid that scroll past a fixed "now" line in time with the metronome; the live pitch trace is drawn over them; the current note is highlighted; a count-in precedes the first note. After the attempt the bars are coloured by grade (§15 colours).
+- The lane follows the block's feedback mode: `continuous` shows the live trace during the attempt; `after_trial` reveals the trace and grades afterwards; `none` hides both. For sight singing, `lane_targets: hidden_until_done` keeps the target bars hidden so the lane does not give the pitches away; the score is the only guide.
 
 ### Range profile
 
@@ -626,6 +656,18 @@ Part 2 adds `assets`, `stems`, `analysis_runs`.
 
 All 12-class answers have computer-keyboard shortcuts in piano layout; a MIDI keyboard works wherever the answer is a note.
 
+### Visual style
+
+Clean, professional and quiet: it should look like a well-made desktop tool, not a marketing site.
+
+- **Theme:** light mode. App background `#F6F7F9`, content surfaces `#FFFFFF`, 1 px borders `#DDE1E6`, primary text `#1F2328`, secondary text `#59636E`. One accent, a muted blue `#2D6CDF`, for primary actions, selection and focus rings.
+- **Type:** `"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif`; 14 px base, 13 px secondary, headings 600 weight at modest sizes; tabular figures for cents, Hz, percentages and timers.
+- **Layout:** left navigation rail (Practice, Tuner, Results, Library, Audio, Settings), content in a centred column, 8 px spacing grid, 6 px corner radius.
+- **Avoid:** gradients, glows, glass effects, heavy shadows, emoji, oversized hero text, decorative illustrations, marketing copy. Plain labels and sentence case. Shadows only on popovers and menus.
+- **Motion:** only where it carries information (tuner, pitch lane, playhead at display rate); other transitions ≤ 120 ms.
+- **Grading colours** (also used in score colouring and the pitch lane): correct `#1A7F37`, marginal `#9A6700`, wrong `#CF222E`, missed `#8C959F`, current `#2D6CDF`.
+- **Pitch lane:** white canvas, light semitone grid with slightly darker C rows and note labels on the left, target bars in light blue with a darker outline, live trace as a 2 px dark line.
+
 ---
 
 ## 16. Part 2 — Repertoire pipeline
@@ -664,7 +706,7 @@ Hosts the agent inside the app window instead of a separate terminal or chat win
 - **Tools:** `session/new` passes `trainer-mcp` in `mcpServers` (Hermes adds client-provided servers to each session); alternatively the agent keeps it in its own MCP config (§13). `cwd` is a coach folder the user picks, where reference documents can live.
 - **Permissions:** the client advertises no file-system or terminal capabilities. `trainer-mcp` tool calls are approved according to a user setting; any other permission request is shown to the user. The agent's own tools can be trimmed for coach sessions in its config (e.g. Hermes `platform_toolsets.acp`).
 - **Panel:** streams messages, tool calls and plans. Context buttons ("ask about this trial", "plan my next session") insert trial or session ids into the prompt. Sessions the agent queues reach "Up next" through the existing queue watcher.
-- **References:** Zed's agent panel and the example clients in the `agent-client-protocol` crate. Zed is GPL-licensed, so use it as a reference rather than copying code.
+- **References:** Zed's agent panel and the example clients in the `agent-client-protocol` crate. Zed's GPL code can be reused directly; licensing is settled at the end.
 
 ### Hands-free mode
 
@@ -709,11 +751,11 @@ Each phase ends with something usable. "Done when" items are acceptance checks.
 
 | Phase | Deliverables | Done when |
 |---|---|---|
-| 1. Foundation | Cargo workspace, Tauri shell, `trainer-core` types, SQLite and migrations, cpal ASIO engine, device page, calibration, live tuner, pYIN post-analysis, single-note grading, golden tests | The tuner runs on the Scarlett via ASIO at 128 frames with no xruns; golden tests pass; a loopback calibration is stored |
+| 1. Foundation | Cargo workspace, Tauri shell, `trainer-core` types, SQLite and migrations, cpal ASIO engine, device page, calibration, standalone tuner, post-trial pitch tracker, single-note grading, golden tests | The tuner runs on the Scarlett via ASIO at 128 frames with no xruns; golden tests pass; a loopback calibration is stored |
 | 2. AP suite | Stimulus engine (SoundFont, synth, Shepard, masks, pools), session runner, every §9 exercise type, assessment battery, presets, results view | A full `ap_assessment` and an `ap_progressive` stage run end to end and log trials |
 | 3. MCP | `trainer-mcp` with the read and write tools, server instructions, queue watcher in the app | From OpenCode or Hermes: read the last session, queue a new AP session, run it in the app, read its report |
-| 4. Relative pitch and singing | §10 and §11 types, range profile, own-voice references, rhythm reproduction | Each type runs from an MCP-queued session and grades correctly on golden tests |
-| 5. Sight singing and dictation | Melody generator, score model, MusicXML/MIDI import, OSMD rendering with colouring, melody alignment, §12 types, `generate_melodies` and `create_score` | Generated and LLM-authored melodies are sung and graded; a CC0 MusicXML import works |
+| 4. Relative pitch and singing | §10 and §11 types, follow-along pitch lane with metronome, backing options, range profile, own-voice references, rhythm reproduction | Each type runs from an MCP-queued session and grades correctly on golden tests |
+| 5. Sight singing and dictation | Melody generator, score model, MusicXML/MIDI import, OSMD rendering with colouring, melody alignment, §12 types, Listen / Sing along / Retry flow, `generate_melodies` and `create_score` | Generated and LLM-authored melodies are sung and graded; a CC0 MusicXML import works |
 | 6. Part 2 ingest | `ml/` worker, import, separation, vocal F0, beat grid | A song produces a vocal stem, an F0 trace and a bar grid |
 | 7. Part 2 transcription | Notes → MusicXML with confidence, MCP transcription tools, listen-and-verify view | The LLM corrects a transcription via MCP and the user marks it verified |
 | 8. Part 2 repertoire | Excerpts, sing-along/karaoke/echo/sight-read modes, contour grading, passage search | A phrase from an imported song is practised and graded against the original vocal |
