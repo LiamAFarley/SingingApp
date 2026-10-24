@@ -29,7 +29,7 @@ pub struct ValidationReport {
     pub errors: Vec<Issue>,
     pub warnings: Vec<Issue>,
     pub trial_count: u32,
-    pub estimated_minutes: f32,
+    pub estimated_minutes: f64,
     pub preview: Vec<TrialPreview>,
 }
 
@@ -186,7 +186,7 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
         errors,
         warnings,
         trial_count: spec.total_trials(),
-        estimated_minutes: (seconds / 60.0 * 10.0).round() / 10.0,
+        estimated_minutes: (f64::from(seconds) / 60.0 * 10.0).round() / 10.0,
         preview,
     }
 }

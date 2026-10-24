@@ -309,7 +309,7 @@ pub struct PresetView {
     pub description: String,
     pub source: String,
     pub trial_count: u32,
-    pub estimated_minutes: f32,
+    pub estimated_minutes: f64,
     pub block_titles: Vec<String>,
 }
 
