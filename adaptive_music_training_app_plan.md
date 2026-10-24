@@ -3,6 +3,22 @@
 
 **Purpose:** A Windows desktop app for singing, ear training and absolute-pitch (AP) training. It plays stimuli and captures the voice through ASIO on a Focusrite Scarlett, grades every attempt deterministically, logs everything, and exposes the history plus exercise and session generation to an LLM through MCP. The LLM reads the results and writes the next sessions; the app runs and grades them.
 
+**Status (October 2026):**
+
+- **Built:** phases 1–3.
+- **Phase 4, built:**
+  - Interval, chord and scale identification.
+  - Pitch matching, sustain, interval singing and patterns, with the follow-along lane and backing options.
+  - The range profile.
+- **Phase 5, built:**
+  - Sight singing from staff notation (VexFlow) and melodic dictation with a monophonic score editor.
+  - Melodies are generated or written by the coach.
+- **All six §9 absolute-pitch types are in, including anchor songs and incidental pairing.**
+- **Phase 4, still to do:** scale-degree, interval comparison, progressions, rhythm types, harmony, echo phrases, range finder, own-voice matching.
+- **Phase 5, still to do:** MusicXML/MIDI import and the score library (`search_scores`, `create_score`); `regrade` and `get_trial_plot` over MCP.
+- **Not started:** Part 2 and §17.
+- **Testing:** everything runs in CI, which builds the Windows installer with ASIO. The audio engine has not yet been run on the Scarlett.
+
 **Core loop:**
 
 ```text
