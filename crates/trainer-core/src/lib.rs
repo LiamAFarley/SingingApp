@@ -7,6 +7,7 @@ pub mod grade;
 pub mod metrics;
 pub mod pitch;
 pub mod presets;
+pub mod reports;
 pub mod rng;
 pub mod schema;
 pub mod stats;

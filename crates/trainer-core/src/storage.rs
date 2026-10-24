@@ -1119,18 +1119,11 @@ impl Db {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests_support {
     use super::*;
     use serde_json::json;
 
-    fn spec() -> SessionSpec {
-        SessionSpec::from_json(
-            r#"{"title": "Test", "protocol": "p1", "blocks": [{"type": "pitch_id", "count": 2}]}"#,
-        )
-        .unwrap()
-    }
-
-    pub(crate) fn sample_trial(session_id: &str, idx: u32, correct: bool) -> TrialRow {
+    pub fn sample_trial(session_id: &str, idx: u32, correct: bool) -> TrialRow {
         TrialRow {
             id: new_id(),
             session_id: session_id.into(),
@@ -1160,6 +1153,20 @@ mod tests {
             secs_since_labeled_reference: None,
             interrupted: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tests_support::sample_trial;
+    use super::*;
+    use serde_json::json;
+
+    fn spec() -> SessionSpec {
+        SessionSpec::from_json(
+            r#"{"title": "Test", "protocol": "p1", "blocks": [{"type": "pitch_id", "count": 2}]}"#,
+        )
+        .unwrap()
     }
 
     #[test]

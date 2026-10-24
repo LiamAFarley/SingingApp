@@ -22,7 +22,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev
       - name: Tests
-        run: cargo test -p trainer-core -p trainer-audio
+        run: cargo test -p trainer-core -p trainer-audio -p trainer-mcp
 
   windows:
     name: Build (Windows, ASIO)
@@ -34,6 +34,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Tests
-        run: cargo test -p trainer-core -p trainer-audio
+        run: cargo test -p trainer-core -p trainer-audio -p trainer-mcp
       - name: Build audio engine with ASIO
         run: cargo build --release -p trainer-audio --features asio
