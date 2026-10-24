@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "./api";
+import { api, useBackendEvent } from "./api";
 import type { AudioView } from "./bindings/AudioView";
 import type { RunnerState } from "./bindings/RunnerState";
 import { live } from "./live";
@@ -37,18 +37,14 @@ export function App() {
     api("runnerState").then(setRunner).catch(() => undefined);
     api("getSettings").then((s) => setA4(s.a4_hz)).catch(() => undefined);
     refreshAudio();
-    const offs: (() => void)[] = [];
-    api("listen", "runner-state", (s: unknown) => {
-      const next = s as RunnerState;
-      setRunner((prev) => (prev && prev.seq > next.seq && prev.session_id === next.session_id ? prev : next));
-    }).then((u) => offs.push(u));
-    api("listen", "audio-changed", () => refreshAudio()).then((u) => offs.push(u));
     const t = setInterval(refreshAudio, 2000);
-    return () => {
-      offs.forEach((o) => o());
-      clearInterval(t);
-    };
+    return () => clearInterval(t);
   }, [refreshAudio]);
+  useBackendEvent("runner-state", (s) => {
+    const next = s as RunnerState;
+    setRunner((prev) => (prev && prev.seq > next.seq && prev.session_id === next.session_id ? prev : next));
+  });
+  useBackendEvent("audio-changed", refreshAudio);
 
   // Jump to the session screen when a session starts; leave it when it ends.
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { AppInfo } from "./bindings/AppInfo";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { AudioView } from "./bindings/AudioView";
@@ -109,4 +110,24 @@ export async function api<K extends keyof Backend>(
 
 export function command(c: RunnerCommand) {
   return api("runnerCommand", c).catch(() => undefined);
+}
+
+/** Subscribes to a backend event for the lifetime of the calling component. */
+export function useBackendEvent(name: string, cb: (payload: unknown) => void) {
+  const latest = useRef(cb);
+  latest.current = cb;
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    let cancelled = false;
+    api("listen", name, (p: unknown) => latest.current(p))
+      .then((u) => {
+        if (cancelled) u();
+        else off = u;
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+      off?.();
+    };
+  }, [name]);
 }

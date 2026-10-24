@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api";
+import { api, useBackendEvent } from "../api";
 import type { AudioView } from "../bindings/AudioView";
 import type { PresetView } from "../bindings/PresetView";
 import type { RunnerState } from "../bindings/RunnerState";
@@ -32,10 +32,8 @@ export function PracticeView({
   useEffect(() => {
     api("listPresets").then(setPresets).catch((e) => setError(e.message));
     refresh();
-    let off: (() => void) | undefined;
-    api("listen", "queue-changed", () => refresh()).then((u) => (off = u));
-    return () => off?.();
   }, [refresh]);
+  useBackendEvent("queue-changed", refresh);
 
   const start = async (key: string, req: Parameters<typeof api<"startSession">>[1]) => {
     setError(null);
