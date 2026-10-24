@@ -137,6 +137,51 @@ function choiceTrial(): TrialView {
   };
 }
 
+function singPitchTrial(): TrialView {
+  const start = clock() + 0.1;
+  return {
+    kind: "sing_pitch",
+    interaction: "sing_pitch",
+    prompt: "A",
+    choices: [],
+    layout: "list",
+    deadline_ms: null,
+    can_replay: false,
+    can_reference: false,
+    lane: null,
+    show_live_pitch: true,
+    label: null,
+    label_at_s: null,
+    timeline_start_s: null,
+    response_start_s: start,
+    response_end_s: start + 4,
+    attempt: 0,
+    assisted: false,
+  };
+}
+
+function pairingTrial(): TrialView {
+  return {
+    kind: "pitch_pairing",
+    interaction: "pairing",
+    prompt: "Listen",
+    choices: [],
+    layout: "list",
+    deadline_ms: null,
+    can_replay: false,
+    can_reference: false,
+    lane: null,
+    show_live_pitch: false,
+    label: "F♯",
+    label_at_s: clock() + 0.3,
+    timeline_start_s: null,
+    response_start_s: null,
+    response_end_s: null,
+    attempt: 0,
+    assisted: false,
+  };
+}
+
 function scaleLane(): LaneSpec {
   const beat = 60 / 96;
   const degrees = [0, 2, 4, 5, 7, 9, 11, 12, 11, 9, 7, 5, 4, 2, 0];
@@ -275,6 +320,10 @@ function startScenario() {
     const trial = sungTrial();
     emit({ phase: "recording", session_id: "demo", title: "Scales: listen and repeat", block_count: 2, block_title: "Major scale", block_kind: "pattern", trial_index: 1, trial_count: 4, done_in_block: 1, correct_in_block: 1, feedback_mode: "continuous", trial });
     if (scenario === "sung-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
+  } else if (scenario === "sing-pitch") {
+    emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });
+  } else if (scenario === "pairing") {
+    emit({ phase: "listening", session_id: "demo", title: "Absolute pitch: pairing", block_count: 1, block_title: "Hear and label", block_kind: "pitch_pairing", trial_index: 4, trial_count: 24, feedback_mode: "none", trial: pairingTrial() });
   } else if (scenario === "summary") {
     emit({ phase: "session_summary", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, session_report: report });
   }
