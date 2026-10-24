@@ -4,11 +4,13 @@
 
 pub mod generate;
 pub mod grade;
+pub mod melody;
 pub mod metrics;
 pub mod pitch;
 pub mod presets;
 pub mod reports;
 pub mod rng;
+pub mod score;
 pub mod schema;
 pub mod stats;
 pub mod storage;
