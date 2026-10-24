@@ -28,7 +28,7 @@
   - The range finder: the singer knows their range and sets it in Settings.
   - The rhythm types (§10): rhythm is practised inside sight singing.
   - MusicXML import: the coach converts the user's scores into library JSON or MIDI files instead.
-- **Next:** `song_and_corpus_app_plan.md` plans what the app needs in order to use two external pipelines: song practice packages (stems, beat grid, vocal notes) and the exercise corpus (Trained Ear and other books, courses). It brings back rhythm reading for the corpus's rhythm exercises, which reverses the rhythm entry above.
+- **Next:** `song_and_corpus_app_plan.md` plans what the app needs in order to use two external pipelines: song practice packages (stems, beat grid, vocal notes) and the exercise corpus (Trained Ear and other books, courses). It brings back rhythm reading (by tapping) for the corpus's rhythm exercises, which reverses the rhythm entry above. Order: courses and warm-ups, then shared notation, then the rest of the courses; songs are deferred.
 - **Not started:** Part 2 and §17.
 - **Testing:** everything runs in CI, which builds the Windows installer with ASIO. The audio engine has not yet been run on the Scarlett.
 

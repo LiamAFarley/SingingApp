@@ -1,6 +1,6 @@
 # App extensions for song practice packages and the exercise corpus
 
-**Date:** 24 October 2026
+**Date:** 24 October 2026 (revised the same day with the owner's priorities)
 **Inputs:** `song_practice_ingestion_playback_pipeline.md` (song packages) and `EXERCISE_CORPUS_PLAN.md` (corpus, courses, conversion).
 **Scope:** what the app (trainer-core, trainer-audio, trainer-app, UI, trainer-mcp) must be able to do to *use* what those two pipelines produce.
 
@@ -15,40 +15,28 @@ Those run outside the app and hand it files. The app's side of that boundary is 
 
 ## 0. Bottom line
 
-1. **Both inputs need the same foundations first.** These are:
-   - a finer time grid (960 ticks per quarter);
-   - tempo maps, i.e. beat ↔ seconds that is not one constant BPM;
-   - metre and key change events;
-   - a multi-track mixer that can play both generated tracks and audio files;
-   - stable item identity with provenance, review and rights data;
-   - grading against explicit note times rather than beats × one tempo.
+**Priorities:**
 
-   Each of these is a contained change to existing code.
-2. **Songs need one genuinely new subsystem: a continuous practice transport.** Today every sung trial is rendered completely in advance and played as one-shot buffers on four buses. A song needs:
-   - streamed stems, with per-stem time-stretching and pitch-shifting;
-   - seeking and looping with no drift;
-   - a published output-frame → source-time map, so live pitch, grading and the score cursor all read one clock.
+1. **Courses and warm-ups first.**
+   - Collection pages and course manifests with progress.
+   - Warm-up vocalises with generated backing tracks.
+   - Instructions shown before an exercise.
+   - The 315 Crowell melodies that already convert need nothing more from the notation.
+2. **Then the shared notation work:**
+   - a finer time grid (960 ticks per quarter) for tuplets and 32nds;
+   - tempo maps and fermatas;
+   - metre and key changes;
+   - rhythm on a percussion staff, read by tapping;
+   - alto and tenor clefs, aligned multi-part systems, grace notes and lyrics or solfège under the notes.
+3. **Then the rest of the courses:** the material that needs that notation, i.e. rhythm courses, chorales, duets and canons, and the remaining Trained Ear books.
+4. **Songs are deferred.** The plan for them is kept (§3) so the shared work fits them later.
 
-   This is the largest single item in this plan.
-3. **The corpus needs notation breadth, then course structure.**
-   - **Notation:**
-     - rhythm, meaning unpitched hits on a percussion staff;
-     - tuplets and 32nds;
-     - alto, tenor and percussion clefs;
-     - parts aligned in one system;
-     - metre and key changes;
-     - grace notes and fermatas.
-   - **Courses:** collection pages and course manifests with progress, plus new exercise kinds: `rhythm_reading`, `vocalise`, `protocol` and `sing_and_play`.
-4. **The app should ship a validator** (`trainer-cli validate library|song|course`). The converter and the song pipeline can then round-trip their output through the app's own parsers, as the corpus plan's step 7 asks, without launching the GUI.
-5. **One fix is needed immediately.** `Cargo.toml` declares `rust-version = "1.88"`, but the lockfile needs 1.95 (`rusqlite_migration 2.6`, `parking_lot 0.13`). That is why the corpus plan found it cannot build on the installed 1.88. Set `rust-version = "1.95"` and tell local builders to run `rustup update`.
+**Out of the app entirely:**
 
-Recommended order (§6):
+- **Identity and rights.** The corpus build decides what goes into the library and courses. Everything is for personal use.
+- **Breathing and bodywork routines.** They live with the coach agent, not in the app.
 
-1. foundations and collection pages, so the 315 Crowell melodies land;
-2. notation breadth;
-3. song transport and playback at 100% speed, with live targets;
-4. stretch, transpose and song sessions;
-5. courses, then editors and the extras.
+**Deferred indefinitely:** MIDI keyboard input (wanted eventually) and `sing_and_play`.
 
 ---
 
@@ -178,31 +166,15 @@ These serve both documents. Each lists the change, why it is needed and how to t
   - opening a cached song takes under 1 s;
   - memory stays under 100 MB while playing six stems.
 
-### 2.6 Identity, provenance, review state, rights
+### 2.6 Progress per item
 
-- **Why.**
-  - Corpus items need stable ids, a source citation, a review status (`unreviewed → candidate → approved → rejected`) and rights.
-  - Songs need a verification state per note: `raw`, `model_consensus`, `review_needed`, `user_verified`.
-  - Both need progress per item.
+- **Why.** Courses need to know which pieces have been attempted and passed.
 - **Change.**
-  - Optional metadata on `LibraryPiece` (§4.3) and on songs (§3.2).
-  - A storage migration adding indexed columns `item_id`, `course_id`, `song_id` and `region_id` to `trials`:
-    - library trials fill `item_id` from the piece id;
-    - song trials fill `song_id`, plus `region_id` when a region is practised.
-  - `get_stats` can group by these columns.
-- **Rights enforcement.** A `rights` record per source or song:
-
-  ```json
-  {
-    "licence": "CC BY-NC-SA 4.0",
-    "redistribution": false,
-    "personal_only": true,
-    "attribution": "..."
-  }
-  ```
-
-  The app shows it on item and course pages. Any export path added later (library or course export, shared presets, corrected MIDI) refuses items whose `redistribution` is false.
-- **Done when** per-item attempts and pass status come from one indexed query, and an attempted export of a CC BY-NC-SA item is refused with a reason.
+  - No identity, provenance or rights system in the app.
+  - Trials of library pieces already record `stimulus.piece`.
+  - Course blocks also record the course and unit ids in the block spec, so they can be found in `spec_json`.
+  - Progress queries read these fields with SQLite `json_extract`. An expression index is added only if it proves slow at corpus scale.
+- **Done when** a course page shows per-item attempted and passed status from stored trials.
 
 ### 2.7 Grading against explicit note times and confidence
 
@@ -221,7 +193,7 @@ These serve both documents. Each lists the change, why it is needed and how to t
 - **Why.** The Trained Ear is 5,177 exercises; the corpus plan groups them as one JSON per source section, giving a few hundred files. The current scanner reads and checks every file on load.
 - **Change.**
   - Cache each file's parsed pieces in SQLite, keyed by path, mtime and size. Only changed files are parsed again.
-  - Keep a lightweight index (id, title, collection, tags, key, time, bars, range, kind, review status, rights, fingerprint) for the UI.
+  - Keep a lightweight index (id, title, collection, tags, key, time, bars, range, kind) for the UI.
   - The Library page becomes a virtualised list with search and filters on key, metre, range, tags, kind and status.
   - The 40-trial cap on starting a session stays.
 - **Done when** 5,177 pieces start up in under 1 s from cache and in under 10 s from cold.
@@ -236,14 +208,11 @@ These serve both documents. Each lists the change, why it is needed and how to t
   - `trainer-cli render <piece-id> --svg` is optional; it could share Verovio QA with the corpus pipeline later.
 - **Done when** the converter's CI or a local script can run it, and failures say which item failed and why.
 
-### 2.10 Build hygiene
-
-- Set `rust-version = "1.95"` in `Cargo.toml` to match the lockfile.
-- Add the toolchain note to the README build section.
-
 ---
 
-## 3. Song practice packages
+## 3. Song practice packages (deferred)
+
+Deferred until after the courses and notation work (§6). The pipeline is built separately and writes packages straight into the app's songs folder. Songs stay in their recorded keys; the user can raise or lower the key (§3.3), and grading is always absolute against the targets in the chosen key.
 
 ### 3.1 The package contract (what the app reads)
 
@@ -251,7 +220,7 @@ The app watches `%APPDATA%\SingingTrainer\songs\<song-id>\`, the same pattern as
 
 | File | Required | App use | Notes |
 |---|---|---|---|
-| `metadata.json` | **yes** | title, artist, duration, sample rate, nominal BPM, meter, key estimate, `package_version`, `verification_state`, `rights` | add `package_version: 1` and `rights` |
+| `metadata.json` | **yes** | title, artist, duration, sample rate, nominal BPM, meter, key, `package_version`, `verification_state` | add `package_version: 1` |
 | `audio/source_master.wav` | yes | full-mix channel | 48 kHz, frame count = `source_frames` |
 | `audio/instrumental.wav` | yes | pure-backing channel | |
 | `audio/lead_vocal.wav` | yes | original-singer reference | |
@@ -282,7 +251,7 @@ The app watches `%APPDATA%\SingingTrainer\songs\<song-id>\`, the same pattern as
 
 ### 3.2 Song model (trainer-core)
 
-- `SongAsset`: metadata, stems (role → path), `BeatGrid` (wrapping `TempoMap` from §2.2 plus bars and downbeats), sections, regions, `VocalNote`s, optional F0 contour, full notes, chords, reductions and rights.
+- `SongAsset`: metadata, stems (role → path), `BeatGrid` (wrapping `TempoMap` from §2.2 plus bars and downbeats), sections, regions, `VocalNote`s, optional F0 contour, full notes, chords and reductions.
 - `VocalNote { id, midi, onset_s, offset_s, pitch_center_cents, confidence, state, ornament?, breath_after? }`. `state` is `raw | model_consensus | review_needed | user_verified`.
 - Conversions:
   - `source_s ↔ beat`, through the grid;
@@ -350,7 +319,7 @@ This is the core new subsystem. The design follows pipeline §20–§28 and §47
 - **Musical-accuracy grading.**
   - A pass over a region is graded by `grade_sung` with explicit expected notes (§2.7) in practice time.
   - Results are per note. Each note's id goes into `song_note_stats` for the weak-note reference and error loops.
-  - Default pitch mode: `absolute`, or `any_octave` when the singer chose "sing in my octave", for a man singing a female lead.
+  - Pitch mode: always `absolute`, against the targets in the song's recorded key moved by any key change the user chose.
 - **Imitation grading.**
   - A new grader compares the user's contour with the singer's F0 over the region: time-aligned cents error with a small DTW window (±80 ms).
   - It reports scoop timing, glide shape and vibrato onset/rate/extent against the singer's.
@@ -436,7 +405,7 @@ The Python pipeline can read `user_overrides.json` too, for example to re-transc
 
 ### 3.9 Song → exercises (bridges into existing kinds)
 
-- **To library:** "Save phrase to library" writes the quantised vocal line of a region as a `LibraryPiece`, tagged `source: song` with the song's rights. The phrase can then be used in:
+- **To library:** "Save phrase to library" writes the quantised vocal line of a region as a `LibraryPiece`, tagged `source: song`. The phrase can then be used in:
   - sight singing;
   - melodic dictation;
   - pattern-style drilling with any transposition.
@@ -454,12 +423,12 @@ The Python pipeline can read `user_overrides.json` too, for example to re-transc
 
 Per the corpus plan §3 and §6:
 
-- **Library JSON:** one file per source section, generated and never hand-edited. It is copied into `library/<collection path>/`.
+- **Library JSON:** one file per source section, generated and never hand-edited. It is copied into `library/<collection path>/`. The build includes only items it has approved, so the app doesn't track review status.
 - **Course manifests:** in `courses/<course-id>.json`.
-- **Per-exercise metadata from `exercise.json`:** provenance, pedagogy, extraction and review status. It is embedded in the library JSON so the app doesn't read the archival bundle.
-- **Optional assets:** `assets/<item>/<stem>.flac` plus `audio.json`, and `playback.mid`.
+- **Per-piece teaching data** (instructions, vowel, solfège, cautions): embedded in the library JSON. Provenance, extraction and rights records stay in the corpus folder; the app doesn't read them.
+- **Optional assets, later:** `assets/<item>/<stem>.flac` plus `audio.json`. Generated MIDI backing comes first (§2.4).
 
-The app does not read MusicXML, `validation.json` or source crops in this plan. Optional later: show the source crop on an item page for personal builds.
+The app does not read MusicXML, `exercise.json`, `validation.json` or source crops.
 
 ### 4.2 Notation breadth
 
@@ -472,69 +441,46 @@ The app does not read MusicXML, `validation.json` or source crops in this plan. 
 | **Metre and key changes** | §2.3 | the 3 Crowell metre-change pieces |
 | **Grace notes** | `grace: true` on a note: rendered small, played as a short note stolen from the next note, not graded (excluded from alignment) | 8 Crowell grace pieces render; grading ignores the graces |
 | **Fermata** | `fermata: true`: rendered, with a hold through the tempo map (§2.2) | the 3 fermata Crowell pieces play with holds and grade |
-| **Repeats** | the converter expands them; the app keeps `repeat_expanded: true` and, optionally later, draws repeat barlines over the expanded score | provenance visible on the item page |
+| **Repeats** | the converter expands them, so the app sees plain expanded music; drawing repeat barlines is optional later | expanded pieces play in the printed order |
 | **Lyrics / solfège underlay** | `lyric` per note (syllable, hyphen and extender flags); rendered under the staff; also used later for song lyrics | a vocalise with vowels and a solfège melody display correctly |
-| **Unrendered markings** | `unrendered: ["slur", "dynamics", ...]` on the piece, shown as a note on the item page | no marking is silently lost |
 
 ### 4.3 Library piece metadata
 
-These optional fields are added to `LibraryPiece`. They are all ignored by generators and used by the item page, filters, courses, export and stats.
+These optional fields are added to `LibraryPiece`. Generators ignore them; the library filters, the pre-exercise screen and courses use them.
 
 ```json
 {
-  "source": {
-    "source_id": "TE-CRO",
-    "work": "Eyes and Ears",
-    "authors": "Benjamin Crowell",
-    "edition": "2004",
-    "section": "Melody / ...",
-    "label": "Crowell-2004_027",
-    "printed_page": null,
-    "pdf_page": null,
-    "url": "..."
-  },
-  "rights": {
-    "licence": "CC BY-SA 4.0",
-    "redistribution": true,
-    "attribution": "..."
-  },
-  "review_status": "approved",
   "kind": "sight_singing | rhythm | vocalise | chorale | duet | canon",
-  "sequence": 27,
   "pedagogy": {
     "instructions": "...",
     "solfege": null,
     "vowel": null,
-    "breath_cues": [],
-    "cautions": [],
-    "assessment": "pitch_and_rhythm"
-  },
-  "fingerprint": "...",
-  "variants": ["TE-COL-1904/..."],
-  "repeat_expanded": false,
-  "unrendered": []
+    "cautions": []
+  }
 }
 ```
 
-- `pedagogy.instructions` and `cautions` show before the first trial of a piece, using the existing block-intro screen.
-- `review_status` other than `approved` is hidden from courses by default. It stays visible in the library with a badge.
+- `pedagogy.instructions`, `vowel` and `cautions` show before the first trial of a piece, using the existing block-intro screen.
 - `kind` filters the library and chooses the default exercise when "Start" is pressed.
+- Ordering, the source citation and dedup links stay in the corpus build and its course manifests.
 
 ### 4.4 Exercise kinds
 
 | Kind | Status | What the app needs |
 |---|---|---|
-| `rhythm_reading` | new | Show a rhythm score with click and count-in; the user performs it. Response modes: **tap** (space bar or on-screen pad, timestamps mapped to the master clock; MIDI pad once MIDI input exists), **clap or speak** (microphone onset detection, a new energy and spectral-flux onset detector next to the pitch tracker), **sing on one pitch** (existing segments, pitch ignored). Grading: onset-only alignment (the existing NW with the pitch cost removed), per-note early/late ms, tolerance by tempo. |
-| `vocalise` | new, built on `pattern` | `pattern` plus metadata: vowel, register, reps, tempo ladder, transposition plan within the singer's range, cautions. Graded on pitch and onset as `pattern` is; never on "vocal health". |
-| `protocol` | new | Breathing, SOVT and bodywork steps with no notation: text, optional timer per step, optional drone or click, optional demo media. Graded only by completion; stored as passive trials. |
+| `vocalise` | new, built on `pattern`; **first priority** | `pattern` plus warm-up fields: vowel, register, reps, tempo ladder (advance when a rep passes), transposition plan stepping through the singer's range, cautions shown before starting. Backing from generated tracks (§2.4): click, pulse, chord pads, bass, guide melody. Graded on pitch and onset as `pattern` is; never on "vocal health". |
 | guided singing | exists in part | Sight singing already has sing-along and practice (assisted) modes. Formalise the corpus plan's assessment policy as fields on `SightSingParams`: `preview_melody` (play once first), `reference_pitch`, `guide` (`off`, `on`, `fade_after_n`), `answer_visible`, `max_plays`. |
-| `sing_and_play` | new, later | Sing one part while playing another on a MIDI keyboard, graded on the sung part. **Requires MIDI input,** which does not exist yet: add `midir` with a device setting, timestamped events, and its own latency calibration. |
-| `melodic_dictation` | extend | `prompt_audio` (a course stem or song segment) instead of synth playback; answer checked against the score. |
+| `rhythm_reading` | new | Show a rhythm score with click and count-in; the user **taps** it (space bar or an on-screen pad). Tap times are mapped to the master clock, with a one-off tap latency calibration in Settings. Grading: onset-only alignment (the existing alignment with the pitch cost removed), per-note early or late ms, tolerance scaled by tempo. Clapping or speaking through the microphone is not planned. |
+| `melodic_dictation` | extend, later | `prompt_audio` (a course stem or song segment) instead of synth playback; answer checked against the score. |
+
+**Not in the app:** breathing, SOVT and bodywork routines. The coach agent handles them directly with the user.
+
+**Deferred indefinitely:** `sing_and_play` (sing one part while playing another). It needs MIDI keyboard input, which is wanted eventually: `midir`, a device setting, timestamped events and its own latency calibration. When MIDI input arrives it also serves tapping in `rhythm_reading` and note entry in `pitch_id` and dictation.
 
 ### 4.5 Courses
 
 - **Step 1: collection pages, no new schema.**
-  - A **Courses** tab lists library collections as cards (count, level from tags, review share).
+  - A **Courses** tab lists library collections as cards (count, level from tags, progress).
   - A collection page shows the units as sub-collections, the item rows (number, title, bars, key, metre, tags, status) and filters, with preview and start.
   - Starting uses the existing library selection.
 - **Step 2: course manifests.**
@@ -542,7 +488,7 @@ These optional fields are added to `LibraryPiece`. They are all ignored by gener
   - A course item turns into a block, so `kind` + overrides become an `Exercise` with `{"library": {"ids": [id]}}`.
   - The `trainer-cli validate course` command checks that every item id resolves.
 - **Progress.**
-  - Per item: unseen, attempted, passed (block pass mark met, not one lucky attempt), or needs review. It is derived from trials by `item_id` and `course_id` (§2.6).
+  - Per item: unseen, attempted, or passed (block pass mark met, not one lucky attempt). It is derived from stored trials (§2.6).
   - Course page actions: Start next 10, Start unit, Resume.
 - **Practice page.**
   - It stays "Quick practice" with the presets.
@@ -560,19 +506,22 @@ These optional fields are added to `LibraryPiece`. They are all ignored by gener
 
 ---
 
-## 5. How the two inputs share the work
+- **Warm-ups:** the coach can queue `vocalise` blocks and course units. Breathing and bodywork stay in its conversation with the user.
 
-| Foundation | Corpus uses it for | Songs use it for |
-|---|---|---|
-| 960 PPQ | tuplets, 32nds | musical time, MIDI reductions, quantised vocal score |
-| Tempo map | fermatas, tempo changes | the beat grid |
-| Metre/key changes | 3+ pieces, books | MuScriptor metre changes |
-| Mixer channels | multi-track MIDI backing, course stems | stems, piano references, presets |
-| File decode/resample | FLAC course assets | WAV stems at the device rate |
-| Explicit expected notes | (all sung trials) | song passes, unverified notes |
-| Identity/rights/review | items, courses, export | songs, regions, verification |
-| Validator CLI | converter round-trip | package check |
-| Lyrics underlay | vocalises, solfège | lyrics (later) |
+---
+
+## 5. How the inputs share the work
+
+| Foundation | Courses and warm-ups use it for | Corpus notation uses it for | Songs (deferred) use it for |
+|---|---|---|---|
+| Mixer channels | warm-up backing tracks | chorale part mute/solo | stems, piano references |
+| 960 PPQ | — | tuplets, 32nds | musical time, quantised vocal score |
+| Tempo map | tempo ladders | fermatas, tempo changes | the beat grid |
+| Metre/key changes | — | Crowell metre changes, books | transcribed metre changes |
+| Library index | course and collection pages | 5,000+ pieces | — |
+| Validator CLI | course manifests | converter round-trip | package check |
+| Lyrics underlay | vowels, solfège | text underlay | lyrics |
+| Explicit expected notes | — | — | song passes, unverified notes |
 
 ---
 
@@ -580,112 +529,94 @@ These optional fields are added to `LibraryPiece`. They are all ignored by gener
 
 Sizes: S is a few days of work, M one to two weeks, L more.
 
-### Phase A: foundations that unblock the corpus Phase 0 (S–M)
+### Phase A: courses and warm-ups (M)
 
-- `rust-version = 1.95` (§2.10).
-- `trainer-cli validate library|course` (§2.9).
 - Library cache and index, plus a virtualised, filterable Library page (§2.8).
-- Metadata fields on `LibraryPiece` and the item page showing source, rights and review status (§4.3).
-- `item_id` / `course_id` trial columns and stats grouping (§2.6).
-- Courses tab, step 1: collection pages (§4.5).
-- Export refusal for non-redistributable items.
+- `kind` and teaching fields on `LibraryPiece`, shown before an exercise (§4.3).
+- Courses tab: collection pages first, then course manifests and per-item progress (§4.5, §2.6).
+- Practice page migration: the shipped preset courses become manifests, and the `COURSES` regex goes.
+- Mixer channels and generated multi-track backing with roles (§2.4).
+- The `vocalise` kind with tempo ladder and transposition plan, and the guided-singing fields (§4.4).
+- Course and library-search MCP tools (§4.6).
+- `trainer-cli validate library|course` (§2.9).
 
 **Exit:**
 
-- the 315 Crowell pieces load through the validator and the app;
-- they appear as a collection page;
-- a session starts from it and grades;
-- per-item attempts are visible.
+- the 315 convertible Crowell pieces load through the validator and appear as a collection page;
+- a curated stepwise-melody course runs with progress;
+- a warm-up course of vocalises runs with generated backing and steps through the singer's range;
+- the coach can read course progress and queue the next items.
 
-### Phase B: notation breadth (M–L)
+### Phase B: shared notation (M–L)
 
 - 960 PPQ with rational durations and tuplets (§2.1), with the old/new regression test.
-- Rhythm/unpitched notation, the percussion staff and `rhythm_reading` with tap and microphone-onset response (§4.2, §4.4).
-- Alto, tenor and percussion clefs.
-- Multi-part systems (one aligned system, part mute/solo).
-- Metre/key changes (§2.3).
 - Tempo map with fermatas (§2.2).
+- Metre and key changes (§2.3).
+- Rhythm and unpitched notation, the percussion staff, and `rhythm_reading` by tapping (§4.2, §4.4).
+- Alto, tenor and percussion clefs.
+- Multi-part systems: one aligned system, with part mute and solo.
 - Grace notes.
-- Lyrics/solfège underlay.
+- Lyrics and solfège underlay.
 
 **Exit:**
 
 - all 427 Crowell pieces (minus the 19 for source review) and 42/42 Smey load, render and play;
-- rhythm blocks grade onsets;
+- rhythm blocks grade tap onsets;
 - a four-part chorale can be sung from any part.
 
-### Phase C: song playback core (L)
+### Phase C: the rest of the courses (M)
 
-- Package contract, loader and `trainer-cli validate song` (§3.1).
-- Song model and storage (§3.2).
-- Decode and resample (§2.5).
-- Mixer channels (§2.4).
-- Transport at 100% speed: streaming, seek, beat-based loop, count-in, beat-grid metronome, source clock (§3.3).
-- Live targets and accuracy grading of passes, with unverified notes left out of the score (§3.5, §2.7).
-- Songs tab with the piano-roll view (§3.6).
+- Rhythm courses (Smey, the Aural Training R sections once converted).
+- Chorale, duet and canon units using the multi-part systems.
+- The remaining Trained Ear books as collections and curated cross-source courses, as the corpus build produces them.
+- Course write tools for the coach (`save_course`, `add_course_items`), once the manifest format has settled.
+- Startup and search performance checked at full corpus scale (§2.8).
 
-**Exit:**
+**Exit:** every approved item the build produces loads, and each book has a collection page; curated rhythm and chorale courses run with progress.
 
-- a pipeline package opens;
-- stems can be soloed and muted;
-- the metronome stays locked for the whole song;
-- a four-bar loop repeats 100 times with no drift;
-- live cents error and per-note pass results show against the vocal notes.
+### Deferred: songs
 
-### Phase D: practice tools and sessions (M–L)
+In this order when they are picked up:
 
-- `signalsmith-stretch` speed and target BPM, and transposition (§3.3).
-- Piano melody reference modes (full notes, onsets, phrase preview), original-singer level and ducking, and accompaniment modes including MIDI reductions (§3.4).
-- Mixer presets.
-- `song_phrase` exercise kind with the repetition and tempo ladders (§3.8).
-- Song MCP tools.
-- "Save phrase to library" (§3.9).
+1. **Song playback core:**
+   - package loader and `trainer-cli validate song` (§3.1);
+   - song model (§3.2);
+   - decode and resample (§2.5);
+   - transport at 100% speed with streaming, seek, bar loops, count-in, beat-grid metronome and one source clock (§3.3);
+   - live targets and accuracy grading (§3.5, §2.7);
+   - Songs tab (§3.6).
+2. **Practice tools:**
+   - speed (`signalsmith-stretch`) and raising or lowering the key;
+   - reference and accompaniment modes, and mixer presets (§3.4);
+   - the `song_phrase` exercise with the repetition and tempo ladders (§3.8);
+   - song MCP tools;
+   - "Save phrase to library" (§3.9).
+3. **Later:**
+   - beat-grid and vocal-note correction (§3.7);
+   - imitation grading;
+   - weak-note references and error loops;
+   - recorded stems for course items;
+   - dictation from recorded prompts;
+   - song lyrics.
 
-**Exit:**
+Each step's acceptance is in §3.3 and §8.
 
-- the pipeline's slow-practice acceptance (50–125% with everything in sync);
-- transposition moves audio, targets and names together;
-- the coach can queue a song phrase session and read per-note stats.
+### Deferred indefinitely
 
-### Phase E: courses and pedagogy (M)
-
-- Course manifests, course progress, the Practice page migration, and course MCP tools (§4.5, §4.6).
-- Pedagogy display before trials.
-- Guided-singing assessment fields.
-- `vocalise` and `protocol` kinds (§4.4).
-- Multi-track MIDI backing tracks with roles (§2.4) for warm-up courses.
-
-**Exit:** a curated starter course, rhythm or stepwise melody, runs with progress, and a 12-routine warm-up course runs with generated backing and completion-only protocol steps.
-
-### Phase F: editing, imitation and the rest (L)
-
-- Beat-grid correction and the vocal-note editor with verify-phrase (§3.7), plus the overrides file.
-- Imitation grading against the singer's F0 (§3.5).
-- Weak-notes-only reference and automatic error loops (§3.4, §3.8).
-- Recorded stems for course items (§2.5, corpus §4.3B).
-- Dictation from recorded prompts (§4.4, §3.9).
-- MIDI input and `sing_and_play`.
-- Lyrics display for songs.
-- Corrected vocal MIDI and MusicXML export.
-
-**Recommended order:** A → B → C → D → E → F.
-
-- A is small and gets real music into the app immediately.
-- B's grid and tempo map are prerequisites for C's musical time anyway.
-- C and D are the song track.
-- E can move ahead of C if courses matter more to you than songs.
-- C does not depend on B's rhythm and clef work, only on §2.1 and §2.2. A and the §2.1/§2.2 part of B could therefore run first and the songs track start before the rest of B.
+- MIDI keyboard input and `sing_and_play` (§4.4).
 
 ---
 
-## 7. Decisions needed
+## 7. Decisions (resolved 24 October 2026)
 
-1. **Songs or courses first** after Phase A/B: Phase C (song playback) or Phase E (courses)?
-2. **Rhythm response** for the first release: tap only (fast and reliable), or also clapping and speaking through the microphone (needs the onset detector)? The corpus plan's decision 3.
-3. **Stretch backend:** `signalsmith-stretch` (MIT, good from 0.75× to 1.5×) is assumed. Rubber Band is GPL, or commercial for closed-source distribution.
-4. **Rights posture** (the corpus plan's decision 1): it decides whether export refusal is a warning or a hard block, and whether personal-only items may ever leave the machine.
-5. **Where packages live:** the app's `songs` folder (copied in), or registered external folders (the pipeline's output folder used in place)? The plan assumes a watched folder that can also be pointed at the pipeline's output directory.
-6. **Song grading default:** absolute octave, or `any_octave` by default for songs? A singer in the other register will usually sing an octave away from the original lead.
+1. **Order:** courses and warm-ups, then shared notation, then the rest of the courses. Songs deferred.
+2. **Rhythm response:** tapping only.
+3. **Stretch backend:** `signalsmith-stretch`.
+4. **Rights:** personal use; the app manages no identity or rights.
+5. **Song packages:** the separately built pipeline writes them straight into the app's songs folder.
+6. **Song keys:** songs stay in their recorded keys, graded absolutely; the user can raise or lower the key.
+7. **Breathing and bodywork:** handled by the coach, not the app.
+8. **MIDI input:** wanted eventually; `sing_and_play` deferred indefinitely.
 
 ---
 
@@ -700,4 +631,6 @@ Sizes: S is a few days of work, M one to two weeks, L more.
 - **Live target:** a synthetic package with a known vocal line, sung by the test tone generator at known offsets, reports the right `expected_note` and cents at every 10 ms.
 - **Grading:** unverified notes are excluded from accuracy; imitation and accuracy scores stay separate.
 - **Validator:** Smey, Crowell fixtures and a synthetic song package pass; malformed fixtures fail with the right reason.
-- **Rights:** export of a `redistribution: false` item is refused.
+- **Courses:** a manifest whose items include an unknown id fails validation with the item named; per-item progress matches a fixture set of stored trials.
+- **Vocalise:** a tempo ladder advances only after a passing rep; the transposition plan never leaves the singer's comfortable range.
+- **Tapping:** synthetic tap streams at known offsets report the right early/late ms after the tap calibration is applied.
