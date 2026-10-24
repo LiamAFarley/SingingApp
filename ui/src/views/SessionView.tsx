@@ -6,7 +6,7 @@ import type { RunnerState } from "../bindings/RunnerState";
 import type { Score } from "../bindings/Score";
 import type { ScoreNote } from "../bindings/ScoreNote";
 import type { TrialView } from "../bindings/TrialView";
-import { ChoiceGrid, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
+import { ChoiceGrid, DegreePad, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
 import { PitchLane } from "../components/PitchLane";
 import { offerKey, useKeyOwner } from "../keyboard";
 import { live, useAnimationFrame } from "../live";
@@ -212,6 +212,8 @@ function KindHelp({ kind }: { kind: string | null }) {
     melodic_dictation: "Listen, then write the melody on the staff. 2–6 choose the length, A–G enter notes in the key, Enter checks.",
     anchor_song: "Sing the first note of each song as it sounds on the original recording, or say whether the opening is in its original key.",
     incidental_pairing: "A tone plays and a colour appears. Press the colour as fast as you can with the number keys. Nothing is asked about the tone.",
+    scale_degree_id: "A cadence sets the key, then one note plays. Name its scale degree (number keys 1–7). Afterwards the note walks to the tonic so you hear where it wants to go.",
+    interval_comparison: "Two intervals play. Is the first or the second larger, or are they the same? Number keys pick answers.",
   };
   return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
 }
@@ -267,6 +269,7 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
       {trial.layout === "notes" && <NotesPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "list" && <ChoiceGrid choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "colors" && <ColorTask trial={trial} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "degrees" && <DegreePad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       <Result runner={runner} />
       <div className="controls">
         {phase === "answering" && trial.can_replay && (
@@ -282,6 +285,11 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
         {phase === "feedback" && fb?.can_show_answer && (
           <button className="btn" onClick={() => command({ kind: "show_answer" })}>
             Play again <span className="kbd">A</span>
+          </button>
+        )}
+        {phase === "feedback" && fb?.can_listen && (
+          <button className="btn" onClick={() => command({ kind: "listen" })}>
+            {trial.kind === "scale_degree_id" ? "Resolve to the tonic" : "Listen"} <span className="kbd">L</span>
           </button>
         )}
         {phase === "feedback" && <NextButton auto={fb?.auto_advance_ms ?? null} />}

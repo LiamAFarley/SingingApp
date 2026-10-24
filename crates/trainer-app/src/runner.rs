@@ -433,11 +433,14 @@ impl<'a> SessionRun<'a> {
         let onset_frame = at;
         let onset = Instant::now()
             + Duration::from_secs_f64(onset_frame.saturating_sub(engine.now()) as f64 / sr);
-        // With a visual cue (incidental pairing) response times and the deadline count from it.
+        // Answers open at `answer_after_ms` (after a key-setting cadence). Response times and the
+        // deadline count from there, or from a visual cue (incidental pairing) when later.
+        let answer_from = onset + Duration::from_secs_f64(t.answer_after_ms.unwrap_or(0.0).max(0.0) / 1000.0);
         let cue_delay = Duration::from_millis(t.cue.as_ref().map(|c| c.delay_ms as u64).unwrap_or(0));
-        let rt_from = onset + cue_delay;
+        let rt_from = answer_from.max(onset + cue_delay);
         let layout = match t.exercise {
             ExerciseKind::IncidentalPairing => ChoiceLayout::Colors,
+            ExerciseKind::ScaleDegreeId => ChoiceLayout::Degrees,
             ExerciseKind::PitchId | ExerciseKind::TonalCenterId
                 if t.choices.iter().all(|c| {
                     c.id.parse::<trainer_core::theory::PitchClass>().is_ok() || c.id == "other"
@@ -454,7 +457,8 @@ impl<'a> SessionRun<'a> {
         view.deadline_ms = t.deadline_ms;
         view.can_replay = t.deadline_ms.is_none();
         view.can_reference = t.reference.is_some();
-        view.response_start_s = Some(secs(engine, onset_frame));
+        // The countdown starts where response times do.
+        view.response_start_s = Some(secs(engine, onset_frame) + rt_from.saturating_duration_since(onset).as_secs_f64());
         if let Some(c) = &t.cue {
             view.label = Some(c.color.clone());
             view.label_at_s = Some(secs(engine, onset_frame) + c.delay_ms as f64 / 1000.0);
@@ -472,12 +476,12 @@ impl<'a> SessionRun<'a> {
         let mut replays = 0u32;
         let (answer, rt) = loop {
             let now_i = Instant::now();
-            if !answering && now_i >= onset {
+            if !answering && now_i >= answer_from {
                 answering = true;
                 self.set(|st| st.phase = Phase::Answering);
             }
             let wake = if !answering {
-                Some(onset.saturating_duration_since(now_i))
+                Some(answer_from.saturating_duration_since(now_i))
             } else {
                 deadline.map(|d| d.saturating_duration_since(now_i))
             };
@@ -1003,7 +1007,10 @@ impl<'a> SessionRun<'a> {
             trace,
             can_retry: is_sung || is_dictation,
             can_sing_along: is_sung,
-            can_listen: is_sung || is_dictation || (matches!(trial, TrialSpec::SingPitch(_)) && show),
+            can_listen: is_sung
+                || is_dictation
+                || (matches!(trial, TrialSpec::SingPitch(_)) && show)
+                || matches!(trial, TrialSpec::Identify(t) if show && t.after_answer.is_some()),
             can_show_answer: is_identify && show,
             can_play_answer: extras.capture.is_some() || (is_dictation && !written.is_empty()),
             auto_advance_ms: auto_ms,
@@ -1013,12 +1020,19 @@ impl<'a> SessionRun<'a> {
             st.phase = Phase::Feedback;
             st.feedback = Some(fv);
         });
-        // Reveal the target of a no-reference singing trial right away when results are shown.
+        // Reveal the target of a no-reference singing trial right away when results are shown,
+        // and play what follows an identification answer (a degree resolving to the tonic).
         if let TrialSpec::SingPitch(t) = trial {
             if show {
                 if let Some(r) = &t.reveal {
                     engine.play_now(Arc::new(renderer.render_events(r)), 1.0, Bus::Prompt)?;
                 }
+            }
+        }
+        if let TrialSpec::Identify(t) = trial {
+            if let (true, Some(after)) = (show, &t.after_answer) {
+                engine.stop_bus(Bus::Prompt);
+                engine.play(Arc::new(renderer.render_events(after)), engine.frame_after_ms(250.0), 1.0, Bus::Prompt)?;
             }
         }
         let mut interacted = false;
@@ -1061,6 +1075,12 @@ impl<'a> SessionRun<'a> {
                             engine.stop_bus(Bus::Prompt);
                             engine.stop_bus(Bus::Guide);
                             engine.play_now(Arc::new(dictation_audio(&renderer, &t.playback)), 1.0, Bus::Prompt)?;
+                        }
+                        TrialSpec::Identify(t) => {
+                            if let Some(after) = &t.after_answer {
+                                engine.stop_bus(Bus::Prompt);
+                                engine.play_now(Arc::new(renderer.render_events(after)), 1.0, Bus::Prompt)?;
+                            }
                         }
                         _ => {}
                     }

@@ -35,6 +35,8 @@ Rules:\n\
 - Fade feedback as accuracy stabilises: continuous -> after_trial -> none. Test transfer (new octaves, timbres, keys) before \
 calling something learned, and retest after gaps for retention.\n\
 - pitch_pairing, incidental_pairing and other exposure are not evidence of absolute pitch.\n\
+- Graded courses are built-in presets: ap_progressive_01–10 and degrees_01–08 (scale degrees in the style of Functional Ear \
+Trainer). Suggest the next stage after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated or written by you \
 ({\"given\": [{key, time, notes: [{note, beats}]}]}). Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \

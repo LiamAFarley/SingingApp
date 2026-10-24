@@ -73,6 +73,8 @@ pub fn generate_block(
         Exercise::MelodicDictation(p) => gen_dictation(p, n, &mut rng, ctx),
         Exercise::AnchorSong(p) => gen_anchor_song(p, n, &mut rng, ctx),
         Exercise::IncidentalPairing(p) => gen_incidental(p, n, &mut rng, ctx),
+        Exercise::ScaleDegreeId(p) => gen_scale_degree(p, n, &mut rng),
+        Exercise::IntervalComparison(p) => gen_interval_comparison(p, n, &mut rng),
     }
 }
 
@@ -285,6 +287,8 @@ fn gen_pitch_id(
         };
         let holdout = ctx.pools.is_holdout(&timbre, octave);
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::PitchId,
             prompt: match p.answer {
@@ -465,6 +469,8 @@ fn gen_anchor_song(
                     e.midi += shift;
                 }
                 out.push(TrialSpec::Identify(IdentifyTrial {
+                    answer_after_ms: None,
+                    after_answer: None,
                     cue: None,
                     exercise: ExerciseKind::AnchorSong,
                     prompt: format!("“{}”: original key or shifted?", a.title),
@@ -532,6 +538,8 @@ fn gen_incidental(
         let (timbre, octave) = combos[combo_bag.draw(rng).unwrap()].clone();
         let midi = tone.in_octave(octave);
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             exercise: ExerciseKind::IncidentalPairing,
             prompt: "Press the colour".into(),
             events: vec![ev(midi, 0.0, p.duration_ms as f64, &timbre, -6.0)],
@@ -615,6 +623,8 @@ fn gen_tonal_center(
         }
         events.extend(cadence_events(tonic, mode, p.tempo_bpm, &timbre, start));
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::TonalCenterId,
             prompt: if p.reference {
@@ -665,47 +675,359 @@ fn gen_interval_id(
             .collect()
     };
     let note = p.note_ms.max(200) as f64;
+    let keys = if p.in_key {
+        key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?
+    } else {
+        Vec::new()
+    };
+    let beat = 60_000.0 / 100.0;
+    let mut prev_key = None;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
-    for _ in 0..n {
+    for i in 0..n {
         let iv: Interval = bag.draw(rng).unwrap();
         let dir = *rng.choose(&p.directions).unwrap();
-        let low = pick_note(range, &mut last, rng);
-        let high = low + iv.semitones();
         let timbre = pick_timbre(&p.timbres, rng)?;
-        let events = match dir {
-            IntervalDirection::Ascending => vec![
-                ev(low, 0.0, note, &timbre, -6.0),
-                ev(high, note, note, &timbre, -6.0),
-            ],
-            IntervalDirection::Descending => vec![
-                ev(high, 0.0, note, &timbre, -6.0),
-                ev(low, note, note, &timbre, -6.0),
-            ],
-            IntervalDirection::Harmonic => {
-                vec![
-                    ev(low, 0.0, note * 1.6, &timbre, -8.0),
-                    ev(high, 0.0, note * 1.6, &timbre, -8.0),
-                ]
+        // In a key: a cadence (when due), then two notes of the scale.
+        let mut lead = Vec::new();
+        let mut t0 = 0.0;
+        let mut key_info = serde_json::Value::Null;
+        let low = if p.in_key {
+            let (tonic, mode) = keys[i];
+            let r = cadence_chords(tonic, mode)[0].1[0];
+            let steps = mode_steps(mode);
+            let in_scale = |m: i32| steps.contains(&(m - r).rem_euclid(12));
+            let s = iv.semitones();
+            let cands: Vec<i32> = (r - 5..=r + 12)
+                .filter(|m| in_scale(*m) && in_scale(*m + s) && *m + s <= r + 19)
+                .collect();
+            let Some(&low) = rng.choose(&cands) else {
+                return err(format!(
+                    "{} does not occur between two notes of a {} scale",
+                    iv.long_name().to_lowercase(),
+                    if mode == KeyMode::Major { "major" } else { "natural minor" }
+                ));
+            };
+            let cadence = p.cadence_each_trial || prev_key != Some((tonic, mode)) || i % 8 == 0;
+            prev_key = Some((tonic, mode));
+            if cadence {
+                lead = cadence_events(tonic, mode, 100.0, &timbre, 0.0);
+                t0 = 6.0 * beat;
             }
+            key_info = json!({
+                "key": tonic.name(),
+                "mode": mode,
+                "degrees": format!("{}-{}", DEGREE_IDS[(low - r).rem_euclid(12) as usize], DEGREE_IDS[(low + s - r).rem_euclid(12) as usize]),
+                "cadence": cadence,
+            });
+            low
+        } else {
+            pick_note(range, &mut last, rng)
         };
+        let high = low + iv.semitones();
+        let mut events = lead;
+        events.extend(interval_events(low, high, dir, note, t0, &timbre));
+        let mut stimulus = json!({
+            "interval": iv.id(),
+            "semitones": iv.semitones(),
+            "direction": dir,
+            "low_midi": low,
+            "timbre": timbre,
+            "in_key": p.in_key,
+        });
+        if let serde_json::Value::Object(k) = key_info {
+            stimulus.as_object_mut().unwrap().extend(k);
+        }
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: (t0 > 0.0).then_some(t0),
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::IntervalId,
-            prompt: "Which interval?".into(),
+            prompt: if p.in_key { "Which interval? (in the key)".into() } else { "Which interval?".into() },
             events,
             mask_before: Mask::None,
             choices: choices.clone(),
             correct: iv.id().into(),
             deadline_ms: None,
             reference: None,
+            stimulus,
+        }));
+    }
+    Ok(out)
+}
+
+/// Two notes, one after the other or together, starting at `at` ms.
+fn interval_events(low: i32, high: i32, dir: IntervalDirection, note: f64, at: f64, timbre: &str) -> Vec<SoundEvent> {
+    match dir {
+        IntervalDirection::Ascending => vec![ev(low, at, note, timbre, -6.0), ev(high, at + note, note, timbre, -6.0)],
+        IntervalDirection::Descending => vec![ev(high, at, note, timbre, -6.0), ev(low, at + note, note, timbre, -6.0)],
+        IntervalDirection::Harmonic => vec![ev(low, at, note * 1.6, timbre, -8.0), ev(high, at, note * 1.6, timbre, -8.0)],
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Keys, scale degrees and interval comparison
+// ---------------------------------------------------------------------------------------------
+
+/// Scale-degree ids numbered against the major scale, by semitones above the tonic.
+pub const DEGREE_IDS: [&str; 12] = ["1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"];
+const DEGREE_NUMBERS: [&str; 12] = ["1", "♭2", "2", "♭3", "3", "4", "♯4", "5", "♭6", "6", "♭7", "7"];
+const DEGREE_SOLFEGE: [&str; 12] = ["do", "ra", "re", "me", "mi", "fa", "fi", "sol", "le", "la", "te", "ti"];
+
+fn mode_steps(mode: KeyMode) -> [i32; 7] {
+    match mode {
+        KeyMode::Major => [0, 2, 4, 5, 7, 9, 11],
+        KeyMode::Minor => [0, 2, 3, 5, 7, 8, 10],
+    }
+}
+
+/// Semitones above the tonic for a degree id such as "3", "b6" or "#4".
+pub fn parse_degree(id: &str) -> Option<i32> {
+    let t = id.trim();
+    let mut acc: i32 = 0;
+    let mut rest = t;
+    for (i, c) in t.char_indices() {
+        match c {
+            'b' | '♭' => acc -= 1,
+            '#' | '♯' => acc += 1,
+            _ => {
+                rest = &t[i..];
+                break;
+            }
+        }
+    }
+    let n: usize = rest.parse().ok()?;
+    if !(1..=7).contains(&n) || acc.abs() > 1 {
+        return None;
+    }
+    Some(([0, 2, 4, 5, 7, 9, 11][n - 1] + acc).rem_euclid(12))
+}
+
+/// The key of every trial: one for the block, or a new one per trial.
+fn key_sequence(
+    keys: &ClassSet,
+    modes: &[KeyMode],
+    change: KeyChange,
+    n: usize,
+    rng: &mut Rng,
+) -> Result<Vec<(PitchClass, KeyMode)>, GenError> {
+    let tonics = keys.classes();
+    if tonics.is_empty() {
+        return err("keys must not be empty");
+    }
+    let modes: Vec<KeyMode> = if modes.is_empty() { vec![KeyMode::Major] } else { modes.to_vec() };
+    Ok(match change {
+        KeyChange::PerBlock => {
+            let k = (*rng.choose(&tonics).unwrap(), *rng.choose(&modes).unwrap());
+            vec![k; n]
+        }
+        KeyChange::PerTrial => {
+            let mut bag = BalancedBag::new(tonics);
+            (0..n)
+                .map(|_| (bag.draw(rng).unwrap(), *rng.choose(&modes).unwrap()))
+                .collect()
+        }
+    })
+}
+
+/// A note followed by the scale steps to the tonic (up, down or to the nearer one).
+pub fn route_to_tonic(note: i32, tonic_pc: i32, mode: KeyMode, resolution: Resolution) -> Vec<i32> {
+    let steps = mode_steps(mode);
+    let in_scale = |m: i32| steps.contains(&(m - tonic_pc).rem_euclid(12));
+    let rel = (note - tonic_pc).rem_euclid(12);
+    let up = match resolution {
+        Resolution::None => return vec![note],
+        Resolution::Ascending => true,
+        Resolution::Descending => false,
+        // 2, 3 and 4 (and their alterations) step down; ♯4 and above step up.
+        Resolution::Nearest => rel > 5,
+    };
+    let mut route = vec![note];
+    if rel == 0 {
+        return route;
+    }
+    let mut cur = note;
+    for _ in 0..12 {
+        cur = if up {
+            (cur + 1..cur + 13).find(|m| in_scale(*m)).unwrap()
+        } else {
+            (cur - 12..cur).rev().find(|m| in_scale(*m)).unwrap()
+        };
+        route.push(cur);
+        if (cur - tonic_pc).rem_euclid(12) == 0 {
+            break;
+        }
+    }
+    route
+}
+
+fn gen_scale_degree(p: &ScaleDegreeParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialSpec>, GenError> {
+    if !(40.0..=220.0).contains(&p.tempo_bpm) {
+        return err("tempo_bpm must be 40–220");
+    }
+    if p.octaves.is_empty() || p.octaves.iter().any(|o| o.abs() > 2) {
+        return err("octaves must be between -2 and 2");
+    }
+    let explicit: Option<Vec<i32>> = if p.degrees.is_empty() {
+        None
+    } else {
+        let mut v = Vec::new();
+        for d in &p.degrees {
+            match parse_degree(d) {
+                Some(s) if !v.contains(&s) => v.push(s),
+                Some(_) => {}
+                None => return err(format!("unknown degree `{d}` (use 1–7 with an optional b or #, e.g. b3, #4)")),
+            }
+        }
+        v.sort();
+        Some(v)
+    };
+    let keys = key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?;
+    let beat = 60_000.0 / p.tempo_bpm as f64;
+    let step = beat * 0.6;
+    let mut bags: Vec<(KeyMode, BalancedBag<i32>)> = Vec::new();
+    let mut prev_key = None;
+    let mut out = Vec::with_capacity(n);
+    for (i, (tonic, mode)) in keys.into_iter().enumerate() {
+        let degrees: Vec<i32> = explicit.clone().unwrap_or_else(|| mode_steps(mode).to_vec());
+        if degrees.len() < 2 {
+            return err("degrees needs at least two degrees");
+        }
+        let bag = match bags.iter().position(|(m, _)| *m == mode) {
+            Some(k) => &mut bags[k].1,
+            None => {
+                bags.push((mode, BalancedBag::new(degrees.clone())));
+                &mut bags.last_mut().unwrap().1
+            }
+        };
+        let semis = bag.draw(rng).unwrap();
+        let timbre = pick_timbre(&p.timbres, rng)?;
+        let r = cadence_chords(tonic, mode)[0].1[0];
+        let octave = *rng.choose(&p.octaves).unwrap();
+        let note = r + semis + 12 * octave;
+        let cadence = p.cadence_each_trial || prev_key != Some((tonic, mode)) || i % 8 == 0;
+        prev_key = Some((tonic, mode));
+        let mut events = if cadence {
+            cadence_events(tonic, mode, p.tempo_bpm, &timbre, 0.0)
+        } else {
+            Vec::new()
+        };
+        let t0 = if cadence { 6.0 * beat } else { 0.0 };
+        events.push(ev(note, t0, beat * 1.5, &timbre, -6.0));
+        let route = route_to_tonic(note, tonic.index() as i32, mode, p.resolution);
+        let walk = |from: usize, start: f64| -> Vec<SoundEvent> {
+            route[from..]
+                .iter()
+                .enumerate()
+                .map(|(k, m)| {
+                    let last = from + k + 1 == route.len();
+                    ev(*m, start + k as f64 * step, if last { step * 2.5 } else { step * 0.95 }, &timbre, -6.0)
+                })
+                .collect()
+        };
+        if p.resolve_before_answer && route.len() > 1 {
+            events.extend(walk(1, t0 + beat * 1.5));
+        }
+        let label = |s: i32| match p.labels {
+            DegreeLabels::Numbers => DEGREE_NUMBERS[s as usize],
+            DegreeLabels::Solfege => DEGREE_SOLFEGE[s as usize],
+        };
+        out.push(TrialSpec::Identify(IdentifyTrial {
+            exercise: ExerciseKind::ScaleDegreeId,
+            prompt: format!("Which degree? ({} key)", if mode == KeyMode::Major { "major" } else { "minor" }),
+            events,
+            mask_before: Mask::None,
+            choices: degrees
+                .iter()
+                .map(|s| Choice { id: DEGREE_IDS[*s as usize].into(), label: label(*s).into() })
+                .collect(),
+            correct: DEGREE_IDS[semis as usize].into(),
+            deadline_ms: None,
+            reference: None,
             stimulus: json!({
-                "interval": iv.id(),
-                "semitones": iv.semitones(),
-                "direction": dir,
-                "low_midi": low,
+                "key": tonic.name(),
+                "mode": mode,
+                "degree": DEGREE_IDS[semis as usize],
+                "semitones": semis,
+                "midi": note,
+                "octave": octave,
+                "cadence": cadence,
+                "resolution": p.resolution,
                 "timbre": timbre,
             }),
+            cue: None,
+            answer_after_ms: Some(t0),
+            after_answer: (p.resolution != Resolution::None).then(|| walk(0, 0.0)),
+        }));
+    }
+    Ok(out)
+}
+
+fn gen_interval_comparison(
+    p: &IntervalComparisonParams,
+    n: usize,
+    rng: &mut Rng,
+) -> Result<Vec<TrialSpec>, GenError> {
+    if p.intervals.is_empty() || p.directions.is_empty() || p.differences.is_empty() {
+        return err("intervals, directions and differences must not be empty");
+    }
+    if p.differences.iter().any(|d| *d > 6) {
+        return err("differences must be 0–6 semitones");
+    }
+    let range = p.root_range.unwrap_or(NoteRange::new(48, 72));
+    let note = p.note_ms.max(200) as f64;
+    let same = p.differences.contains(&0);
+    let mut choices = vec![
+        Choice { id: "first".into(), label: "First is larger".into() },
+        Choice { id: "second".into(), label: "Second is larger".into() },
+    ];
+    if same {
+        choices.push(Choice { id: "same".into(), label: "Same".into() });
+    }
+    let mut bag = BalancedBag::new(p.intervals.clone());
+    let mut diffs = BalancedBag::new(p.differences.clone());
+    let mut last = None;
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let a = bag.draw(rng).unwrap().semitones();
+        let d = diffs.draw(rng).unwrap() as i32;
+        let options: Vec<i32> = [a + d, a - d].into_iter().filter(|b| (1..=24).contains(b)).collect();
+        let b = *rng.choose(&options).unwrap_or(&a);
+        let (first, second) = if rng.chance(0.5) { (a, b) } else { (b, a) };
+        let dir = *rng.choose(&p.directions).unwrap();
+        let timbre = pick_timbre(&p.timbres, rng)?;
+        let r1 = pick_note(range, &mut last, rng);
+        let r2 = pick_note(range, &mut last, rng);
+        let span = if dir == IntervalDirection::Harmonic { note * 1.6 } else { note * 2.0 };
+        let mut events = interval_events(r1, r1 + first, dir, note, 0.0, &timbre);
+        events.extend(interval_events(r2, r2 + second, dir, note, span + 600.0, &timbre));
+        let name = |s: i32| Interval::from_semitones(s).map(|i| i.id()).unwrap_or("?");
+        let correct = if first == second {
+            "same"
+        } else if first > second {
+            "first"
+        } else {
+            "second"
+        };
+        out.push(TrialSpec::Identify(IdentifyTrial {
+            exercise: ExerciseKind::IntervalComparison,
+            prompt: "Which interval is larger?".into(),
+            events,
+            mask_before: Mask::None,
+            choices: choices.clone(),
+            correct: correct.into(),
+            deadline_ms: None,
+            reference: None,
+            stimulus: json!({
+                "first": name(first),
+                "second": name(second),
+                "difference": (first - second).abs(),
+                "direction": dir,
+                "timbre": timbre,
+            }),
+            cue: None,
+            answer_after_ms: Some(span + 600.0),
+            after_answer: None,
         }));
     }
     Ok(out)
@@ -792,6 +1114,8 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             q.id().to_string()
         };
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::ChordId,
             prompt: if p.answer_inversion {
@@ -869,6 +1193,8 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             })
             .collect();
         out.push(TrialSpec::Identify(IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::ScaleId,
             prompt: "Which scale?".into(),
@@ -1827,5 +2153,100 @@ mod tests {
             }
         }
         assert!((8..=35).contains(&mismatched), "{mismatched} mismatched");
+    }
+
+    #[test]
+    fn degrees_parse_and_routes_walk_to_the_tonic() {
+        assert_eq!(parse_degree("1"), Some(0));
+        assert_eq!(parse_degree("b3"), Some(3));
+        assert_eq!(parse_degree("♯4"), Some(6));
+        assert_eq!(parse_degree("7"), Some(11));
+        assert_eq!(parse_degree("8"), None);
+        assert_eq!(parse_degree("bb3"), None);
+        // C major, from C4 (60): 3 goes down, 6 goes up, 4 down, 5 up.
+        assert_eq!(route_to_tonic(64, 0, KeyMode::Major, Resolution::Nearest), [64, 62, 60]);
+        assert_eq!(route_to_tonic(69, 0, KeyMode::Major, Resolution::Nearest), [69, 71, 72]);
+        assert_eq!(route_to_tonic(65, 0, KeyMode::Major, Resolution::Nearest), [65, 64, 62, 60]);
+        assert_eq!(route_to_tonic(67, 0, KeyMode::Major, Resolution::Nearest), [67, 69, 71, 72]);
+        assert_eq!(route_to_tonic(64, 0, KeyMode::Major, Resolution::Ascending), [64, 65, 67, 69, 71, 72]);
+        assert_eq!(route_to_tonic(69, 0, KeyMode::Major, Resolution::Descending), [69, 67, 65, 64, 62, 60]);
+        assert_eq!(route_to_tonic(60, 0, KeyMode::Major, Resolution::Nearest), [60]);
+        // Chromatic ♯4 steps up into 5 and on; A minor ♭6 steps up through ♭7.
+        assert_eq!(route_to_tonic(66, 0, KeyMode::Major, Resolution::Nearest), [66, 67, 69, 71, 72]);
+        assert_eq!(route_to_tonic(65, 9, KeyMode::Minor, Resolution::Nearest), [65, 67, 69]);
+    }
+
+    #[test]
+    fn scale_degree_trials_follow_the_key_and_resolve() {
+        let b = block(r#"{"type": "scale_degree_id", "count": 70, "params": {"degrees": ["1", "2", "3"]}}"#);
+        let trials = generate_block(&b, 4, &GenContext::default()).unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for (i, t) in trials.iter().enumerate() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert_eq!(t.choices.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(), ["1", "2", "3"]);
+            let note = t.events.last().unwrap().midi;
+            let semis = parse_degree(&t.correct).unwrap();
+            assert_eq!((note - 0).rem_euclid(12), semis, "key of C");
+            // A cadence (16 notes) before every question by default.
+            assert_eq!(t.events.len(), 17, "trial {i}");
+            assert_eq!(t.answer_after_ms, Some(6.0 * 600.0));
+            let after = t.after_answer.as_ref().unwrap();
+            assert_eq!(after[0].midi, note);
+            assert_eq!(after.last().unwrap().midi.rem_euclid(12), 0);
+            seen.insert(t.correct.clone());
+        }
+        assert_eq!(seen.len(), 3);
+        // A new key per question, minor labels in solfege, the cadence only when due.
+        let b = block(r#"{"type": "scale_degree_id", "count": 12, "params": {"keys": "all", "key_change": "per_trial", "modes": ["minor"], "labels": "solfege", "cadence_each_trial": false}}"#);
+        let trials = generate_block(&b, 5, &GenContext::default()).unwrap();
+        let TrialSpec::Identify(t) = &trials[0] else { panic!() };
+        assert_eq!(t.choices.iter().map(|c| c.label.as_str()).collect::<Vec<_>>(), ["do", "re", "me", "fa", "sol", "le", "te"]);
+        let keys: std::collections::HashSet<_> = trials.iter().map(|t| t.stimulus()["key"].clone()).collect();
+        assert!(keys.len() > 6);
+        assert!(generate_block(&block(r#"{"type": "scale_degree_id", "params": {"degrees": ["9"]}}"#), 1, &GenContext::default()).is_err());
+    }
+
+    #[test]
+    fn intervals_in_a_key_stay_diatonic() {
+        let b = block(r#"{"type": "interval_id", "count": 60, "params": {"in_key": true, "keys": ["D"], "intervals": ["m2", "M2", "m3", "M3", "P4", "TT", "P5", "m6", "M6", "m7", "M7", "P8"]}}"#);
+        let trials = generate_block(&b, 6, &GenContext::default()).unwrap();
+        let d_major = [2, 4, 6, 7, 9, 11, 1];
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert_eq!(t.stimulus["key"], "D");
+            let notes: Vec<i32> = t.events.iter().skip(16).map(|e| e.midi).collect();
+            assert_eq!(notes.len(), 2);
+            for m in &notes {
+                assert!(d_major.contains(&m.rem_euclid(12)), "{m} not in D major");
+            }
+            assert!(t.answer_after_ms.is_some());
+        }
+        let minor_tt = block(r#"{"type": "interval_id", "count": 4, "params": {"in_key": true, "modes": ["minor"], "intervals": ["TT"]}}"#);
+        assert!(generate_block(&minor_tt, 1, &GenContext::default()).is_ok());
+        // Free-standing intervals have no cadence.
+        let free = block(r#"{"type": "interval_id", "count": 4}"#);
+        let TrialSpec::Identify(t) = &generate_block(&free, 1, &GenContext::default()).unwrap()[0] else { panic!() };
+        assert_eq!(t.events.len(), 2);
+        assert!(t.answer_after_ms.is_none());
+    }
+
+    #[test]
+    fn interval_comparison_answers_match_the_sizes() {
+        let b = block(r#"{"type": "interval_comparison", "count": 80}"#);
+        let trials = generate_block(&b, 8, &GenContext::default()).unwrap();
+        let mut answers = std::collections::HashMap::new();
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            let size = |k: &str| Interval::ALL.iter().find(|i| i.id() == t.stimulus[k]).unwrap().semitones();
+            let (a, b) = (size("first"), size("second"));
+            let expected = if a == b { "same" } else if a > b { "first" } else { "second" };
+            assert_eq!(t.correct, expected);
+            assert!((a - b).abs() <= 2);
+            *answers.entry(t.correct.clone()).or_insert(0) += 1;
+        }
+        assert_eq!(answers.len(), 3);
+        let no_same = block(r#"{"type": "interval_comparison", "count": 10, "params": {"differences": [1]}}"#);
+        let TrialSpec::Identify(t) = &generate_block(&no_same, 1, &GenContext::default()).unwrap()[0] else { panic!() };
+        assert_eq!(t.choices.len(), 2);
     }
 }

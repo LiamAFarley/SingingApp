@@ -1,0 +1,11 @@
+{
+  "title": "Intervals in a key",
+  "blocks": [
+    {
+      "type": "interval_id",
+      "title": "Melodic intervals in C major",
+      "count": 30,
+      "params": { "in_key": true, "directions": ["ascending", "descending"] }
+    }
+  ]
+}

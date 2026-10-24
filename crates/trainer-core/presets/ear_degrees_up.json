@@ -1,0 +1,11 @@
+{
+  "title": "Scale degrees: walk up to the tonic",
+  "blocks": [
+    {
+      "type": "scale_degree_id",
+      "title": "Seven degrees in C major, resolving upward",
+      "count": 30,
+      "params": { "resolution": "ascending", "octaves": [-1, 0] }
+    }
+  ]
+}

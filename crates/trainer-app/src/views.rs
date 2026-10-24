@@ -57,6 +57,8 @@ pub enum ChoiceLayout {
     List,
     /// Colour swatches (incidental pairing).
     Colors,
+    /// Scale degrees in a row, in pitch order (number keys pick the degree with that number).
+    Degrees,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

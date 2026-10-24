@@ -8,7 +8,8 @@ use serde_json::{Value, json};
 use ts_rs::TS;
 
 use crate::schema::{
-    AnchorSongParams, ChordIdParams, DictationParams, ExerciseKind, IncidentalPairingParams, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
+    AnchorSongParams, ChordIdParams, DictationParams, ExerciseKind, IncidentalPairingParams,
+    IntervalComparisonParams, ScaleDegreeParams, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
     PitchPairingParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams,
     SustainParams, TonalCenterIdParams,
 };
@@ -369,7 +370,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::IntervalId,
-            "Two notes (ascending, descending or together); name the interval.",
+            "Two notes (ascending, descending or together); name the interval. Free-standing on random roots by default; in_key=true plays a cadence first and takes both notes from the key's scale (diatonic intervals, e.g. 3-6 in D major), with keys/modes/key_change (per_block or per_trial) and cadence_each_trial.",
             schema_of::<IntervalIdParams>(),
             json!({"type": "interval_id", "count": 30, "params": {"intervals": ["m6", "M6", "P5"], "directions": ["descending"]}}),
         ),
@@ -432,6 +433,18 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Incidental pairing: a colour task in which each colour always comes with the same pitch class (fixed colours: C red, C# orange, D yellow, D# olive, E green, F teal, F# sky, G blue, G# indigo, A purple, A# pink, B brown). The user presses the colour; the tone is never mentioned. Exposure only, never evidence of absolute pitch; transfer is measured with pitch_id. mismatch_rate trials pair a colour with another class: slower responses on those (get_stats grouped by stimulus.matched, field rt) suggest the pairing is being learnt.",
             schema_of::<IncidentalPairingParams>(),
             json!({"type": "incidental_pairing", "count": 60, "params": {"classes": ["C", "E", "G#", "D"]}}),
+        ),
+        entry(
+            ExerciseKind::ScaleDegreeId,
+            "Scale degrees, as in Functional Ear Trainer: a cadence sets the key, one note plays, the user names its degree (numbers against the major scale, e.g. 1 2 b3, or movable-do solfege); after answering the note walks diatonically to the tonic (resolution: nearest = 2-4 down and 5-7 up, ascending, descending, none). Build levels with `degrees` (e.g. [\"1\",\"2\",\"3\"], then add degrees; chromatic ones like b2 or #4 later), fixed key (keys [\"C\"]) or a new key every question (key_change per_trial), cadence_each_trial false to make the key carry over, resolve_before_answer as a learning aid for new degrees, octaves [-1,0,1] for range.",
+            schema_of::<ScaleDegreeParams>(),
+            json!({"type": "scale_degree_id", "count": 30, "feedback": "after_trial", "params": {"keys": ["C"], "degrees": ["1", "2", "3"]}}),
+        ),
+        entry(
+            ExerciseKind::IntervalComparison,
+            "Two intervals play one after the other (melodic or harmonic, on different roots); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder).",
+            schema_of::<IntervalComparisonParams>(),
+            json!({"type": "interval_comparison", "count": 24, "params": {"differences": [0, 1, 2], "directions": ["ascending"]}}),
         ),
     ]
 }

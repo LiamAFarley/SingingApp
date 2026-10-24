@@ -151,3 +151,40 @@ export function ChoiceGrid({ choices, enabled, states, onPick }: Omit<PadProps, 
     </div>
   );
 }
+
+/** The number a degree id carries ("b3" → "3"). */
+const degreeDigit = (id: string) => id.replace(/[^0-9]/g, "");
+
+/** Scale degrees in a row, in pitch order. Number keys pick the degree with that number (the plain one first). */
+export function DegreePad({ choices, enabled, states, onPick }: Omit<PadProps, "octave" | "compact">) {
+  const forDigit = (d: string) => choices.find((c) => c.id === d) ?? choices.find((c) => degreeDigit(c.id) === d);
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || !/^[1-7]$/.test(e.key)) return;
+      const c = forDigit(e.key);
+      if (c) {
+        e.preventDefault();
+        onPick(c.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  return (
+    <div className="degrees">
+      {choices.map((c) => {
+        const st = states[c.id] ?? "idle";
+        const digit = forDigit(degreeDigit(c.id))?.id === c.id ? degreeDigit(c.id) : "";
+        // Number labels already show the key.
+        const hint = digit && digit !== c.label ? digit : "";
+        return (
+          <button key={c.id} className={`key degree ${st !== "idle" ? st : ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
+            <span>{c.label}</span>
+            {hint && <span className="hint">{hint}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}

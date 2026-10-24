@@ -1,0 +1,17 @@
+{
+  "title": "Intervals in changing keys",
+  "blocks": [
+    {
+      "type": "interval_id",
+      "title": "Melodic intervals, a new key every question",
+      "count": 30,
+      "params": {
+        "in_key": true,
+        "keys": "all",
+        "modes": ["major", "minor"],
+        "key_change": "per_trial",
+        "directions": ["ascending", "descending"]
+      }
+    }
+  ]
+}

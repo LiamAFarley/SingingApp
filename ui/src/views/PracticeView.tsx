@@ -7,12 +7,38 @@ import type { SessionRow } from "../bindings/SessionRow";
 import { fmtDate } from "../music";
 
 const CATEGORIES = ["Absolute pitch", "Ear training", "Singing", "Sight singing and dictation", "Saved"];
-const STAGE_ID = /^ap_progressive_(\d+)$/;
-const STAGE_KEY = "practice.apStage";
 
-function rememberedStage(): string | null {
+/** Graded courses shown as one card with a stage picker. */
+interface Course {
+  pattern: RegExp;
+  title: string;
+  description: string;
+  unit: string;
+  storageKey: string;
+}
+
+const COURSES: Course[] = [
+  {
+    pattern: /^ap_progressive_(\d+)$/,
+    title: "Absolute pitch: progressive",
+    description: "Name and sing a growing set of pitch classes, one stage at a time.",
+    unit: "Stage",
+    storageKey: "practice.apStage",
+  },
+  {
+    pattern: /^degrees_(\d+)$/,
+    title: "Scale degrees",
+    description: "A cadence sets the key, a note plays, you name its degree, and it walks to the tonic.",
+    unit: "Level",
+    storageKey: "practice.degreeLevel",
+  },
+];
+
+const inCourse = (p: PresetView) => COURSES.some((c) => c.pattern.test(p.id));
+
+function remembered(key: string): string | null {
   try {
-    return localStorage.getItem(STAGE_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
@@ -128,21 +154,26 @@ export function PracticeView({
       </div>
 
       {CATEGORIES.map((cat) => {
-        const items = presets.filter((p) => p.category === cat && !STAGE_ID.test(p.id));
-        const stages = presets.filter((p) => p.category === cat && STAGE_ID.test(p.id));
-        if (items.length === 0 && stages.length === 0) return null;
+        const items = presets.filter((p) => p.category === cat && !inCourse(p));
+        const courses = COURSES.map((c) => ({
+          course: c,
+          stages: presets.filter((p) => p.category === cat && c.pattern.test(p.id)),
+        })).filter((c) => c.stages.length > 0);
+        if (items.length === 0 && courses.length === 0) return null;
         return (
           <div className="section" key={cat}>
             <h2>{cat}</h2>
             <div className="grid cols-3">
-              {stages.length > 0 && (
+              {courses.map(({ course, stages }) => (
                 <StageCard
+                  key={course.storageKey}
+                  course={course}
                   stages={stages}
                   disabled={active || starting != null}
                   starting={starting}
                   onStart={(id) => start(id, { source: "preset", id })}
                 />
-              )}
+              ))}
               {items.map((p) => (
                 <div key={p.id} className="card preset">
                   <div>
@@ -171,13 +202,15 @@ export function PracticeView({
   );
 }
 
-/** The progressive absolute-pitch protocol as one card with a stage picker. */
+/** A graded course (progressive absolute pitch, scale degrees) as one card with a stage picker. */
 function StageCard({
+  course,
   stages,
   disabled,
   starting,
   onStart,
 }: {
+  course: Course;
   stages: PresetView[];
   disabled: boolean;
   starting: string | null;
@@ -185,23 +218,23 @@ function StageCard({
 }) {
   const sorted = [...stages].sort((a, b) => a.id.localeCompare(b.id));
   const [id, setId] = useState(() => {
-    const saved = rememberedStage();
+    const saved = remembered(course.storageKey);
     return sorted.some((p) => p.id === saved) ? saved! : sorted[0].id;
   });
   const p = sorted.find((x) => x.id === id) ?? sorted[0];
-  const stageNo = (x: PresetView) => parseInt(STAGE_ID.exec(x.id)?.[1] ?? "0", 10);
+  const stageNo = (x: PresetView) => parseInt(course.pattern.exec(x.id)?.[1] ?? "0", 10);
   return (
     <div className="card preset">
       <div>
-        <div className="title">Absolute pitch: progressive</div>
-        <div className="desc">Name and sing a growing set of pitch classes, one stage at a time.</div>
+        <div className="title">{course.title}</div>
+        <div className="desc">{course.description}</div>
         <label className="field" style={{ marginTop: 10 }}>
           <select
             value={p.id}
             onChange={(e) => {
               setId(e.target.value);
               try {
-                localStorage.setItem(STAGE_KEY, e.target.value);
+                localStorage.setItem(course.storageKey, e.target.value);
               } catch {
                 // Remembering the stage is only a convenience.
               }
@@ -209,7 +242,7 @@ function StageCard({
           >
             {sorted.map((x) => (
               <option key={x.id} value={x.id}>
-                Stage {stageNo(x)}
+                {course.unit} {stageNo(x)}
               </option>
             ))}
           </select>

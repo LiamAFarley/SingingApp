@@ -458,19 +458,143 @@ fn d_ms_900() -> u32 {
     900
 }
 
+/// When the key of a key-based exercise changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum KeyChange {
+    /// One key for the whole block (picked from `keys`).
+    #[default]
+    PerBlock,
+    /// A new key for every question.
+    PerTrial,
+}
+
+fn d_tonic_c() -> ClassSet {
+    ClassSet::List(vec![PitchClass::new(0)])
+}
+
+/// Interval identification. Without `in_key` intervals stand alone on random roots; with it a
+/// cadence sets a key and both notes come from its scale (diatonic intervals).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IntervalIdParams {
     #[serde(default = "d_simple_intervals")]
     pub intervals: Vec<Interval>,
     #[serde(default = "d_melodic_dirs")]
     pub directions: Vec<IntervalDirection>,
-    /// Range for the lower note. Default C3–C5.
+    /// Range for the lower note. Default C3–C5 (ignored with `in_key`).
     #[serde(default)]
     pub root_range: Option<NoteRange>,
     #[serde(default)]
     pub timbres: Vec<TimbreId>,
     #[serde(default = "d_ms_900")]
     pub note_ms: u32,
+    /// Play the intervals inside a key, after a cadence, with both notes from its scale.
+    #[serde(default)]
+    pub in_key: bool,
+    /// Tonics for `in_key` (default C).
+    #[serde(default = "d_tonic_c")]
+    pub keys: ClassSet,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    /// With `in_key`: a cadence before every question, otherwise when the key changes and every
+    /// eighth question.
+    #[serde(default = "d_true")]
+    pub cadence_each_trial: bool,
+}
+
+fn d_compare_diffs() -> Vec<u32> {
+    vec![0, 1, 2]
+}
+
+fn d_ms_700() -> u32 {
+    700
+}
+
+/// Interval comparison: two intervals play; say which is larger, or that they are the same.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IntervalComparisonParams {
+    /// Intervals the first one is drawn from.
+    #[serde(default = "d_simple_intervals")]
+    pub intervals: Vec<Interval>,
+    /// Size differences in semitones between the two (0 means the same interval).
+    #[serde(default = "d_compare_diffs")]
+    pub differences: Vec<u32>,
+    #[serde(default = "d_melodic_dirs")]
+    pub directions: Vec<IntervalDirection>,
+    /// Range for the lower notes. Default C3–C5.
+    #[serde(default)]
+    pub root_range: Option<NoteRange>,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+    #[serde(default = "d_ms_700")]
+    pub note_ms: u32,
+}
+
+/// How a scale degree moves to the tonic after it is answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Resolution {
+    /// To the nearer tonic: 2, 3 and 4 step down, 5, 6 and 7 step up.
+    #[default]
+    Nearest,
+    Ascending,
+    Descending,
+    None,
+}
+
+/// Answer labels for scale degrees.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DegreeLabels {
+    /// 1, 2, ♭3 … numbered against the major scale.
+    #[default]
+    Numbers,
+    /// Movable do with do-based minor: do re me fa sol le te.
+    Solfege,
+}
+
+fn d_degree_octaves() -> Vec<i32> {
+    vec![0]
+}
+
+fn d_degree_tempo() -> f32 {
+    100.0
+}
+
+/// Scale degrees, as in Functional Ear Trainer: a cadence sets the key, a note plays, name its
+/// degree; then the note walks diatonically to the tonic so its function is heard.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ScaleDegreeParams {
+    /// Tonics (default C, a fixed key).
+    #[serde(default = "d_tonic_c")]
+    pub keys: ClassSet,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    /// Degrees asked, numbered against the major scale: "1", "2", "b3", "#4", "7" …
+    /// Default: the seven degrees of the mode. Fewer degrees make early levels.
+    #[serde(default)]
+    pub degrees: Vec<String>,
+    /// A cadence before every question; otherwise when the key changes and every eighth question.
+    #[serde(default = "d_true")]
+    pub cadence_each_trial: bool,
+    /// Octaves of the note: 0 is the octave from the tonic up, -1 the one below.
+    #[serde(default = "d_degree_octaves")]
+    pub octaves: Vec<i32>,
+    #[serde(default)]
+    pub resolution: Resolution,
+    /// Also play the resolution before answering (a learning aid for new degrees).
+    #[serde(default)]
+    pub resolve_before_answer: bool,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+    #[serde(default = "d_degree_tempo")]
+    pub tempo_bpm: f32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
@@ -964,6 +1088,8 @@ pub enum Exercise {
     MelodicDictation(DictationParams),
     AnchorSong(AnchorSongParams),
     IncidentalPairing(IncidentalPairingParams),
+    ScaleDegreeId(ScaleDegreeParams),
+    IntervalComparison(IntervalComparisonParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -984,10 +1110,12 @@ pub enum ExerciseKind {
     MelodicDictation,
     AnchorSong,
     IncidentalPairing,
+    ScaleDegreeId,
+    IntervalComparison,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 15] = [
+    pub const ALL: [ExerciseKind; 17] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -1003,6 +1131,8 @@ impl ExerciseKind {
         ExerciseKind::MelodicDictation,
         ExerciseKind::AnchorSong,
         ExerciseKind::IncidentalPairing,
+        ExerciseKind::ScaleDegreeId,
+        ExerciseKind::IntervalComparison,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -1022,6 +1152,8 @@ impl ExerciseKind {
             ExerciseKind::MelodicDictation => "melodic_dictation",
             ExerciseKind::AnchorSong => "anchor_song",
             ExerciseKind::IncidentalPairing => "incidental_pairing",
+            ExerciseKind::ScaleDegreeId => "scale_degree_id",
+            ExerciseKind::IntervalComparison => "interval_comparison",
         }
     }
 
@@ -1046,6 +1178,8 @@ impl ExerciseKind {
             ExerciseKind::MelodicDictation => "Melodic dictation",
             ExerciseKind::AnchorSong => "Anchor songs",
             ExerciseKind::IncidentalPairing => "Colour task (incidental pairing)",
+            ExerciseKind::ScaleDegreeId => "Scale degrees",
+            ExerciseKind::IntervalComparison => "Interval comparison",
         }
     }
 
@@ -1066,6 +1200,8 @@ impl ExerciseKind {
             ExerciseKind::MelodicDictation => &["ear.dictation"],
             ExerciseKind::AnchorSong => &["ap.anchor"],
             ExerciseKind::IncidentalPairing => &["ap.exposure"],
+            ExerciseKind::ScaleDegreeId => &["rp.degree"],
+            ExerciseKind::IntervalComparison => &["rp.interval_compare"],
         }
     }
 
@@ -1100,6 +1236,8 @@ impl Exercise {
             Exercise::MelodicDictation(_) => ExerciseKind::MelodicDictation,
             Exercise::AnchorSong(_) => ExerciseKind::AnchorSong,
             Exercise::IncidentalPairing(_) => ExerciseKind::IncidentalPairing,
+            Exercise::ScaleDegreeId(_) => ExerciseKind::ScaleDegreeId,
+            Exercise::IntervalComparison(_) => ExerciseKind::IntervalComparison,
         }
     }
 
@@ -1288,6 +1426,12 @@ pub struct IdentifyTrial {
     /// A colour shown after the sound starts (incidental pairing); response times count from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cue: Option<VisualCue>,
+    /// Answers are taken and timed from this point in the sound (after a key-setting cadence).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_after_ms: Option<f64>,
+    /// Played as soon as the result is shown, e.g. a scale degree walking to the tonic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_answer: Option<Vec<SoundEvent>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]

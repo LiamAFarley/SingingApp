@@ -1,0 +1,11 @@
+{
+  "title": "Interval comparison",
+  "blocks": [
+    {
+      "type": "interval_comparison",
+      "title": "Which interval is larger?",
+      "count": 30,
+      "params": { "differences": [0, 1, 2], "directions": ["ascending", "descending"] }
+    }
+  ]
+}

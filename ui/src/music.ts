@@ -93,6 +93,8 @@ export const KIND_TITLES: Record<string, string> = {
   melodic_dictation: "Melodic dictation",
   anchor_song: "Anchor songs",
   incidental_pairing: "Colour task",
+  scale_degree_id: "Scale degrees",
+  interval_comparison: "Interval comparison",
 };
 
 /** Colours of the incidental-pairing task (same ids as the backend's PAIRING_COLORS). */

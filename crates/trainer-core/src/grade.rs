@@ -755,6 +755,8 @@ mod tests {
 
     fn id_trial(correct: &str) -> IdentifyTrial {
         IdentifyTrial {
+            answer_after_ms: None,
+            after_answer: None,
             cue: None,
             exercise: ExerciseKind::PitchId,
             prompt: "Name the note".into(),

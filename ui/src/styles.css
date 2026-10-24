@@ -1067,3 +1067,16 @@ pre.code {
   border-color: var(--wrong);
   background: var(--wrong-soft);
 }
+
+.degrees {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.key.degree {
+  width: 64px;
+  height: 72px;
+  font-size: 20px;
+}

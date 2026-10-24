@@ -1,6 +1,7 @@
 //! Built-in session presets. They work without the LLM and are what the app shows on first run.
 
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use ts_rs::TS;
 
 use crate::schema::{
@@ -74,6 +75,52 @@ pub fn ap_progressive_stage(n: u32) -> SessionSpec {
     }
 }
 
+pub const DEGREE_LEVELS: u32 = 8;
+
+/// Level `n` (1–8) of the scale-degree course, after Functional Ear Trainer: a cadence sets the
+/// key, a note plays, you name its degree, and the note then walks to the tonic. The early levels
+/// keep one key and a few degrees; later ones change the key every question and add the minor
+/// mode and the chromatic degrees.
+pub fn scale_degree_level(n: u32) -> SessionSpec {
+    let n = n.clamp(1, DEGREE_LEVELS);
+    const CHROMATIC: [&str; 12] = ["1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"];
+    let (summary, params) = match n {
+        1 => ("Degrees 1, 2 and 3 in C major.", json!({ "degrees": ["1", "2", "3"] })),
+        2 => ("Degrees 1 to 5 in C major.", json!({ "degrees": ["1", "2", "3", "4", "5"] })),
+        3 => ("All seven degrees of C major, over two octaves.", json!({ "octaves": [-1, 0] })),
+        4 => (
+            "All seven degrees; the major key changes every question.",
+            json!({ "keys": "all", "key_change": "per_trial", "octaves": [-1, 0] }),
+        ),
+        5 => ("All seven degrees of C minor.", json!({ "modes": ["minor"], "octaves": [-1, 0] })),
+        6 => (
+            "Major and minor keys; the key changes every question.",
+            json!({ "keys": "all", "modes": ["major", "minor"], "key_change": "per_trial", "octaves": [-1, 0] }),
+        ),
+        7 => (
+            "All twelve degrees, chromatic ones included, in C major.",
+            json!({ "degrees": CHROMATIC, "octaves": [-1, 0] }),
+        ),
+        _ => (
+            "All twelve degrees; the key changes every question.",
+            json!({ "degrees": CHROMATIC, "keys": "all", "key_change": "per_trial", "octaves": [-1, 0] }),
+        ),
+    };
+    let spec = json!({
+        "title": format!("Scale degrees: level {n}"),
+        "protocol": "scale_degrees",
+        "notes": format!("{summary} Suggested criterion for the next level: at least 90% over two sessions."),
+        "blocks": [{
+            "type": "scale_degree_id",
+            "count": 30,
+            "pass_mark": 0.9,
+            "tags": ["rp.degree.course"],
+            "params": params,
+        }],
+    });
+    SessionSpec::from_value(spec).expect("scale degree level is valid")
+}
+
 const FILES: &[(&str, &str, &str, &str)] = &[
     (
         "ap_assessment",
@@ -116,6 +163,36 @@ const FILES: &[(&str, &str, &str, &str)] = &[
         "Ear training",
         "Harmonic intervals, minor 2nd to octave.",
         include_str!("../presets/ear_intervals_harmonic.json"),
+    ),
+    (
+        "ear_intervals_in_key",
+        "Ear training",
+        "Diatonic intervals in C major after a cadence, both notes from the scale.",
+        include_str!("../presets/ear_intervals_in_key.json"),
+    ),
+    (
+        "ear_intervals_changing_keys",
+        "Ear training",
+        "Diatonic intervals with a cadence in a new major or minor key every question.",
+        include_str!("../presets/ear_intervals_changing_keys.json"),
+    ),
+    (
+        "ear_interval_comparison",
+        "Ear training",
+        "Two intervals in a row: say which is larger, or that they are the same.",
+        include_str!("../presets/ear_interval_comparison.json"),
+    ),
+    (
+        "ear_degrees_up",
+        "Ear training",
+        "Name the degree in C major; every note walks up the scale to the tonic.",
+        include_str!("../presets/ear_degrees_up.json"),
+    ),
+    (
+        "ear_degrees_down",
+        "Ear training",
+        "Name the degree in C major; every note walks down the scale to the tonic.",
+        include_str!("../presets/ear_degrees_down.json"),
     ),
     (
         "ear_chords",
@@ -203,6 +280,16 @@ pub fn builtin_presets() -> Vec<Preset> {
             spec: serde_json::to_value(&spec).unwrap(),
         });
     }
+    for n in 1..=DEGREE_LEVELS {
+        let spec = scale_degree_level(n);
+        out.push(Preset {
+            id: format!("degrees_{n:02}"),
+            title: spec.title.clone(),
+            category: "Ear training".into(),
+            description: spec.notes.clone().unwrap_or_default(),
+            spec: serde_json::to_value(&spec).unwrap(),
+        });
+    }
     for (id, category, description, json) in FILES {
         let spec =
             SessionSpec::from_json(json).unwrap_or_else(|e| panic!("preset {id} is invalid: {e}"));
@@ -228,6 +315,7 @@ pub fn find_builtin(id: &str) -> Option<SessionSpec> {
 mod tests {
     use super::*;
     use crate::generate::GenContext;
+    use crate::schema::KeyChange;
     use crate::validate::validate_session;
 
     #[test]
@@ -241,6 +329,22 @@ mod tests {
             if p.id == "ap_assessment" {
                 assert!(r.warnings.is_empty(), "{:?}", r.warnings);
             }
+        }
+    }
+
+    #[test]
+    fn degree_levels_grow() {
+        let first = scale_degree_level(1);
+        let last = scale_degree_level(DEGREE_LEVELS);
+        match (&first.blocks[0].exercise, &last.blocks[0].exercise) {
+            (Exercise::ScaleDegreeId(a), Exercise::ScaleDegreeId(b)) => {
+                assert_eq!(a.degrees, ["1", "2", "3"]);
+                assert_eq!(a.keys.classes().len(), 1);
+                assert_eq!(b.degrees.len(), 12);
+                assert!(b.keys.is_all());
+                assert_eq!(b.key_change, KeyChange::PerTrial);
+            }
+            _ => panic!(),
         }
     }
 

@@ -27,6 +27,11 @@ const presets: PresetView[] = [
   p("ap_daily", "Absolute pitch: daily", "Absolute pitch", "Name 36 notes and sing 12, all twelve pitch classes.", 48, 5.4, ["Name the note", "Sing the note"]),
   p("ap_assessment", "Absolute pitch assessment", "Absolute pitch", "Holdout tones, no feedback: identification across octaves and timbres, speed, singing and key. Run first in a session.", 156, 16.5, ["12-class identification", "Cross-octave identification"]),
   p("ear_intervals_melodic", "Intervals: melodic", "Ear training", "Melodic intervals up and down, minor 2nd to octave.", 30, 3.2, ["Interval identification"]),
+  p("degrees_01", "Scale degrees: level 1", "Ear training", "Degrees 1, 2 and 3 in C major. Suggested criterion for the next level: at least 90% over two sessions.", 30, 4.1, ["Scale degrees"]),
+  p("degrees_02", "Scale degrees: level 2", "Ear training", "Degrees 1 to 5 in C major. Suggested criterion for the next level: at least 90% over two sessions.", 30, 4.1, ["Scale degrees"]),
+  p("degrees_04", "Scale degrees: level 4", "Ear training", "All seven degrees; the major key changes every question. Suggested criterion for the next level: at least 90% over two sessions.", 30, 4.6, ["Scale degrees"]),
+  p("ear_intervals_in_key", "Intervals in a key", "Ear training", "Diatonic intervals in C major after a cadence, both notes from the scale.", 30, 5.0, ["Melodic intervals in C major"]),
+  p("ear_interval_comparison", "Interval comparison", "Ear training", "Two intervals in a row: say which is larger, or that they are the same.", 30, 3.5, ["Which interval is larger?"]),
   p("ear_chords", "Chords: triads and inversions", "Ear training", "Triads, inversions and seventh chords.", 60, 6.8, ["Triads", "Major and minor inversions", "Seventh chords"]),
   p("sing_pitch_matching", "Pitch matching and sustain", "Singing", "Hear a note and sing it back, then hold notes steadily.", 19, 3.1, ["Match the note", "Hold steadily"]),
   p("sing_scales", "Scales: listen and repeat", "Singing", "Listen to a scale, then sing it back in time.", 8, 4.9, ["Major scale", "Natural minor scale"]),
@@ -440,6 +445,32 @@ function colorTrial(): TrialView {
   };
 }
 
+function degreeTrial(): TrialView {
+  const ids = ["1", "2", "3", "4", "5", "6", "7"];
+  return {
+    kind: "scale_degree_id",
+    interaction: "choice",
+    prompt: "Which degree? (major key)",
+    choices: ids.map((id) => ({ id, label: id })),
+    layout: "degrees",
+    deadline_ms: null,
+    can_replay: true,
+    can_reference: false,
+    lane: null,
+    show_live_pitch: false,
+    label: null,
+    label_at_s: null,
+    timeline_start_s: null,
+    response_start_s: clock(),
+    response_end_s: null,
+    attempt: 0,
+    assisted: false,
+    score: null,
+    plays: 0,
+    max_plays: 0,
+  };
+}
+
 function scaleLane(): LaneSpec {
   const beat = 60 / 96;
   const degrees = [0, 2, 4, 5, 7, 9, 11, 12, 11, 9, 7, 5, 4, 2, 0];
@@ -604,6 +635,31 @@ function startScenario() {
         { pitch: "A4", start: 16, dur: 4 }, { pitch: "F4", start: 20, dur: 4 }, { pitch: "G4", start: 24, dur: 8 },
       ];
       emit({ phase: "feedback", feedback: dictationFeedback(answer) });
+    }
+  } else if (scenario === "degrees" || scenario === "degrees-feedback") {
+    emit({ phase: "answering", session_id: "demo", title: "Scale degrees: level 3", block_count: 1, block_title: "All seven degrees in C", block_kind: "scale_degree_id", trial_index: 8, trial_count: 30, done_in_block: 8, correct_in_block: 7, trial: degreeTrial() });
+    if (scenario === "degrees-feedback") {
+      emit({
+        phase: "feedback",
+        done_in_block: 9,
+        feedback: {
+          correct: false,
+          summary: "You answered 5. It was 6.",
+          correct_choice: "6",
+          answered: "5",
+          cents: null,
+          notes: [],
+          trace: [],
+          can_retry: false,
+          can_sing_along: false,
+          can_listen: true,
+          can_show_answer: true,
+          can_play_answer: false,
+          auto_advance_ms: null,
+          hidden: false,
+          dictation: null,
+        },
+      });
     }
   } else if (scenario === "colors") {
     emit({ phase: "answering", session_id: "demo", title: "Colour task (incidental pairing)", block_count: 1, block_title: "Press the colour", block_kind: "incidental_pairing", trial_index: 11, trial_count: 60, done_in_block: 11, correct_in_block: 11, trial: colorTrial() });
