@@ -1133,3 +1133,89 @@ select.sing-part {
   padding-left: 18px;
   line-height: 1.7;
 }
+
+/* Lock-on tuner (after a sung note) ------------------------------------- */
+
+.lock-tuner {
+  width: 100%;
+  max-width: 640px;
+  margin: 4px auto 0;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.lock-tuner .title {
+  font-weight: 600;
+}
+
+.lock-readout {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.lock-note {
+  min-width: 72px;
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.lock-hold {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.lock-hold-fill {
+  height: 100%;
+  background: var(--correct);
+  transition: width 60ms linear;
+}
+
+.offset-meter {
+  position: relative;
+  height: 40px;
+}
+
+.offset-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.offset-zone {
+  position: absolute;
+  top: 16px;
+  height: 8px;
+  border-radius: 3px;
+  background: var(--correct-soft);
+}
+
+.offset-tick {
+  position: absolute;
+  top: 28px;
+  transform: translateX(-50%);
+}
+
+.offset-needle {
+  position: absolute;
+  top: 6px;
+  width: 3px;
+  height: 28px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  transition: left 60ms linear;
+}

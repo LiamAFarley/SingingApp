@@ -956,6 +956,18 @@ impl<'a> SessionRun<'a> {
             can_show_answer: is_identify && show,
             can_play_answer: extras.capture.is_some() || (is_dictation && !written.is_empty()),
             can_hear_choices: matches!(trial, TrialSpec::Identify(t) if show && !t.choice_sounds.is_empty()),
+            tuner: match trial {
+                TrialSpec::SingPitch(t) if show => Some(TunerTarget {
+                    pitch_class: t.target_class.index(),
+                    midi: t.target_midi,
+                    name: match t.target_midi {
+                        Some(m) => trainer_core::theory::Note(m).display_name(),
+                        None => t.target_class.display_name().to_string(),
+                    },
+                    reference_midi: t.reveal.as_ref().and_then(|r| r.first()).map(|e| e.midi),
+                }),
+                _ => None,
+            },
             auto_advance_ms: auto_ms,
             hidden: !show,
         };

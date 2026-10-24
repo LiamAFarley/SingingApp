@@ -7,6 +7,7 @@ import type { Score } from "../bindings/Score";
 import type { ScoreNote } from "../bindings/ScoreNote";
 import type { TrialView } from "../bindings/TrialView";
 import { ChoiceGrid, DegreePad, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
+import { LockOnTuner } from "../components/LockOnTuner";
 import { PitchLane } from "../components/PitchLane";
 import { offerKey, useKeyOwner } from "../keyboard";
 import { live, useAnimationFrame } from "../live";
@@ -373,6 +374,10 @@ function SingPitchStage({ runner, trial }: { runner: RunnerState; trial: TrialVi
   useAnimationFrame(runner.phase === "recording");
   const fb = runner.feedback;
   const open = runner.phase === "recording" && live.now() >= (trial.response_start_s ?? 0);
+  // After a miss the tuner opens to practise locking on to the note; after a hit it is a click away.
+  const [tunerOpen, setTunerOpen] = useState(false);
+  useEffect(() => setTunerOpen(false), [runner.trial_index, trial.attempt]);
+  const showTuner = runner.phase === "feedback" && fb?.tuner != null && (fb.correct === false || tunerOpen);
   return (
     <div className="section" style={{ gap: 18, margin: "auto 0" }}>
       <div className="big-label">{open || runner.phase !== "recording" ? trial.prompt : "…"}</div>
@@ -389,10 +394,16 @@ function SingPitchStage({ runner, trial }: { runner: RunnerState; trial: TrialVi
               Error {fmtCents(fb.cents)}
             </div>
           )}
+          {showTuner && fb.tuner && <LockOnTuner target={fb.tuner} />}
           <div className="controls">
             {fb.can_listen && (
               <button className="btn" onClick={() => command({ kind: "listen" })}>
                 Hear the note <span className="kbd">L</span>
+              </button>
+            )}
+            {fb.tuner && !showTuner && (
+              <button className="btn" onClick={() => setTunerOpen(true)}>
+                Practise with the tuner
               </button>
             )}
             <NextButton auto={fb.auto_advance_ms} />

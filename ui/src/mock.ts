@@ -339,6 +339,7 @@ function sightFeedback(): FeedbackView {
     can_show_answer: false,
     can_play_answer: true,
     can_hear_choices: false,
+    tuner: null,
     auto_advance_ms: null,
     hidden: false,
     dictation: null,
@@ -415,6 +416,7 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
     can_show_answer: false,
     can_play_answer: answer.length > 0,
     can_hear_choices: false,
+    tuner: null,
     auto_advance_ms: null,
     hidden: false,
     dictation: { target, answer: { ...target, notes: answer }, target_marks, answer_marks },
@@ -633,6 +635,7 @@ function sungFeedback(): FeedbackView {
     can_show_answer: false,
     can_play_answer: true,
     can_hear_choices: false,
+    tuner: null,
     auto_advance_ms: null,
     hidden: false,
     dictation: null,
@@ -670,6 +673,7 @@ const report: SessionReport = {
 };
 
 let scenario = new URLSearchParams(typeof location !== "undefined" ? location.search : "").get("scenario");
+const mockStart = clock();
 
 function startScenario() {
   if (scenario === "pitch") {
@@ -685,6 +689,14 @@ function startScenario() {
     const practice = scenario === "harmony-practice";
     emit({ phase: "recording", session_id: "demo", title: "Harmony: a third below", block_index: practice ? 0 : 1, block_count: 2, block_title: practice ? "Practice: your part plays along" : "By ear", block_kind: "harmony", trial_index: 1, trial_count: practice ? 3 : 6, done_in_block: practice ? 0 : 2, correct_in_block: practice ? 0 : 1, feedback_mode: "continuous", trial });
     if (scenario === "harmony-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
+  } else if (scenario === "sing-pitch-feedback") {
+    emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 0, trial_count: 12, done_in_block: 1, correct_in_block: 0, feedback_mode: "after_trial", trial: { ...singPitchTrial(), prompt: "Sing A♭" } });
+    emit({ phase: "feedback", feedback: {
+      correct: false, summary: "Sang G3 (80 cents flat), did not settle", correct_choice: null, answered: null, cents: -80,
+      notes: [], trace: [], can_retry: false, can_sing_along: false, can_listen: true, can_show_answer: false,
+      can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null,
+      tuner: { pitch_class: 8, midi: null, name: "A♭", reference_midi: 56 },
+    } });
   } else if (scenario === "sing-pitch") {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });
   } else if (scenario === "pairing") {
@@ -725,6 +737,7 @@ function startScenario() {
           can_show_answer: true,
           can_play_answer: false,
           can_hear_choices: true,
+          tuner: null,
           auto_advance_ms: null,
           hidden: false,
           dictation: null,
@@ -781,6 +794,7 @@ function runnerCommand(c: RunnerCommand) {
           can_show_answer: true,
           can_play_answer: false,
           can_hear_choices: true,
+          tuner: null,
           dictation: null,
           auto_advance_ms: correct ? 900 : null,
           hidden: false,
@@ -976,6 +990,9 @@ export function mockBackend(): Backend {
           let midi: number | null;
           if (state.phase === "recording" && lane && state.trial?.interaction === "sung") {
             midi = simulatedMidi(t - laneStart);
+          } else if (scenario === "sing-pitch-feedback") {
+            // Gliding up from G onto A-flat.
+            midi = 56 - Math.max(0, 0.8 - (t - mockStart) * 0.3) + 0.05 * Math.sin(2 * Math.PI * 5.2 * t);
           } else {
             midi = 57.12 + 0.18 * Math.sin(2 * Math.PI * 5.2 * t) + 0.05 * Math.sin(t * 0.7);
           }

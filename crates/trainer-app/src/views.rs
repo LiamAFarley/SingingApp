@@ -155,12 +155,28 @@ pub struct FeedbackView {
     pub can_play_answer: bool,
     /// Answers can be clicked to hear them.
     pub can_hear_choices: bool,
+    /// A single sung note: the target for the live tuner, to practise locking on.
+    pub tuner: Option<TunerTarget>,
     /// Moves on by itself after this many ms unless the user interacts.
     pub auto_advance_ms: Option<u32>,
     /// Results are withheld by the block's feedback mode.
     pub hidden: bool,
     /// Dictation: the written answer and the melody, with a mark per note.
     pub dictation: Option<DictationView>,
+}
+
+/// The note to lock on to with the tuner after singing a single note.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TunerTarget {
+    /// Pitch class, 0 = C.
+    pub pitch_class: u8,
+    /// The exact note when the octave counts; otherwise the nearest note of the class is the target.
+    pub midi: Option<i32>,
+    /// E.g. `A♭`, or `A♭3` for an exact note.
+    pub name: String,
+    /// The note "Hear the note" plays, for a drone.
+    pub reference_midi: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
