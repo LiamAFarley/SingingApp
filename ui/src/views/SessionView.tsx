@@ -1,0 +1,598 @@
+import { useEffect, useState } from "react";
+import { api, command } from "../api";
+import type { BlockReport } from "../bindings/BlockReport";
+import type { RunnerState } from "../bindings/RunnerState";
+import type { TrialView } from "../bindings/TrialView";
+import { ChoiceGrid, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
+import { PitchLane } from "../components/PitchLane";
+import { live, useAnimationFrame } from "../live";
+import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
+
+const FEEDBACK_TEXT: Record<string, string> = {
+  continuous: "Live pitch line and results after each trial",
+  after_trial: "Results after each trial",
+  after_block: "Results at the end of the block",
+  end_of_session: "Results at the end of the session",
+  none: "No feedback (assessment)",
+};
+
+export function SessionView({ runner, onClose }: { runner: RunnerState; onClose: () => void }) {
+  const phase = runner.phase;
+  const trial = runner.trial;
+  const [confirmEnd, setConfirmEnd] = useState(false);
+
+  useEffect(() => {
+    if (phase === "session_summary" || phase === "idle") setConfirmEnd(false);
+  }, [phase]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      const target = e.target as HTMLElement;
+      if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+      const k = e.key.toLowerCase();
+      const fb = runner.feedback;
+      if (confirmEnd) {
+        // While the end-session question is open only Enter (end) and Esc (keep going) count.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (k === "enter") command({ kind: "abort" });
+        if (k === "escape" || k === "enter") setConfirmEnd(false);
+        return;
+      }
+      if (k === " " || k === "enter") {
+        e.preventDefault();
+        if (phase === "block_intro") command({ kind: "begin" });
+        else if (phase === "feedback" || phase === "block_summary") command({ kind: "next" });
+        else if (phase === "session_summary" || phase === "error") command({ kind: "close" });
+        return;
+      }
+      if (k === "escape") {
+        if (phase !== "session_summary" && phase !== "error") setConfirmEnd(true);
+        return;
+      }
+      if (phase === "answering" && trial?.interaction === "choice") {
+        if (k === "r" && trial.can_replay) command({ kind: "replay" });
+        // Not F: that key answers F on the piano pad.
+        if (k === "n" && trial.can_reference) command({ kind: "reference" });
+        return;
+      }
+      if (phase === "feedback" && fb) {
+        if (k === "a" && fb.can_show_answer) command({ kind: "show_answer" });
+        if (k === "l" && fb.can_listen) command({ kind: "listen" });
+        if (k === "g" && fb.can_sing_along) command({ kind: "sing_along" });
+        if (k === "t" && fb.can_retry) command({ kind: "retry" });
+      }
+      if (k === "s" && (phase === "recording" || phase === "listening")) command({ kind: "skip" });
+    };
+    // Capture phase, so the answer pads never see keys meant for the end-session question.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [phase, trial, runner.feedback, confirmEnd]);
+
+  const blockProgress =
+    phase === "block_summary" || phase === "session_summary"
+      ? 1
+      : runner.trial_count > 0
+        ? (runner.trial_index + (phase === "feedback" ? 1 : 0)) / runner.trial_count
+        : 0;
+
+  return (
+    <div className="session">
+      <div className="session-head">
+        <div>
+          <h1>{runner.title}</h1>
+          <div className="muted small" style={{ marginTop: 2 }}>
+            {phase === "session_summary" ? (
+              `${runner.block_count} ${runner.block_count === 1 ? "block" : "blocks"}`
+            ) : (
+              <>
+                {runner.block_count > 1 && `Block ${runner.block_index + 1} of ${runner.block_count} · `}
+                {runner.block_title}
+                {phase !== "block_intro" && phase !== "block_summary" && runner.trial_count > 0 && (
+                  <> · Trial {Math.min(runner.trial_index + 1, runner.trial_count)} of {runner.trial_count}</>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+        <div className="row">
+          {runner.done_in_block > 0 && runner.feedback_mode !== "none" && runner.feedback_mode !== "after_block" && runner.feedback_mode !== "end_of_session" && (
+            <span className="badge num">
+              {runner.correct_in_block} / {runner.done_in_block} correct
+            </span>
+          )}
+          {phase !== "session_summary" && !confirmEnd && (
+            <button className="btn quiet" onClick={() => setConfirmEnd(true)}>
+              End session <span className="kbd">Esc</span>
+            </button>
+          )}
+          {confirmEnd && (
+            <>
+              <span className="small muted">End this session? Trials so far are kept.</span>
+              <button className="btn" onClick={() => setConfirmEnd(false)}>
+                Keep going <span className="kbd">Esc</span>
+              </button>
+              <button
+                className="btn danger"
+                onClick={() => {
+                  setConfirmEnd(false);
+                  command({ kind: "abort" });
+                }}
+              >
+                End session <span className="kbd">Enter</span>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="progress">
+        <div style={{ width: `${Math.min(1, blockProgress) * 100}%` }} />
+      </div>
+      <div className="stage">
+        {phase === "block_intro" && <BlockIntro runner={runner} />}
+        {(phase === "preparing" || phase === "listening" || phase === "answering" || phase === "recording" || phase === "grading" || phase === "feedback") &&
+          trial && <TrialStage runner={runner} trial={trial} />}
+        {phase === "preparing" && !trial && <div className="prompt-sub">Preparing…</div>}
+        {phase === "block_summary" && <BlockSummary report={runner.block_report} />}
+        {phase === "session_summary" && <SessionSummary runner={runner} onClose={onClose} />}
+        {phase === "error" && (
+          <div className="section">
+            <div className="notice error">{runner.error}</div>
+            <div className="controls">
+              <button className="btn primary" onClick={() => command({ kind: "close" })}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BlockIntro({ runner }: { runner: RunnerState }) {
+  return (
+    <div className="section" style={{ alignItems: "center", textAlign: "center", gap: 14, margin: "auto 0" }}>
+      {runner.block_index === 0 && runner.notes && <div className="notice info" style={{ maxWidth: 620, textAlign: "left" }}>{runner.notes}</div>}
+      <h2 style={{ fontSize: 20 }}>{runner.block_title}</h2>
+      <div className="muted">
+        {[
+          runner.block_kind && KIND_TITLES[runner.block_kind] !== runner.block_title ? KIND_TITLES[runner.block_kind] : null,
+          `${runner.trial_count} ${runner.trial_count === 1 ? "trial" : "trials"}`,
+          FEEDBACK_TEXT[runner.feedback_mode],
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </div>
+      {runner.block_instructions && <p style={{ maxWidth: 560 }}>{runner.block_instructions}</p>}
+      <KindHelp kind={runner.block_kind} />
+      <div className="controls" style={{ marginTop: 8 }}>
+        <button className="btn primary" onClick={() => command({ kind: "begin" })} autoFocus>
+          Begin <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Space</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function KindHelp({ kind }: { kind: string | null }) {
+  const text: Record<string, string> = {
+    pitch_id: "A tone plays with no reference. Click the note or use the keys A–J (white) and W, E, T, Y, U (black).",
+    sing_pitch: "When the prompt appears, sing the named note on a comfortable vowel. Octave does not matter.",
+    pitch_pairing: "Listen. Each tone is followed by its name.",
+    tonal_center_id: "A short cadence plays. Name its key (the tonic).",
+    interval_id: "Two notes play. Name the interval. Number keys pick answers.",
+    chord_id: "A chord plays. Name its quality. Number keys pick answers.",
+    scale_id: "A scale plays. Name it. Number keys pick answers.",
+    pitch_match: "A note plays, then sing it back and hold it.",
+    sustain: "Hold the note steadily until the bar ends. Vibrato is fine; the note centre is what counts.",
+    sing_interval: "The first note sounds during the count-in. Sing both notes in time with the clicks.",
+    pattern: "Follow the bars in time with the metronome. In echo mode you hear the pattern first, then sing it.",
+  };
+  return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
+}
+
+function keyStates(runner: RunnerState, picked: string | null): Record<string, KeyState> {
+  const fb = runner.feedback;
+  const states: Record<string, KeyState> = {};
+  if (runner.phase === "feedback" && fb && !fb.hidden) {
+    if (fb.correct_choice) states[fb.correct_choice] = "correct";
+    if (fb.answered && fb.answered !== fb.correct_choice) states[fb.answered] = "wrong";
+  } else if (picked) {
+    states[picked] = "picked";
+  }
+  return states;
+}
+
+function TrialStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  switch (trial.interaction) {
+    case "choice":
+      return <ChoiceStage runner={runner} trial={trial} />;
+    case "sing_pitch":
+      return <SingPitchStage runner={runner} trial={trial} />;
+    case "pairing":
+      return <PairingStage trial={trial} />;
+    case "sung":
+      return <SungStage runner={runner} trial={trial} />;
+  }
+}
+
+function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const [picked, setPicked] = useState<string | null>(null);
+  useEffect(() => setPicked(null), [runner.trial_index, trial.attempt]);
+  const phase = runner.phase;
+  const fb = runner.feedback;
+  const enabled = phase === "answering";
+  const pick = (id: string) => {
+    if (!enabled) return;
+    setPicked(id);
+    command({ kind: "answer", choice: id });
+  };
+  const states = keyStates(runner, picked);
+  const sub =
+    phase === "preparing" || phase === "listening" ? "Listen…" : phase === "answering" ? (trial.deadline_ms ? <Deadline trial={trial} /> : "Your answer") : "";
+  return (
+    <>
+      <div>
+        <div className="prompt">{trial.prompt}</div>
+        <div className="prompt-sub">{sub}</div>
+      </div>
+      {trial.layout === "pitch_classes" && <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "notes" && <NotesPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "list" && <ChoiceGrid choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      <Result runner={runner} />
+      <div className="controls">
+        {phase === "answering" && trial.can_replay && (
+          <button className="btn" onClick={() => command({ kind: "replay" })}>
+            Replay <span className="kbd">R</span>
+          </button>
+        )}
+        {phase === "answering" && trial.can_reference && (
+          <button className="btn" onClick={() => command({ kind: "reference" })}>
+            Reference <span className="kbd">N</span>
+          </button>
+        )}
+        {phase === "feedback" && fb?.can_show_answer && (
+          <button className="btn" onClick={() => command({ kind: "show_answer" })}>
+            Play again <span className="kbd">A</span>
+          </button>
+        )}
+        {phase === "feedback" && <NextButton auto={fb?.auto_advance_ms ?? null} />}
+      </div>
+    </>
+  );
+}
+
+function Deadline({ trial }: { trial: TrialView }) {
+  useAnimationFrame(true);
+  const start = trial.response_start_s ?? 0;
+  const total = (trial.deadline_ms ?? 0) / 1000;
+  const left = Math.max(0, total - (live.now() - start));
+  return (
+    <div className="countdown" title="Time left">
+      <div style={{ width: `${(left / total) * 100}%` }} />
+    </div>
+  );
+}
+
+function Result({ runner }: { runner: RunnerState }) {
+  const fb = runner.feedback;
+  if (runner.phase !== "feedback" || !fb) return <div className="result" />;
+  if (fb.hidden) return <div className="result muted">Answer recorded.</div>;
+  const cls = fb.correct === true ? "correct" : fb.correct === false ? "wrong" : "";
+  return <div className={`result ${cls}`}>{fb.summary}</div>;
+}
+
+function NextButton({ auto }: { auto: number | null }) {
+  return (
+    <button className="btn primary" onClick={() => command({ kind: "next" })} autoFocus>
+      {auto ? "Next" : "Next"} <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Space</span>
+    </button>
+  );
+}
+
+function LivePitchReadout() {
+  useAnimationFrame(true);
+  const p = live.latest(0.2);
+  if (!p || p.midi == null) return <div className="prompt-sub">–</div>;
+  const nearest = Math.round(p.midi);
+  const cents = (p.midi - nearest) * 100;
+  return (
+    <div className="prompt-sub num">
+      {noteDisplay(nearest)} · {describeCents(cents)}
+    </div>
+  );
+}
+
+function ResponseCountdown({ trial }: { trial: TrialView }) {
+  useAnimationFrame(true);
+  const a = trial.response_start_s ?? 0;
+  const b = trial.response_end_s ?? a + 1;
+  const now = live.now();
+  const frac = now < a ? 1 : Math.max(0, 1 - (now - a) / (b - a));
+  return (
+    <div className="countdown">
+      <div style={{ width: `${frac * 100}%` }} />
+    </div>
+  );
+}
+
+function SingPitchStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  useAnimationFrame(runner.phase === "recording");
+  const fb = runner.feedback;
+  const open = runner.phase === "recording" && live.now() >= (trial.response_start_s ?? 0);
+  return (
+    <div className="section" style={{ gap: 18, margin: "auto 0" }}>
+      <div className="big-label">{open || runner.phase !== "recording" ? trial.prompt : "…"}</div>
+      <div className="prompt-sub">
+        {runner.phase === "recording" ? (open ? "Sing now" : "Get ready") : runner.phase === "grading" ? "Analysing…" : ""}
+      </div>
+      {runner.phase === "recording" && <ResponseCountdown trial={trial} />}
+      {runner.phase === "recording" && trial.show_live_pitch && <LivePitchReadout />}
+      {runner.phase === "feedback" && fb && (
+        <>
+          <Result runner={runner} />
+          {!fb.hidden && fb.cents != null && (
+            <div className="prompt-sub num">
+              Error {fmtCents(fb.cents)}
+            </div>
+          )}
+          <div className="controls">
+            {fb.can_listen && (
+              <button className="btn" onClick={() => command({ kind: "listen" })}>
+                Hear the note <span className="kbd">L</span>
+              </button>
+            )}
+            <NextButton auto={fb.auto_advance_ms} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function PairingStage({ trial }: { trial: TrialView }) {
+  useAnimationFrame(true);
+  const show = trial.label_at_s != null && live.now() >= trial.label_at_s;
+  return (
+    <div className="section" style={{ margin: "auto 0" }}>
+      <div className="prompt-sub">Listen</div>
+      <div className="big-label" style={{ minHeight: 64 }}>
+        {show ? trial.label : ""}
+      </div>
+    </div>
+  );
+}
+
+function SungStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const lane = trial.lane!;
+  const fb = runner.feedback;
+  const graded = runner.phase === "feedback" && fb && !fb.hidden ? { trace: fb.trace, notes: fb.notes } : null;
+  return (
+    <>
+      <div>
+        <div className="prompt">{trial.prompt}</div>
+        <SungStatus runner={runner} trial={trial} />
+      </div>
+      <PitchLane lane={lane} timelineStart={trial.timeline_start_s} showLive={trial.show_live_pitch} graded={graded} height={320} />
+      {runner.phase === "recording" && <LaneReadout trial={trial} />}
+      {runner.phase === "feedback" && fb && (
+        <>
+          <Result runner={runner} />
+          {!fb.hidden && fb.notes.length > 0 && <NoteStrip notes={fb.notes} />}
+          <div className="controls">
+            {fb.can_listen && (
+              <button className="btn" onClick={() => command({ kind: "listen" })}>
+                Listen <span className="kbd">L</span>
+              </button>
+            )}
+            {fb.can_sing_along && (
+              <button className="btn" onClick={() => command({ kind: "sing_along" })}>
+                Sing along <span className="kbd">G</span>
+              </button>
+            )}
+            {fb.can_retry && (
+              <button className="btn" onClick={() => command({ kind: "retry" })}>
+                Retry <span className="kbd">T</span>
+              </button>
+            )}
+            <NextButton auto={fb.auto_advance_ms} />
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SungStatus({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  useAnimationFrame(runner.phase === "recording");
+  if (runner.phase === "grading") return <div className="prompt-sub">Analysing…</div>;
+  if (runner.phase !== "recording") return <div className="prompt-sub">{trial.assisted ? "Sing-along attempt" : ""}</div>;
+  const lane = trial.lane!;
+  const t = live.now() - (trial.timeline_start_s ?? 0);
+  let text = "Sing";
+  if (t < 0) text = "Get ready";
+  else if (t < lane.sing_start_s) {
+    const refEnd = lane.reference.reduce((m, n) => Math.max(m, n.start_s + n.dur_s), 0);
+    text = t < refEnd && lane.reference.length > 1 ? "Listen" : "Count-in";
+  } else if (t > lane.total_s) text = "Done";
+  return <div className="prompt-sub">{trial.assisted ? `${text} · with guide` : text}</div>;
+}
+
+/** Beat, current target and live pitch under the lane while a sung trial records. */
+function LaneReadout({ trial }: { trial: TrialView }) {
+  useAnimationFrame(true);
+  const lane = trial.lane!;
+  const t = live.now() - (trial.timeline_start_s ?? 0);
+  const beat = lane.beat_s > 0 && t >= 0 ? Math.floor(t / lane.beat_s + 1e-6) : -1;
+  const singing = t >= lane.sing_start_s && t <= lane.total_s;
+  const target = lane.targets_hidden
+    ? undefined
+    : (lane.notes.find((n) => t >= n.start_s && t < n.start_s + n.dur_s) ?? (t < lane.sing_start_s ? lane.notes[0] : undefined));
+  const p = live.latest(0.15);
+  let you = "–";
+  let cls = "";
+  if (p && p.midi != null) {
+    const nearest = Math.round(p.midi);
+    const cents = (p.midi - nearest) * 100;
+    you = `${noteDisplay(nearest)} ${cents >= 0 ? "+" : "−"}${Math.abs(Math.round(cents))}¢`;
+    if (target && singing) cls = nearest !== target.midi ? "wrong" : Math.abs(cents) <= 25 ? "correct" : "marginal";
+  }
+  return (
+    <div className="readout num">
+      {lane.metronome && lane.beats_per_bar > 0 && (
+        <div className="beats" aria-hidden>
+          {Array.from({ length: lane.beats_per_bar }, (_, i) => (
+            <span key={i} className={beat >= 0 && beat % lane.beats_per_bar === i ? "on" : ""} />
+          ))}
+        </div>
+      )}
+      {!lane.targets_hidden && (
+        <span>
+          {singing ? "Target" : "First note"} <strong>{target ? noteDisplay(target.midi) : "–"}</strong>
+        </span>
+      )}
+      <span>
+        You <strong className={cls}>{you}</strong>
+      </span>
+    </div>
+  );
+}
+
+function NoteStrip({ notes }: { notes: NonNullable<RunnerState["feedback"]>["notes"] }) {
+  return (
+    <div className="row wrap" style={{ justifyContent: "center", gap: 6 }}>
+      {notes.map((n, i) => {
+        const cls = !n.matched ? "" : !n.correct ? "wrong" : n.in_tune ? "correct" : "marginal";
+        return (
+          <span key={i} className={`badge num ${cls}`} title={n.onset_error_ms != null ? `Onset ${Math.round(n.onset_error_ms)} ms` : undefined}>
+            {noteDisplay(n.target_midi)} {n.matched && n.cents_error != null ? `${n.cents_error > 0 ? "+" : ""}${Math.round(n.cents_error)}` : "missed"}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="card muted-card" style={{ padding: 12 }}>
+      <div className="small muted">{label}</div>
+      <div className="num" style={{ fontSize: 20, fontWeight: 600, marginTop: 2 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function BlockSummary({ report }: { report: BlockReport | null }) {
+  return (
+    <div className="section" style={{ gap: 18 }}>
+      <h2>Block complete</h2>
+      {report ? (
+        <>
+          <div className="grid cols-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
+            <Stat label="Accuracy" value={pct(report.accuracy)} />
+            <Stat label="Correct" value={`${report.correct} / ${report.graded}`} />
+            <Stat label="Median response" value={fmtMs(report.median_rt_ms)} />
+            <Stat label="Median error" value={fmtCents(report.median_abs_cents)} />
+          </div>
+          {report.pass_mark != null && (
+            <div className={`notice ${report.passed ? "info" : ""}`}>
+              Pass mark {pct(report.pass_mark)}: {report.passed ? "passed" : "not yet"}.
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="muted">Results are shown at the end of the session.</p>
+      )}
+      <div className="controls">
+        <NextButton auto={null} />
+      </div>
+    </div>
+  );
+}
+
+const COMFORT = [
+  ["comfortable", "Comfortable"],
+  ["mild_fatigue", "Mild fatigue"],
+  ["discomfort", "Discomfort"],
+  ["pain", "Pain or hoarseness"],
+] as const;
+
+function SessionSummary({ runner, onClose }: { runner: RunnerState; onClose: () => void }) {
+  const r = runner.session_report;
+  const [comfort, setComfort] = useState<string | null>(null);
+  return (
+    <div className="section" style={{ gap: 18 }}>
+      <h2>Session complete</h2>
+      {r && (
+        <>
+          <div className="grid cols-3">
+            <Stat label="Accuracy" value={pct(r.accuracy)} />
+            <Stat label="Trials" value={String(r.trials.filter((t) => !t.assisted).length)} />
+            <Stat label="Duration" value={r.duration_s != null ? `${Math.round(r.duration_s / 60)} min` : "–"} />
+          </div>
+          <div className="card flush">
+            <table>
+              <thead>
+                <tr>
+                  <th>Block</th>
+                  <th>Trials</th>
+                  <th>Accuracy</th>
+                  <th>Median response</th>
+                  <th>Median error</th>
+                  <th>Pass</th>
+                </tr>
+              </thead>
+              <tbody>
+                {r.blocks.map((b) => (
+                  <tr key={b.index}>
+                    <td>{b.title}</td>
+                    <td className="num">{b.trials}</td>
+                    <td className="num">{pct(b.accuracy)}</td>
+                    <td className="num">{fmtMs(b.median_rt_ms)}</td>
+                    <td className="num">{fmtCents(b.median_abs_cents)}</td>
+                    <td>{b.passed == null ? "–" : b.passed ? <span className="badge correct">Passed</span> : <span className="badge">Not yet</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+      <div className="section">
+        <div className="small muted">How does your voice feel? (optional, shared with your coach)</div>
+        <div className="row wrap">
+          {COMFORT.map(([id, label]) => (
+            <button
+              key={id}
+              className={`btn small ${comfort === id ? "primary" : ""}`}
+              onClick={() => {
+                setComfort(id);
+                api("addComfortReport", runner.session_id, "post", id, null).catch(() => undefined);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {comfort === "pain" && (
+          <div className="notice">Rest your voice. If pain or hoarseness persists, see a voice professional before demanding singing.</div>
+        )}
+      </div>
+      <div className="controls">
+        <button
+          className="btn primary"
+          onClick={() => {
+            command({ kind: "close" });
+            onClose();
+          }}
+        >
+          Done <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Space</span>
+        </button>
+      </div>
+    </div>
+  );
+}

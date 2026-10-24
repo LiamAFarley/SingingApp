@@ -1,0 +1,92 @@
+const DISPLAY = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+const SHARP_IDS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+export function pcDisplay(midi: number): string {
+  return DISPLAY[((Math.round(midi) % 12) + 12) % 12];
+}
+
+export function octave(midi: number): number {
+  return Math.floor(Math.round(midi) / 12) - 1;
+}
+
+export function noteDisplay(midi: number): string {
+  return `${pcDisplay(midi)}${octave(midi)}`;
+}
+
+/** Display name for a pitch-class id such as "G#". */
+export function pcIdDisplay(id: string): string {
+  const i = SHARP_IDS.indexOf(id);
+  return i < 0 ? id : DISPLAY[i];
+}
+
+export function pcId(index: number): string {
+  return SHARP_IDS[((index % 12) + 12) % 12];
+}
+
+/** Parses names like "F#4", "Eb3", "C4" into MIDI. */
+export function parseNote(name: string): number | null {
+  const m = /^([A-Ga-g])([#b♯♭]*)(-?\d+)$/.exec(name.trim());
+  if (!m) return null;
+  const base: Record<string, number> = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  let semis = base[m[1].toUpperCase()];
+  for (const c of m[2]) semis += c === "#" || c === "♯" ? 1 : -1;
+  return (parseInt(m[3], 10) + 1) * 12 + semis;
+}
+
+export function noteId(midi: number): string {
+  return `${SHARP_IDS[((midi % 12) + 12) % 12]}${octave(midi)}`;
+}
+
+export function hzToMidi(hz: number, a4 = 440): number {
+  return 69 + 12 * Math.log2(hz / a4);
+}
+
+export function midiToHz(midi: number, a4 = 440): number {
+  return a4 * Math.pow(2, (midi - 69) / 12);
+}
+
+export function describeCents(c: number): string {
+  const r = Math.round(c);
+  if (r === 0) return "in tune";
+  if (Math.abs(r) === 1) return r > 0 ? "1 cent sharp" : "1 cent flat";
+  return r > 0 ? `${r} cents sharp` : `${-r} cents flat`;
+}
+
+export function pct(v: number | null | undefined): string {
+  return v == null ? "–" : `${Math.round(v * 100)}%`;
+}
+
+export function fmtMs(v: number | null | undefined): string {
+  return v == null ? "–" : `${Math.round(v)} ms`;
+}
+
+export function fmtCents(v: number | null | undefined): string {
+  return v == null ? "–" : `${Math.round(v)}¢`;
+}
+
+export function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+export function fmtDuration(s: number | null | undefined): string {
+  if (s == null) return "–";
+  const m = Math.floor(s / 60);
+  const r = Math.round(s % 60);
+  return m > 0 ? `${m} min ${r.toString().padStart(2, "0")} s` : `${r} s`;
+}
+
+export const KIND_TITLES: Record<string, string> = {
+  pitch_id: "Name the note",
+  sing_pitch: "Sing a named note",
+  pitch_pairing: "Note pairing",
+  tonal_center_id: "Find the key",
+  interval_id: "Intervals",
+  chord_id: "Chords",
+  scale_id: "Scales",
+  pitch_match: "Pitch matching",
+  sustain: "Sustained note",
+  sing_interval: "Interval singing",
+  pattern: "Sung patterns",
+};
