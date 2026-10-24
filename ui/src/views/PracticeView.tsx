@@ -7,6 +7,16 @@ import type { SessionRow } from "../bindings/SessionRow";
 import { fmtDate } from "../music";
 
 const CATEGORIES = ["Absolute pitch", "Ear training", "Singing", "Saved"];
+const STAGE_ID = /^ap_progressive_(\d+)$/;
+const STAGE_KEY = "practice.apStage";
+
+function rememberedStage(): string | null {
+  try {
+    return localStorage.getItem(STAGE_KEY);
+  } catch {
+    return null;
+  }
+}
 
 export function PracticeView({
   runner,
@@ -118,12 +128,21 @@ export function PracticeView({
       </div>
 
       {CATEGORIES.map((cat) => {
-        const items = presets.filter((p) => p.category === cat);
-        if (items.length === 0) return null;
+        const items = presets.filter((p) => p.category === cat && !STAGE_ID.test(p.id));
+        const stages = presets.filter((p) => p.category === cat && STAGE_ID.test(p.id));
+        if (items.length === 0 && stages.length === 0) return null;
         return (
           <div className="section" key={cat}>
             <h2>{cat}</h2>
             <div className="grid cols-3">
+              {stages.length > 0 && (
+                <StageCard
+                  stages={stages}
+                  disabled={active || starting != null}
+                  starting={starting}
+                  onStart={(id) => start(id, { source: "preset", id })}
+                />
+              )}
               {items.map((p) => (
                 <div key={p.id} className="card preset">
                   <div>
@@ -148,6 +167,65 @@ export function PracticeView({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** The progressive absolute-pitch protocol as one card with a stage picker. */
+function StageCard({
+  stages,
+  disabled,
+  starting,
+  onStart,
+}: {
+  stages: PresetView[];
+  disabled: boolean;
+  starting: string | null;
+  onStart: (id: string) => void;
+}) {
+  const sorted = [...stages].sort((a, b) => a.id.localeCompare(b.id));
+  const [id, setId] = useState(() => {
+    const saved = rememberedStage();
+    return sorted.some((p) => p.id === saved) ? saved! : sorted[0].id;
+  });
+  const p = sorted.find((x) => x.id === id) ?? sorted[0];
+  const stageNo = (x: PresetView) => parseInt(STAGE_ID.exec(x.id)?.[1] ?? "0", 10);
+  return (
+    <div className="card preset">
+      <div>
+        <div className="title">Absolute pitch: progressive</div>
+        <div className="desc">Name and sing a growing set of pitch classes, one stage at a time.</div>
+        <label className="field" style={{ marginTop: 10 }}>
+          <select
+            value={p.id}
+            onChange={(e) => {
+              setId(e.target.value);
+              try {
+                localStorage.setItem(STAGE_KEY, e.target.value);
+              } catch {
+                // Remembering the stage is only a convenience.
+              }
+            }}
+          >
+            {sorted.map((x) => (
+              <option key={x.id} value={x.id}>
+                Stage {stageNo(x)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="desc" style={{ marginTop: 6 }}>
+          {p.description}
+        </div>
+      </div>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <span className="small faint num">
+          {p.trial_count} trials · about {Math.max(1, Math.round(p.estimated_minutes))} min
+        </span>
+        <button className="btn small" disabled={disabled} onClick={() => onStart(p.id)}>
+          {starting === p.id ? "Starting…" : "Start"}
+        </button>
+      </div>
     </div>
   );
 }

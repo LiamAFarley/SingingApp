@@ -18,7 +18,9 @@ import type { AppSettings } from "./bindings/AppSettings";
 const clock = () => performance.now() / 1000;
 
 const presets: PresetView[] = [
-  p("ap_progressive_01", "Absolute pitch: stage 1", "Absolute pitch", "Classes: C, E, G♯. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 6.1, ["Name the note", "Sing the note"]),
+  p("ap_progressive_01", "Absolute pitch: stage 1", "Absolute pitch", "Classes: C, E, A♭. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
+  p("ap_progressive_02", "Absolute pitch: stage 2", "Absolute pitch", "Classes: C, E, A♭, D. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
+  p("ap_progressive_03", "Absolute pitch: stage 3", "Absolute pitch", "Classes: C, E, A♭, D, F♯. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
   p("ap_daily", "Absolute pitch: daily", "Absolute pitch", "Name 36 notes and sing 12, all twelve pitch classes.", 48, 5.4, ["Name the note", "Sing the note"]),
   p("ap_assessment", "Absolute pitch assessment", "Absolute pitch", "Holdout tones, no feedback: identification across octaves and timbres, speed, singing and key. Run first in a session.", 156, 16.5, ["12-class identification", "Cross-octave identification"]),
   p("ear_intervals_melodic", "Intervals: melodic", "Ear training", "Melodic intervals up and down, minor 2nd to octave.", 30, 3.2, ["Interval identification"]),
