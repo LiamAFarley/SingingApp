@@ -645,75 +645,6 @@ impl<'a> SessionRun<'a> {
         )))
     }
 
-    fn lane_for(&self, t: &SungTrial) -> LaneSpec {
-        let beat = (60.0 / t.tempo_bpm) as f32;
-        let notes: Vec<LaneNote> = t
-            .notes
-            .iter()
-            .map(|n| LaneNote {
-                midi: n.midi,
-                start_s: (t.sing_start_beat + n.start_beat) * beat,
-                dur_s: n.beats * beat,
-            })
-            .collect();
-        let reference: Vec<LaneNote> = t
-            .reference_beats
-            .iter()
-            .map(|n| LaneNote {
-                midi: n.midi,
-                start_s: n.start_beat * beat,
-                dur_s: n.beats * beat,
-            })
-            .collect();
-        let accompaniment: Vec<LaneNote> = t
-            .accompaniment
-            .iter()
-            .map(|n| LaneNote {
-                midi: n.midi,
-                start_s: (t.sing_start_beat + n.start_beat) * beat,
-                dur_s: n.beats * beat,
-            })
-            .collect();
-        let lo = notes
-            .iter()
-            .chain(&reference)
-            .chain(&accompaniment)
-            .map(|n| n.midi)
-            .min()
-            .unwrap_or(60);
-        let hi = notes
-            .iter()
-            .chain(&reference)
-            .chain(&accompaniment)
-            .map(|n| n.midi)
-            .max()
-            .unwrap_or(60);
-        let pad = ((12 - (hi - lo)).max(0) / 2).max(4);
-        LaneSpec {
-            notes,
-            reference,
-            accompaniment,
-            beat_s: beat,
-            beats_per_bar: t.beats_per_bar,
-            sing_start_s: t.sing_start_beat * beat,
-            total_s: t.total_beats * beat,
-            midi_low: lo - pad,
-            midi_high: hi + pad,
-            targets_hidden: t.lane_targets == LaneTargets::HiddenUntilDone,
-            metronome: t.backing.has_click() || t.count_in_beat.is_some(),
-            sections: t
-                .sections
-                .iter()
-                .map(|s| LaneSection {
-                    label: s.label.clone(),
-                    start_s: s.start_beat * beat,
-                    end_s: s.end_beat * beat,
-                })
-                .collect(),
-            cursor: t.follow_cursor,
-        }
-    }
-
     fn run_sung(
         &mut self,
         engine: &AudioEngine,
@@ -732,7 +663,7 @@ impl<'a> SessionRun<'a> {
             engine.play(Arc::new(audio.guide), start, 0.9, Bus::Guide)?;
         }
         let mut view = self.base_view(t.exercise, Interaction::Sung, &t.prompt, attempt);
-        view.lane = Some(self.lane_for(t));
+        view.lane = Some(lane_for(t));
         view.score = t.score.clone();
         view.show_live_pitch = feedback == FeedbackMode::Continuous || assisted;
         view.timeline_start_s = Some(secs(engine, start));
@@ -795,7 +726,7 @@ impl<'a> SessionRun<'a> {
         let mut plays = 1u32;
         let mut view = self.base_view(ExerciseKind::MelodicDictation, Interaction::Dictation, &t.prompt, attempt);
         view.score = Some(t.given.clone());
-        view.lane = Some(self.lane_for(&t.playback));
+        view.lane = Some(lane_for(&t.playback));
         view.can_replay = true;
         view.can_reference = key.is_some();
         view.plays = plays;
@@ -1145,6 +1076,77 @@ impl<'a> SessionRun<'a> {
     }
 }
 
+/// What the follow-along lane draws for a sung trial: targets, the reference, the other voice of
+/// a harmony exercise, and the timeline.
+fn lane_for(t: &SungTrial) -> LaneSpec {
+    let beat = (60.0 / t.tempo_bpm) as f32;
+    let notes: Vec<LaneNote> = t
+        .notes
+        .iter()
+        .map(|n| LaneNote {
+            midi: n.midi,
+            start_s: (t.sing_start_beat + n.start_beat) * beat,
+            dur_s: n.beats * beat,
+        })
+        .collect();
+    let reference: Vec<LaneNote> = t
+        .reference_beats
+        .iter()
+        .map(|n| LaneNote {
+            midi: n.midi,
+            start_s: n.start_beat * beat,
+            dur_s: n.beats * beat,
+        })
+        .collect();
+    let accompaniment: Vec<LaneNote> = t
+        .accompaniment
+        .iter()
+        .map(|n| LaneNote {
+            midi: n.midi,
+            start_s: (t.sing_start_beat + n.start_beat) * beat,
+            dur_s: n.beats * beat,
+        })
+        .collect();
+    let lo = notes
+        .iter()
+        .chain(&reference)
+        .chain(&accompaniment)
+        .map(|n| n.midi)
+        .min()
+        .unwrap_or(60);
+    let hi = notes
+        .iter()
+        .chain(&reference)
+        .chain(&accompaniment)
+        .map(|n| n.midi)
+        .max()
+        .unwrap_or(60);
+    let pad = ((12 - (hi - lo)).max(0) / 2).max(4);
+    LaneSpec {
+        notes,
+        reference,
+        accompaniment,
+        beat_s: beat,
+        beats_per_bar: t.beats_per_bar,
+        sing_start_s: t.sing_start_beat * beat,
+        total_s: t.total_beats * beat,
+        midi_low: lo - pad,
+        midi_high: hi + pad,
+        targets_hidden: t.lane_targets == LaneTargets::HiddenUntilDone,
+        metronome: t.backing.has_click() || t.count_in_beat.is_some(),
+        sections: t
+            .sections
+            .iter()
+            .map(|s| LaneSection {
+                label: s.label.clone(),
+                start_s: s.start_beat * beat,
+                end_s: s.end_beat * beat,
+            })
+            .collect(),
+        cursor: t.follow_cursor,
+    }
+}
+
 /// A dictation's playback: cadence, count-in clicks and the melody in one buffer.
 fn dictation_audio(renderer: &trainer_audio::render::Renderer, playback: &SungTrial) -> SoundBuffer {
     let audio = renderer.render_sung_trial(playback);
@@ -1267,5 +1269,25 @@ mod tests {
         let missed = v.target_marks.iter().flatten().filter(|m| *m == "missed").count();
         assert_eq!(missed, t.score.pitched().count() - 1);
         assert_eq!(v.answer_marks.iter().flatten().count(), 1);
+    }
+
+    #[test]
+    fn harmony_lane_shows_the_other_voice_while_singing() {
+        let block: trainer_core::schema::BlockSpec = serde_json::from_value(serde_json::json!({
+            "type": "harmony", "count": 1, "params": {"source": {"parallel": {"voice": "sixth_above"}}}
+        }))
+        .unwrap();
+        let ctx = trainer_core::generate::GenContext::default();
+        let TrialSpec::Sung(t) = trainer_core::generate::generate_block(&block, 5, &ctx).unwrap().remove(0) else {
+            panic!("not sung")
+        };
+        let lane = lane_for(&t);
+        assert_eq!(lane.accompaniment.len(), lane.notes.len());
+        assert!(lane.targets_hidden);
+        for (sung, other) in lane.notes.iter().zip(&lane.accompaniment) {
+            assert_eq!(sung.start_s, other.start_s);
+            assert!(other.start_s >= lane.sing_start_s);
+            assert!(other.midi >= lane.midi_low && other.midi <= lane.midi_high);
+        }
     }
 }

@@ -462,7 +462,7 @@ pub struct SungAudio {
     pub guide: SoundBuffer,
     /// Whether the trial plays the guide by default.
     pub guide_audible: bool,
-    /// The other voice alone (empty unless the trial has one), on the same timeline.
+    /// The other voice alone (silent unless the trial has one), on the same timeline.
     pub accompaniment: SoundBuffer,
 }
 
@@ -755,5 +755,20 @@ mod tests {
         assert!(a.guide.duration_s() > 6.0);
         let chords = harmonize(&t);
         assert_eq!(chords.len(), 2);
+        assert_eq!(a.accompaniment.peak(), 0.0);
+
+        // A second voice sounds from the start of singing, at its own level.
+        let mut h = t.clone();
+        h.backing = Backing::None;
+        h.backing_volume = 0.0;
+        h.reference_beats.clear();
+        h.accompaniment = h.notes.iter().map(|n| TargetNote { midi: n.midi + 4, ..n.clone() }).collect();
+        let a = r.render_sung_trial(&h);
+        let sing_frame = r.frames(4000.0);
+        assert!(a.accompaniment.peak() > 0.01);
+        let before = &a.backing.data[..sing_frame * 2];
+        let after = &a.backing.data[sing_frame * 2..];
+        assert!(before.iter().all(|v| v.abs() < 1e-4), "silent before singing");
+        assert!(after.iter().any(|v| v.abs() > 0.01), "the other voice is in the backing");
     }
 }

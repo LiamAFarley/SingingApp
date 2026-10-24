@@ -140,15 +140,39 @@ pub fn play_note(
 
 // --- melody library ---------------------------------------------------------------------------
 
+/// `Bb4` as `B♭4`, `F# minor` as `F♯ minor`.
+fn glyphs(name: &str) -> String {
+    let (head, tail) = name.split_once(' ').unwrap_or((name, ""));
+    let mut out: String = head
+        .chars()
+        .enumerate()
+        .map(|(i, c)| match c {
+            'b' if i > 0 => '♭',
+            '#' => '♯',
+            c => c,
+        })
+        .collect();
+    if !tail.is_empty() {
+        out.push(' ');
+        out.push_str(tail);
+    }
+    out
+}
+
 fn library_entry(p: &LibraryPiece) -> LibraryEntry {
     let scores = p.scores().unwrap_or_default();
     let range = scores.iter().filter_map(|s| s.range()).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
+    // Spelled in the piece's key.
+    let spell = |m: i32| match scores.first() {
+        Some(s) => glyphs(&s.key.spell(m).name()),
+        None => Note(m).display_name(),
+    };
     LibraryEntry {
         id: p.id.clone(),
         title: p.title.clone(),
         collection: p.collection.clone(),
         tags: p.tags.clone(),
-        key: p.key.clone(),
+        key: glyphs(&p.key),
         time: p.time.to_string(),
         tempo_bpm: p.tempo_bpm,
         bars: scores.first().map(|s| s.bars).unwrap_or(0),
@@ -158,8 +182,8 @@ fn library_entry(p: &LibraryPiece) -> LibraryEntry {
             .enumerate()
             .map(|(k, part)| part.name.clone().unwrap_or_else(|| format!("Part {}", k + 1)))
             .collect(),
-        low: range.map(|r| Note(r.0).name()),
-        high: range.map(|r| Note(r.1).name()),
+        low: range.map(|r| spell(r.0)),
+        high: range.map(|r| spell(r.1)),
         file: p.file.clone(),
     }
 }
@@ -578,4 +602,18 @@ pub fn remove_anchor(state: State<'_, AppState>, id: String) -> Res<bool> {
 #[tauri::command]
 pub fn get_stats(state: State<'_, AppState>, query: StatsQuery) -> Res<Vec<StatsRow>> {
     trainer_core::stats::get_stats(&state.core.db.lock(), &query).map_err(anyhow_err)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glyphs;
+
+    #[test]
+    fn accidentals_become_glyphs() {
+        assert_eq!(glyphs("Bb4"), "B♭4");
+        assert_eq!(glyphs("C#5"), "C♯5");
+        assert_eq!(glyphs("Eb major"), "E♭ major");
+        assert_eq!(glyphs("B minor"), "B minor");
+        assert_eq!(glyphs("F# minor"), "F♯ minor");
+    }
 }

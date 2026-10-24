@@ -1112,6 +1112,7 @@ pre.code {
 }
 
 select.sing-part {
+  min-width: 84px;
   padding: 3px 6px;
   font-size: 13px;
 }

@@ -118,7 +118,12 @@ impl LibraryPiece {
             "time": self.time,
             "tempo_bpm": self.tempo_bpm,
             "bars": scores.first().map(|s| s.bars),
-            "parts": self.parts.iter().map(|p| p.name.clone().unwrap_or_default()).collect::<Vec<_>>(),
+            "parts": self
+                .parts
+                .iter()
+                .enumerate()
+                .map(|(k, p)| p.name.clone().unwrap_or_else(|| format!("Part {}", k + 1)))
+                .collect::<Vec<_>>(),
             "range": range.map(|(lo, hi)| format!("{}–{}", crate::theory::Note(lo).name(), crate::theory::Note(hi).name())),
             "file": self.file,
         })
