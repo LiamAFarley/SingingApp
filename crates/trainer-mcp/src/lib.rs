@@ -515,6 +515,25 @@ impl ServerHandler for TrainerServer {
     }
 }
 
+/// Serves MCP over stdin/stdout until the client disconnects.
+pub async fn serve_stdio(data_dir: PathBuf) -> anyhow::Result<()> {
+    use rmcp::ServiceExt;
+    let db = Db::open(&trainer_core::storage::db_path(&data_dir))?;
+    let service = TrainerServer::new(db, data_dir)
+        .serve(rmcp::transport::stdio())
+        .await?;
+    service.waiting().await?;
+    Ok(())
+}
+
+/// Blocking entry point for binaries that do not run their own async runtime.
+pub fn run_stdio_blocking(data_dir: PathBuf) -> anyhow::Result<()> {
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(serve_stdio(data_dir))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

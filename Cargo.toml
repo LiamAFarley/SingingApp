@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/trainer-core", "crates/trainer-audio", "crates/trainer-mcp"]
+members = ["crates/trainer-core", "crates/trainer-audio", "crates/trainer-mcp", "crates/trainer-app"]
 
 [workspace.package]
 version = "0.1.0"

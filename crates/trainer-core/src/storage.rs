@@ -259,6 +259,7 @@ pub struct TrialRow {
     /// The trial played a tone whose name the user was told (feedback or pairing).
     pub labeled_reference: bool,
     pub started_at: String,
+    #[ts(type = "number | null")]
     pub start_frame: Option<i64>,
     pub device_profile: Option<String>,
     pub calibrated: bool,
@@ -409,6 +410,7 @@ pub struct CalibrationRow {
     pub id: String,
     pub device_key: String,
     /// Measured round trip minus the driver-reported estimate, in frames.
+    #[ts(type = "number")]
     pub residual_frames: i64,
     pub sample_rate: u32,
     pub buffer_frames: Option<u32>,

@@ -96,13 +96,17 @@ impl EngineInfo {
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct EngineStatus {
     pub running: bool,
+    #[ts(type = "number")]
     pub out_frame: u64,
+    #[ts(type = "number")]
     pub in_frame: u64,
     pub buffer_frames: u32,
     pub load_percent: f32,
     pub xruns: u32,
+    #[ts(type = "number")]
     pub input_overflows: u64,
     pub voices: u32,
+    #[ts(type = "number | null")]
     pub roundtrip_estimate_frames: Option<i64>,
     pub input_peak: f32,
     pub errors: Vec<String>,

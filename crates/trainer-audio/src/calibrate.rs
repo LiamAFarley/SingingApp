@@ -44,6 +44,7 @@ pub fn detect_onsets(x: &[f32], sample_rate: u32, min_gap_ms: f32) -> Vec<usize>
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 pub struct CalibrationResult {
     /// Measured round trip minus the timestamp estimate, in frames. Add it to the estimate.
+    #[ts(type = "number")]
     pub residual_frames: i64,
     /// Median absolute deviation of the measurements, in ms.
     pub spread_ms: f64,

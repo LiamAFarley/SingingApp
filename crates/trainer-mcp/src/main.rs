@@ -6,9 +6,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use rmcp::ServiceExt;
-use trainer_core::storage::{Db, db_path, default_data_dir};
-use trainer_mcp::TrainerServer;
+use trainer_core::storage::default_data_dir;
 
 fn parse_args() -> Result<PathBuf> {
     let mut args = std::env::args().skip(1);
@@ -45,10 +43,5 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let data_dir = parse_args()?;
-    let db = Db::open(&db_path(&data_dir))
-        .with_context(|| format!("opening the database in {}", data_dir.display()))?;
-    let server = TrainerServer::new(db, data_dir);
-    let service = server.serve(rmcp::transport::stdio()).await?;
-    service.waiting().await?;
-    Ok(())
+    trainer_mcp::serve_stdio(data_dir).await
 }

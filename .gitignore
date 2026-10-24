@@ -7,3 +7,4 @@
 /crates/trainer-app/resources/soundfonts/*.sf2
 /crates/trainer-app/binaries/trainer-mcp-*
 /crates/trainer-app/gen
+/crates/trainer-app/gen/schemas
