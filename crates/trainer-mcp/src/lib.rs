@@ -41,10 +41,11 @@ Trainer). Suggest the next stage after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
 ({\"given\": [{key, time, notes: [{note, beats}]}]}), or taken from the melody library ({\"library\": {collection | ids | tags}}). \
 Transcribe the user's books into the library with add_library_pieces (or MIDI files with import_library_files) and reuse them. \
-Harmony singing (harmony) sings one voice against another: a third, fourth, fifth or sixth above or below a melody (generated, \
-yours or from the library; tritones become perfect fourths), or a part of a multi-part library piece. practice: true plays the \
-singer's part along (stored as assisted); grading {\"tuning\": \"just\"} scores against pure intervals. Presets harmony_01–08 \
-are a course, one interval each. \
+Harmony singing (harmony) sings one voice against the others: fixed intervals (source.parallel: a third, fourth, fifth or \
+sixth from a melody; tritones become perfect fourths) or free part-writing you compose (source.given, or library pieces): \
+two-voice or SATB, sung exactly as written with any intervals, tritones included; play_parts picks the accompanying voices. \
+practice: true plays the singer's part along (stored as assisted); grading {\"tuning\": \"just\"} scores against pure \
+intervals. Presets harmony_01–08 are a course, one interval each. \
 Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \
 -> no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence \
@@ -931,6 +932,17 @@ mod tests {
         assert!(!err);
         let (_, list) = call(&client, "list_library", json!({})).await;
         assert_eq!(list["pieces"].as_array().unwrap().len(), 1);
+
+        // Free part-writing: an SATB piece written into the session, any intervals.
+        let satb = json!({"title": "Chorale", "blocks": [{"type": "harmony", "count": 2, "params": {
+            "play_parts": [0, 3],
+            "source": {"given": {"part": 2, "pieces": [{"title": "Phrase 1", "key": "D major", "time": "4/4", "parts": [
+                {"name": "Soprano", "notes": "F#4:1 E4 D4 C#4 | D4:4"},
+                {"name": "Alto", "notes": "D4:1 C#4 B3 A3 | A3:4"},
+                {"name": "Tenor", "notes": "A3:1 A3 G3 G3 | F#3:4"},
+                {"name": "Bass", "notes": "D3:1 A2 G2 A2 | D3:4"}]}]}}}}]});
+        let (_, v) = call(&client, "queue_session", json!({"session": satb, "dry_run": true})).await;
+        assert_eq!(v["validation"]["ok"], json!(true), "{v}");
 
         let (_, sessions) = call(&client, "list_sessions", json!({"status": "queued"})).await;
         assert_eq!(sessions.as_array().unwrap().len(), 1);

@@ -234,22 +234,15 @@ export function LibraryPage({ sessionActive, onOpenSession }: { sessionActive: b
                 Dictation
               </button>
               {g.pieces.some((p) => p.parts.length > 1) && (
-                <select
-                  className="sing-part"
-                  value=""
+                <PartPicker
+                  label="Harmony…"
+                  parts={partNames(g.pieces)}
                   disabled={sessionActive}
-                  title="Sing the second part of each piece while the others play"
-                  onChange={(e) => {
-                    const multi = ids(g.pieces.filter((p) => p.parts.length > 1));
-                    if (e.target.value) start("harmony", g.name, multi, 1, e.target.value === "practise");
-                  }}
-                >
-                  <option value="" disabled>
-                    Harmony…
-                  </option>
-                  <option value="practise">Practise (hear your part)</option>
-                  <option value="sing">Sing</option>
-                </select>
+                  title="Sing one voice of every multi-part piece while the others play"
+                  onPick={(part, practice) =>
+                    start("harmony", g.name, ids(g.pieces.filter((p) => p.parts.length > 1)), part, practice)
+                  }
+                />
               )}
             </div>
           </div>
@@ -309,6 +302,57 @@ function ids(pieces: LibraryEntry[]): string[] {
   return pieces.map((p) => p.id);
 }
 
+/** Voice names for a set of pieces: those of the piece with the most parts. */
+function partNames(pieces: LibraryEntry[]): string[] {
+  return pieces.reduce<string[]>((best, p) => (p.parts.length > best.length ? p.parts : best), []);
+}
+
+/** Choose a part to sing, or to practise with it playing along. */
+function PartPicker({
+  label,
+  parts,
+  disabled,
+  title,
+  onPick,
+}: {
+  label: string;
+  parts: string[];
+  disabled: boolean;
+  title: string;
+  onPick: (part: number, practice: boolean) => void;
+}) {
+  return (
+    <select
+      className="sing-part"
+      value=""
+      disabled={disabled}
+      title={title}
+      onChange={(e) => {
+        const [mode, k] = e.target.value.split(":");
+        if (k != null) onPick(Number(k), mode === "practise");
+      }}
+    >
+      <option value="" disabled>
+        {label}
+      </option>
+      <optgroup label="Sing">
+        {parts.map((name, k) => (
+          <option key={k} value={`sing:${k}`}>
+            {name}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Practise (hear your part)">
+        {parts.map((name, k) => (
+          <option key={k} value={`practise:${k}`}>
+            {name}
+          </option>
+        ))}
+      </optgroup>
+    </select>
+  );
+}
+
 function groupPieces(pieces: LibraryEntry[], filter: string): Group[] {
   const q = filter.trim().toLowerCase();
   const match = (p: LibraryEntry) =>
@@ -351,7 +395,7 @@ function PieceRow({
   sameFile: number;
   onToggle: () => void;
   onPlay: () => void;
-  /** Sight-sing (no part), or sing or practise one part of a multi-part piece against the others. */
+  /** Sight-sing, or sing or practise one part of a multi-part piece against the others. */
   onSing: (part: number | null, practice: boolean) => void;
   onDelete: () => void;
   onCancelDelete: () => void;
@@ -377,34 +421,13 @@ function PieceRow({
               {playing ? "Stop" : "Play"}
             </button>
             {p.parts.length > 1 ? (
-              <select
-                className="sing-part"
-                value=""
+              <PartPicker
+                label="Sing…"
+                parts={p.parts}
                 disabled={sessionActive}
                 title="Sing one part while the others play, or practise it with your part playing along"
-                onChange={(e) => {
-                  const [mode, k] = e.target.value.split(":");
-                  if (k != null) onSing(Number(k), mode === "practise");
-                }}
-              >
-                <option value="" disabled>
-                  Sing…
-                </option>
-                <optgroup label="Sing">
-                  {p.parts.map((name, k) => (
-                    <option key={k} value={`sing:${k}`}>
-                      {name}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Practise (hear your part)">
-                  {p.parts.map((name, k) => (
-                    <option key={k} value={`practise:${k}`}>
-                      {name}
-                    </option>
-                  ))}
-                </optgroup>
-              </select>
+                onPick={onSing}
+              />
             ) : (
               <button className="btn small" disabled={sessionActive} onClick={() => onSing(null, false)}>
                 Sing

@@ -874,6 +874,7 @@ let libraryPieces: LibraryEntry[] = [
   libraryEntry("Ottman/Chapter 3/2", "No. 2", "Ottman/Chapter 3", "F major", "3/4", 8, "C4", "C5"),
   libraryEntry("Ottman/Chapter 3/10", "No. 10", "Ottman/Chapter 3", "D minor", "6/8", 8, "A3", "D5", ["Part 1"], ["minor"]),
   libraryEntry("Duets/canon#1", "Canon in two parts", "Duets", "C major", "4/4", 8, "C4", "G5", ["Upper", "Lower"], ["two-part"]),
+  libraryEntry("Duets/chorale", "Chorale phrase", "Duets", "D major", "4/4", 2, "D3", "F♯4", ["Soprano", "Alto", "Tenor", "Bass"], ["satb"]),
   libraryEntry("Folk tune", "Folk tune", null, "A minor", "3/4", 16, "E4", "E5"),
 ];
 

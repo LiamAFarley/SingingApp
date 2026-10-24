@@ -2052,28 +2052,48 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
     if !(30.0..=220.0).contains(&p.tempo_bpm) {
         return err("tempo_bpm must be 30–220");
     }
-    // Melodies for parallel harmony; library pieces in block order with the part sung.
+    // Melodies for parallel harmony, or written pieces (given or from the library) in block order
+    // with the part sung.
     enum Voices<'a> {
         Parallel(&'a ParallelHarmony, Melodies<'a>),
-        Library(&'a LibrarySelect, Vec<(&'a LibraryPiece, usize)>),
+        Written { source: &'static str, pieces: Vec<(LibraryPiece, usize)>, fit_range: bool, piece_tempo: bool },
     }
-    let voices = match &p.source {
+    let mut voices = match &p.source {
         HarmonySource::Parallel(pp) => Voices::Parallel(pp, Melodies::new(&pp.melody, ctx, rng)?),
+        HarmonySource::Given(g) => {
+            if g.pieces.is_empty() {
+                return err("source.given.pieces must contain at least one piece");
+            }
+            let mut pieces = Vec::with_capacity(g.pieces.len());
+            for (k, v) in g.pieces.iter().enumerate() {
+                let piece = library::piece_from_value(v, &format!("given#{}", k + 1))
+                    .map_err(|e| GenError(format!("source.given.pieces[{k}]: {e}")))?;
+                if piece.parts.len() < 2 {
+                    return err(format!("source.given.pieces[{k}] needs two to four parts"));
+                }
+                let part = g.part.min(piece.parts.len() - 1);
+                pieces.push((piece, part));
+            }
+            if g.shuffle {
+                rng.shuffle(&mut pieces);
+            }
+            Voices::Written { source: "given", pieces, fit_range: g.fit_range, piece_tempo: g.piece_tempo }
+        }
         HarmonySource::Library(sel) => {
-            let mut v: Vec<(&LibraryPiece, usize)> = library::select(&ctx.library, sel, 2)
+            let mut pieces: Vec<(LibraryPiece, usize)> = library::select(&ctx.library, sel, 2)
                 .map_err(|e| GenError(format!("source.library: {e}")))?
                 .into_iter()
-                .map(|piece| (piece, sel.part.min(piece.parts.len() - 1)))
+                .map(|piece| (piece.clone(), sel.part.min(piece.parts.len() - 1)))
                 .collect();
             if sel.shuffle {
-                rng.shuffle(&mut v);
+                rng.shuffle(&mut pieces);
             }
-            Voices::Library(sel, v)
+            Voices::Written { source: "library", pieces, fit_range: sel.fit_range, piece_tempo: sel.piece_tempo }
         }
     };
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let (sung, played, prompt, extra) = match &voices {
+        let (sung, played, prompt, extra) = match &mut voices {
             Voices::Parallel(pp, melodies) => {
                 let (melody, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
                 let (sung, played) = parallel_voices(melody, pp, ctx);
@@ -2087,15 +2107,16 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
                 }
                 (sung, vec![played], prompt, extra)
             }
-            Voices::Library(sel, pieces) => {
-                let (piece, part) = pieces[i % pieces.len()];
+            Voices::Written { source, pieces, fit_range, piece_tempo } => {
+                let (piece, part) = &pieces[i % pieces.len()];
+                let part = *part;
                 let mut melodies: Vec<CompactMelody> = (0..piece.parts.len()).map(|k| piece.melody(k)).collect();
-                if !sel.piece_tempo {
+                if !*piece_tempo {
                     for m in &mut melodies {
                         m.tempo_bpm = None;
                     }
                 }
-                if sel.fit_range {
+                if *fit_range {
                     if let Some((lo, hi)) = library::melody_range(&melodies[part]) {
                         let k = library::best_octave(lo, hi, ctx.comfortable);
                         for m in &mut melodies {
@@ -2104,24 +2125,30 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
                     }
                 }
                 let score = |k: usize| {
-                    Score::from_compact(&melodies[k], p.tempo_bpm)
-                        .map_err(|e| GenError(format!("library piece `{}`: {e}", piece.id)))
+                    Score::from_compact(&melodies[k], p.tempo_bpm).map_err(|e| GenError(format!("piece `{}`: {e}", piece.id)))
                 };
                 let sung = score(part)?;
-                let played = (0..melodies.len()).filter(|k| *k != part).map(score).collect::<Result<Vec<_>, _>>()?;
-                let name = piece.parts[part].name.clone().unwrap_or_else(|| {
-                    match (part, piece.parts.len()) {
-                        (0, _) => "the top part".into(),
-                        (k, n) if k + 1 == n => "the bottom part".into(),
-                        (k, n) => format!("part {} of {n}", k + 1),
-                    }
+                let plays: Vec<usize> = (0..melodies.len())
+                    .filter(|k| *k != part && (p.play_parts.is_empty() || p.play_parts.contains(k)))
+                    .collect();
+                let played = plays.iter().map(|k| score(*k)).collect::<Result<Vec<_>, _>>()?;
+                let name = piece.parts[part].name.clone().unwrap_or_else(|| match (part, piece.parts.len()) {
+                    (0, _) => "the top part".into(),
+                    (k, n) if k + 1 == n => "the bottom part".into(),
+                    (k, n) => format!("part {} of {n}", k + 1),
                 });
                 let prompt = format!("{}: sing {name}", piece.title);
-                let extra = json!({ "source": "library", "piece": piece.id, "part": part, "parts": piece.parts.len() });
+                let extra = json!({
+                    "source": source,
+                    "piece": piece.id,
+                    "part": part,
+                    "parts": piece.parts.len(),
+                    "played_parts": plays,
+                });
                 (sung, played, prompt, extra)
             }
         };
-        let notation = p.notation.unwrap_or(matches!(p.source, HarmonySource::Library(_)));
+        let notation = p.notation.unwrap_or(!matches!(p.source, HarmonySource::Parallel(_)));
         let mut t = score_timeline(
             sung,
             &ScoreTimeline {
@@ -2463,6 +2490,45 @@ mod tests {
         let (gaps, names) = harmony("fifth_above", true);
         assert_eq!(gaps, [7, 7, 5, 7]);
         assert!(names[2].starts_with('E'), "{names:?}");
+    }
+
+    #[test]
+    fn written_harmony_is_sung_as_written_with_any_interval() {
+        // Two voices with a tritone (F over B) in bar 1.
+        let duet = json!({"title": "Duet", "key": "C major", "parts": [
+            {"name": "Upper", "notes": "F4:2 E4:2 | C5:4"},
+            {"name": "Lower", "notes": "B3:2 C4:2 | C4:4"}]});
+        let b: BlockSpec = serde_json::from_value(json!({"type": "harmony", "count": 1, "params": {
+            "source": {"given": {"pieces": [duet], "part": 1, "fit_range": false}}}})).unwrap();
+        let TrialSpec::Sung(t) = generate_block(&b, 1, &GenContext::default()).unwrap().remove(0) else { panic!() };
+        let gaps: Vec<i32> = t.notes.iter().zip(&t.accompaniment).map(|(s, a)| a.midi - s.midi).collect();
+        assert_eq!(gaps, [6, 4, 12], "the tritone stays");
+        assert!(t.score.is_some(), "written parts are read from the staff");
+        assert_eq!(t.prompt, "Duet: sing Lower");
+        assert_eq!(t.stimulus["source"], "given");
+
+        // SATB: sing the tenor against the bass alone.
+        let satb = json!({"key": "G major", "time": "3/4", "parts": [
+            {"name": "Soprano", "notes": "B4:3"}, {"name": "Alto", "notes": "G4:3"},
+            {"name": "Tenor", "notes": "D4:3"}, {"name": "Bass", "notes": "G3:3"}]});
+        let b: BlockSpec = serde_json::from_value(json!({"type": "harmony", "count": 1, "params": {
+            "play_parts": [3], "source": {"given": {"pieces": [satb], "part": 2, "fit_range": false}}}})).unwrap();
+        let TrialSpec::Sung(t) = generate_block(&b, 1, &GenContext::default()).unwrap().remove(0) else { panic!() };
+        assert_eq!(t.notes.iter().map(|n| n.midi).collect::<Vec<_>>(), [62]);
+        assert_eq!(t.accompaniment.iter().map(|n| n.midi).collect::<Vec<_>>(), [55]);
+        assert_eq!(t.stimulus["played_parts"], json!([3]));
+        assert!(t.prompt.ends_with("sing Tenor"));
+
+        // A piece needs two parts, and errors name the piece.
+        let solo = json!({"key": "C", "notes": "C4:4"});
+        let b: BlockSpec = serde_json::from_value(json!({"type": "harmony", "count": 1, "params": {
+            "source": {"given": {"pieces": [solo]}}}})).unwrap();
+        assert!(generate_block(&b, 1, &GenContext::default()).unwrap_err().to_string().contains("pieces[0] needs two to four parts"));
+        let bad = json!({"key": "C", "parts": [{"notes": "C4:4"}, {"notes": "C4:3 | D4:5"}]});
+        let b: BlockSpec = serde_json::from_value(json!({"type": "harmony", "count": 1, "params": {
+            "source": {"given": {"pieces": [bad]}}}})).unwrap();
+        let e = generate_block(&b, 1, &GenContext::default()).unwrap_err().to_string();
+        assert!(e.contains("source.given.pieces[0]: parts[1]: notes: the last bar has 5 beats"), "{e}");
     }
 
     #[test]

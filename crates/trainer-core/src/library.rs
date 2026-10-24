@@ -217,6 +217,18 @@ fn parse_clef(v: Option<&Value>) -> Result<ClefChoice, String> {
     }
 }
 
+/// A piece written inline (a harmony exercise's `given`), checked like a library file's. It
+/// takes `id`, and a title from it when it has none.
+pub fn piece_from_value(v: &Value, id: &str) -> Result<LibraryPiece, String> {
+    let mut p = parse_piece(v)?;
+    p.id = id.to_string();
+    if p.title.is_empty() {
+        p.title = id.to_string();
+    }
+    p.finish()?;
+    Ok(p)
+}
+
 fn parse_piece(v: &Value) -> Result<LibraryPiece, String> {
     let o = v.as_object().ok_or("expected an object")?;
     let key = opt_string(o.get("key"), "key")?.ok_or("missing `key`, e.g. \"Eb major\"")?;

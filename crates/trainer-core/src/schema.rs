@@ -1032,14 +1032,73 @@ fn melody_or_generator<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MelodyS
     }
 }
 
+/// Two- to four-part pieces written into the session (two voices, SATB …), sung as written.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GivenHarmony {
+    /// Pieces in the melody library's JSON form, each with two to four parts, top part first.
+    #[schemars(schema_with = "given_pieces_schema")]
+    pub pieces: Vec<serde_json::Value>,
+    /// The part you sing: 0 is the top part (soprano), 3 the bass of a four-part piece; a piece
+    /// with fewer parts gives its lowest.
+    #[serde(default)]
+    pub part: usize,
+    #[serde(default)]
+    pub shuffle: bool,
+    /// Move every part by the same octaves so yours fits the comfortable range.
+    #[serde(default = "d_true")]
+    pub fit_range: bool,
+    /// Use a piece's own tempo when it has one; otherwise the exercise's tempo_bpm.
+    #[serde(default = "d_true")]
+    pub piece_tempo: bool,
+}
+
+fn given_pieces_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": "array",
+        "minItems": 1,
+        "items": {
+            "type": "object",
+            "required": ["key", "parts"],
+            "properties": {
+                "title": { "type": "string" },
+                "key": { "type": "string", "description": "e.g. \"Eb major\", \"F# minor\"" },
+                "time": { "type": "string", "description": "e.g. \"3/4\"; default 4/4" },
+                "tempo_bpm": { "type": "number" },
+                "pickup": { "type": "number", "description": "beats before the first barline" },
+                "parts": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 4,
+                    "description": "top part first; any intervals between them",
+                    "items": {
+                        "type": "object",
+                        "required": ["notes"],
+                        "properties": {
+                            "name": { "type": "string", "description": "e.g. Soprano, Alto, Tenor, Bass" },
+                            "clef": { "enum": ["auto", "treble", "treble8vb", "bass"] },
+                            "notes": {
+                                "description": "text \"Eb4:1 F4:.5 G4 | Ab4:2~ | Ab4:1 R:1\" (pitch:beats, a length carries over, R rest, ~ tie, | barline checked) or a list of {note, beats} | {rest}",
+                                "oneOf": [{ "type": "string" }, { "type": "array" }]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 /// Where the voices of a harmony exercise come from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HarmonySource {
-    /// A melody and a voice a diatonic third, fourth, fifth or sixth away from it.
+    /// A melody and a voice a fixed diatonic interval away from it (third, fourth, fifth, sixth).
     Parallel(ParallelHarmony),
-    /// Pieces with two or more parts from the melody library. `part` is the one you sing; the
-    /// app plays the others.
+    /// Pieces written into the session with two to four parts, sung as written: free two-voice
+    /// or SATB harmony with any intervals, tritones included.
+    Given(GivenHarmony),
+    /// Pieces with two or more parts from the melody library, sung as written. `part` is the one
+    /// you sing; the app plays the others.
     Library(LibrarySelect),
 }
 
@@ -1063,8 +1122,12 @@ pub struct HarmonyParams {
     /// attempts are stored as assisted and left out of accuracy.
     #[serde(default)]
     pub practice: bool,
-    /// Show your part on the staff. Default: shown for library pieces, by ear for parallel
-    /// harmony.
+    /// With written pieces (given, library): the parts the app plays with you, by index (0 =
+    /// top). Default: all the others. Indices a piece does not have are ignored.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub play_parts: Vec<usize>,
+    /// Show your part on the staff. Default: shown for written pieces (given, library), by ear
+    /// for parallel harmony.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notation: Option<bool>,
     /// Beats per minute in the time signature's unit (a library piece's own tempo wins unless

@@ -28,7 +28,7 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
   - A third, fourth, fifth or sixth below or above a melody, by ear or from the staff, or the melody over that voice.
     - The melody can be generated, written by the coach, or taken from the library.
     - Where the interval would be a tritone (F against B), the harmony note becomes a perfect fourth instead.
-  - Any part of a two-part (or larger) library piece.
+  - Free part-writing: any voice of a two-voice or SATB piece, sung exactly as written with any intervals, tritones included. The coach can write these into a session or add them to the library. You choose which other voices play with you, e.g. only the bass first, then everyone.
   - Practice mode plays your own part along and shows its notes. Practice attempts are not counted in accuracy.
   - The **Harmony intervals** course has one interval per level: three trials hearing your part, then six by ear.
   - Optional just-intonation grading against the other voice.
