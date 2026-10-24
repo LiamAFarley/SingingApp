@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::melody::generate_melody;
 use crate::rng::{BalancedBag, Rng};
 use crate::schema::*;
-use crate::score::{Score, ScoreNote};
+use crate::score::{Score, ScoreNote, note_events};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::{PoolConfig, TimbreId, default_training_timbres, is_valid_timbre};
 
@@ -14,6 +14,8 @@ pub struct GenContext {
     /// The singer's comfortable range (default C3–G4 until the user sets one).
     pub comfortable: NoteRange,
     pub pools: PoolConfig,
+    /// Saved anchor songs (for `anchor_song`).
+    pub anchors: Vec<Anchor>,
 }
 
 impl Default for GenContext {
@@ -21,6 +23,7 @@ impl Default for GenContext {
         GenContext {
             comfortable: NoteRange::new(48, 67),
             pools: PoolConfig::default(),
+            anchors: Vec::new(),
         }
     }
 }
@@ -68,6 +71,8 @@ pub fn generate_block(
         Exercise::Pattern(p) => gen_pattern(p, n, &mut rng, ctx),
         Exercise::SightSing(p) => gen_sight_sing(p, n, &mut rng, ctx),
         Exercise::MelodicDictation(p) => gen_dictation(p, n, &mut rng, ctx),
+        Exercise::AnchorSong(p) => gen_anchor_song(p, n, &mut rng, ctx),
+        Exercise::IncidentalPairing(p) => gen_incidental(p, n, &mut rng, ctx),
     }
 }
 
@@ -280,6 +285,7 @@ fn gen_pitch_id(
         };
         let holdout = ctx.pools.is_holdout(&timbre, octave);
         out.push(TrialSpec::Identify(IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::PitchId,
             prompt: match p.answer {
                 PitchAnswer::PitchClass => "Name the note".into(),
@@ -342,6 +348,7 @@ fn gen_sing_pitch(
             None => format!("Sing {}", pc.display_name()),
         };
         out.push(TrialSpec::SingPitch(SingPitchTrial {
+            exercise: ExerciseKind::SingPitch,
             prompt,
             target_class: pc,
             target_midi,
@@ -385,6 +392,163 @@ fn gen_pairing(
             label: pc.display_name().to_string(),
             gap_ms: p.gap_ms,
             stimulus: json!({ "pitch_class": pc.name(), "octave": octave, "timbre": timbre }),
+        }));
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Anchor songs and incidental pairing
+// ---------------------------------------------------------------------------------------------
+
+fn gen_anchor_song(
+    p: &AnchorSongParams,
+    n: usize,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<Vec<TrialSpec>, GenError> {
+    check_timbres(std::slice::from_ref(&p.timbre))?;
+    let wanted = |a: &Anchor| {
+        p.anchors.is_empty() || p.anchors.iter().any(|w| w == &a.id || w.eq_ignore_ascii_case(&a.title))
+    };
+    let mut anchors: Vec<&Anchor> = ctx.anchors.iter().filter(|a| wanted(a)).collect();
+    if p.mode == AnchorMode::KeyCheck {
+        anchors.retain(|a| a.melody.is_some());
+    }
+    if anchors.is_empty() {
+        return err(match (ctx.anchors.is_empty(), p.mode) {
+            (true, _) => "no anchor songs are saved yet: add some in Settings → Anchor songs (or with save_anchor)",
+            (false, AnchorMode::KeyCheck) => "key_check needs anchors with a melody (the opening phrase in the original key)",
+            (false, AnchorMode::SingFirstNote) => "none of the listed anchors are saved",
+        });
+    }
+    if p.mode == AnchorMode::KeyCheck && p.shifts.iter().any(|s| *s == 0 || s.abs() > 6) {
+        return err("shifts must be non-zero and at most 6 semitones");
+    }
+    let mut bag = BalancedBag::new((0..anchors.len()).collect::<Vec<_>>());
+    let mut shift_bag = BalancedBag::new(if p.shifts.is_empty() { d_shifts() } else { p.shifts.clone() });
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let a = anchors[bag.draw(rng).unwrap()];
+        let first = a.first_note;
+        match p.mode {
+            AnchorMode::SingFirstNote => {
+                let pc = PitchClass::of_midi(first.midi());
+                out.push(TrialSpec::SingPitch(SingPitchTrial {
+                    exercise: ExerciseKind::AnchorSong,
+                    prompt: format!("Sing the first note of “{}”", a.title),
+                    target_class: pc,
+                    target_midi: None,
+                    response_ms: p.response_ms.max(1000),
+                    delay_ms: 0,
+                    pre_mask: p.pre_mask,
+                    reveal: p
+                        .reveal_target_after
+                        .then(|| vec![ev(first.midi(), 0.0, 1400.0, &p.timbre, -6.0)]),
+                    stimulus: json!({
+                        "anchor_id": a.id,
+                        "title": a.title,
+                        "pitch_class": pc.name(),
+                        "first_note": first.name(),
+                        "mode": p.mode,
+                    }),
+                }));
+            }
+            AnchorMode::KeyCheck => {
+                let melody = a.melody.as_ref().unwrap();
+                let score = Score::from_compact(melody, 90.0)
+                    .map_err(|e| GenError(format!("anchor “{}”: {e}", a.title)))?;
+                let original = rng.chance(p.original_rate.clamp(0.0, 1.0) as f64);
+                let shift = if original { 0 } else { shift_bag.draw(rng).unwrap() };
+                let mut events = note_events(&score.notes, score.time, score.tempo_bpm, &p.timbre);
+                for e in &mut events {
+                    e.midi += shift;
+                }
+                out.push(TrialSpec::Identify(IdentifyTrial {
+                    cue: None,
+                    exercise: ExerciseKind::AnchorSong,
+                    prompt: format!("“{}”: original key or shifted?", a.title),
+                    events,
+                    mask_before: p.pre_mask,
+                    choices: vec![
+                        Choice { id: "original".into(), label: "Original key".into() },
+                        Choice { id: "shifted".into(), label: "Shifted".into() },
+                    ],
+                    correct: if original { "original" } else { "shifted" }.into(),
+                    deadline_ms: None,
+                    reference: None,
+                    stimulus: json!({
+                        "anchor_id": a.id,
+                        "title": a.title,
+                        "shift": shift,
+                        "original": original,
+                        "mode": p.mode,
+                    }),
+                }));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn d_shifts() -> Vec<i32> {
+    vec![-2, -1, 1, 2]
+}
+
+fn gen_incidental(
+    p: &IncidentalPairingParams,
+    n: usize,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<Vec<TrialSpec>, GenError> {
+    let classes = p.classes.classes();
+    if classes.len() < 2 {
+        return err("classes needs at least two pitch classes");
+    }
+    if !(0.0..=0.5).contains(&p.mismatch_rate) {
+        return err("mismatch_rate must be 0–0.5");
+    }
+    let combos = pool_combos(&p.timbres, &p.octaves, p.pool, ctx)?;
+    let color = |pc: PitchClass| PAIRING_COLORS[pc.index() as usize];
+    let mut sorted = classes.clone();
+    sorted.sort();
+    let choices: Vec<Choice> = sorted
+        .iter()
+        .map(|pc| Choice { id: color(*pc).0.into(), label: color(*pc).1.into() })
+        .collect();
+    let mut bag = BalancedBag::new(classes.clone());
+    let mut combo_bag = BalancedBag::new((0..combos.len()).collect::<Vec<_>>());
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        // The colour shown; its tone usually comes with it.
+        let shown = bag.draw(rng).unwrap();
+        let matched = !rng.chance(p.mismatch_rate as f64);
+        let tone = if matched {
+            shown
+        } else {
+            let others: Vec<PitchClass> = classes.iter().copied().filter(|c| *c != shown).collect();
+            *rng.choose(&others).unwrap()
+        };
+        let (timbre, octave) = combos[combo_bag.draw(rng).unwrap()].clone();
+        let midi = tone.in_octave(octave);
+        out.push(TrialSpec::Identify(IdentifyTrial {
+            exercise: ExerciseKind::IncidentalPairing,
+            prompt: "Press the colour".into(),
+            events: vec![ev(midi, 0.0, p.duration_ms as f64, &timbre, -6.0)],
+            mask_before: Mask::None,
+            choices: choices.clone(),
+            correct: color(shown).0.into(),
+            deadline_ms: Some(3000),
+            reference: None,
+            stimulus: json!({
+                "color": color(shown).0,
+                "pitch_class": tone.name(),
+                "color_class": shown.name(),
+                "matched": matched,
+                "octave": octave,
+                "timbre": timbre,
+            }),
+            cue: Some(VisualCue { color: color(shown).0.into(), delay_ms: p.cue_delay_ms }),
         }));
     }
     Ok(out)
@@ -451,6 +615,7 @@ fn gen_tonal_center(
         }
         events.extend(cadence_events(tonic, mode, p.tempo_bpm, &timbre, start));
         out.push(TrialSpec::Identify(IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::TonalCenterId,
             prompt: if p.reference {
                 "The first tone is A. Name the key".into()
@@ -525,6 +690,7 @@ fn gen_interval_id(
             }
         };
         out.push(TrialSpec::Identify(IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::IntervalId,
             prompt: "Which interval?".into(),
             events,
@@ -626,6 +792,7 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             q.id().to_string()
         };
         out.push(TrialSpec::Identify(IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::ChordId,
             prompt: if p.answer_inversion {
                 "Which chord and inversion?".into()
@@ -702,6 +869,7 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             })
             .collect();
         out.push(TrialSpec::Identify(IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::ScaleId,
             prompt: "Which scale?".into(),
             events,
@@ -1596,5 +1764,68 @@ mod tests {
         let TrialSpec::Dictation(t) = &generate_block(&b, 1, &GenContext::default()).unwrap()[0] else { panic!() };
         assert!(t.given.notes.is_empty());
         assert!(t.playback.reference_beats.is_empty());
+    }
+
+    fn anchor(title: &str, first: &str, melody: bool) -> Anchor {
+        serde_json::from_value(json!({
+            "id": title.to_lowercase(),
+            "title": title,
+            "first_note": first,
+            "melody": if melody { json!({"key": "C major", "notes": [{"note": first, "beats": 1}, {"note": "D4", "beats": 1}, {"note": "E4", "beats": 2}]}) } else { serde_json::Value::Null },
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn anchor_songs_need_saved_anchors() {
+        let b = block(r#"{"type": "anchor_song", "count": 6}"#);
+        assert!(generate_block(&b, 1, &GenContext::default()).is_err());
+        let ctx = GenContext {
+            anchors: vec![anchor("Yesterday", "G4", false), anchor("Hey Jude", "C4", true)],
+            ..GenContext::default()
+        };
+        let trials = generate_block(&b, 1, &ctx).unwrap();
+        assert_eq!(trials.len(), 6);
+        for t in &trials {
+            let TrialSpec::SingPitch(t) = t else { panic!("not sing_pitch") };
+            assert_eq!(t.exercise, ExerciseKind::AnchorSong);
+            assert!(t.prompt.starts_with("Sing the first note of"));
+            assert!(t.target_midi.is_none());
+        }
+        // Key checks use only anchors with a melody and balance original against shifted.
+        let b = block(r#"{"type": "anchor_song", "count": 40, "params": {"mode": "key_check"}}"#);
+        let trials = generate_block(&b, 2, &ctx).unwrap();
+        let mut shifted = 0;
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!("not identify") };
+            assert_eq!(t.stimulus["title"], "Hey Jude");
+            let shift = t.stimulus["shift"].as_i64().unwrap() as i32;
+            assert_eq!(t.events[0].midi, 60 + shift);
+            assert_eq!(t.correct, if shift == 0 { "original" } else { "shifted" });
+            if shift != 0 {
+                shifted += 1;
+            }
+        }
+        assert!((10..=30).contains(&shifted), "{shifted} of 40 shifted");
+    }
+
+    #[test]
+    fn incidental_pairing_pairs_each_colour_with_one_class() {
+        let b = block(r#"{"type": "incidental_pairing", "count": 200, "params": {"mismatch_rate": 0.1}}"#);
+        let trials = generate_block(&b, 9, &GenContext::default()).unwrap();
+        let mut mismatched = 0;
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            let cue = t.cue.as_ref().expect("cue");
+            assert_eq!(cue.color, t.correct);
+            assert_eq!(t.choices.len(), 4);
+            let pc: PitchClass = t.stimulus["pitch_class"].as_str().unwrap().parse().unwrap();
+            let matched = t.stimulus["matched"].as_bool().unwrap();
+            assert_eq!(matched, PAIRING_COLORS[pc.index() as usize].0 == cue.color);
+            if !matched {
+                mismatched += 1;
+            }
+        }
+        assert!((8..=35).contains(&mismatched), "{mismatched} mismatched");
     }
 }

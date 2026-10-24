@@ -55,6 +55,8 @@ pub enum ChoiceLayout {
     Notes,
     /// Named answers in a grid.
     List,
+    /// Colour swatches (incidental pairing).
+    Colors,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -372,5 +374,6 @@ mod export_more {
         trainer_core::stats::StatsQuery::export_all(&cfg).unwrap();
         trainer_core::stats::StatsRow::export_all(&cfg).unwrap();
         trainer_core::storage::TrialRow::export_all(&cfg).unwrap();
+        trainer_core::schema::Anchor::export_all(&cfg).unwrap();
     }
 }

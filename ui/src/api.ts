@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { Anchor } from "./bindings/Anchor";
 import type { AppInfo } from "./bindings/AppInfo";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { AudioView } from "./bindings/AudioView";
@@ -41,6 +42,9 @@ export interface Backend {
   setRangeProfile(profile: RangeProfile): Promise<RangeProfile>;
   addComfortReport(sessionId: string | null, phase: string, level: string, note: string | null): Promise<void>;
   getStats(query: StatsQuery): Promise<StatsRow[]>;
+  listAnchors(): Promise<Anchor[]>;
+  saveAnchor(anchor: Anchor): Promise<Anchor>;
+  removeAnchor(id: string): Promise<boolean>;
   subscribeLive(onBatch: (b: LiveBatch) => void): Promise<void>;
   listen<T>(event: string, cb: (payload: T) => void): Promise<() => void>;
 }
@@ -76,6 +80,9 @@ async function tauriBackend(): Promise<Backend> {
     setRangeProfile: (profile) => call("set_range_profile", { profile }),
     addComfortReport: (sessionId, phase, level, note) => call("add_comfort_report", { sessionId, phase, level, note }),
     getStats: (query) => call("get_stats", { query }),
+    listAnchors: () => call("list_anchors"),
+    saveAnchor: (anchor) => call("save_anchor", { anchor }),
+    removeAnchor: (id) => call("remove_anchor", { id }),
     subscribeLive: async (onBatch) => {
       const channel = new core.Channel<LiveBatch>();
       channel.onmessage = onBatch;

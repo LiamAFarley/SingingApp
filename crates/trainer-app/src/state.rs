@@ -13,7 +13,6 @@ use trainer_audio::{AudioEngine, Bus, EngineInfo, LiveRange, SoundBuffer};
 use trainer_core::generate::GenContext;
 use trainer_core::storage::{CalibrationRow, Db, db_path};
 use trainer_core::theory::midi_to_hz;
-use trainer_core::timbre::PoolConfig;
 
 use crate::views::{AppSettings, LiveBatch};
 
@@ -159,17 +158,7 @@ impl Core {
     }
 
     pub fn gen_context(&self) -> GenContext {
-        let db = self.db.lock();
-        let comfortable = db
-            .range_profile()
-            .map(|r| r.comfortable())
-            .unwrap_or_else(|_| GenContext::default().comfortable);
-        let pools: PoolConfig = db
-            .get_setting("stimulus_pools")
-            .ok()
-            .flatten()
-            .unwrap_or_default();
-        GenContext { comfortable, pools }
+        self.db.lock().gen_context().unwrap_or_default()
     }
 
     /// Live tracker range from the singer's range profile.

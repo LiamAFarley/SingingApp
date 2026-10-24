@@ -1,0 +1,13 @@
+{
+  "title": "Colour task (incidental pairing)",
+  "blocks": [
+    {
+      "type": "incidental_pairing",
+      "title": "Press the colour",
+      "instructions": "A tone plays and a colour appears. Press the colour as quickly as you can (keys 1–4). Nothing is asked about the tone.",
+      "count": 60,
+      "feedback": "after_trial",
+      "params": { "classes": ["C", "E", "G#", "D"] }
+    }
+  ]
+}

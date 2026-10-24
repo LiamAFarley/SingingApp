@@ -419,6 +419,24 @@ pub fn add_comfort_report(
 }
 
 #[tauri::command]
+pub fn list_anchors(state: State<'_, AppState>) -> Res<Vec<trainer_core::schema::Anchor>> {
+    state.core.db.lock().anchors().map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_anchor(
+    state: State<'_, AppState>,
+    anchor: trainer_core::schema::Anchor,
+) -> Res<trainer_core::schema::Anchor> {
+    state.core.db.lock().save_anchor(&anchor, "manual").map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn remove_anchor(state: State<'_, AppState>, id: String) -> Res<bool> {
+    state.core.db.lock().remove_anchor(&id).map_err(anyhow_err)
+}
+
+#[tauri::command]
 pub fn get_stats(state: State<'_, AppState>, query: StatsQuery) -> Res<Vec<StatsRow>> {
     trainer_core::stats::get_stats(&state.core.db.lock(), &query).map_err(anyhow_err)
 }

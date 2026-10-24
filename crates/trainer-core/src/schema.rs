@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::melody::MelodyParams;
-use crate::score::{CompactMelody, Score};
+use crate::score::{CompactMelody, Pitch, Score};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::TimbreId;
 
@@ -825,6 +825,122 @@ impl Default for DictationParams {
     }
 }
 
+/// A song the user knows well in its original key: an absolute-pitch anchor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct Anchor {
+    #[serde(default)]
+    pub id: String,
+    /// The song as prompts name it, e.g. "Yesterday (The Beatles)".
+    pub title: String,
+    /// The first sung note of the original recording, e.g. "G4".
+    pub first_note: Pitch,
+    /// The opening phrase in the original key, for "original key or shifted?" trials.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub melody: Option<CompactMelody>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub source: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AnchorMode {
+    /// "Sing the first note of …", graded by pitch class (octave reported).
+    #[default]
+    SingFirstNote,
+    /// The opening phrase plays in its original key or shifted; answer which.
+    KeyCheck,
+}
+
+fn d_anchor_shifts() -> Vec<i32> {
+    vec![-2, -1, 1, 2]
+}
+
+fn d_half() -> f32 {
+    0.5
+}
+
+/// Anchor songs: sing a known song's first note from memory, or tell whether its opening is
+/// played in the original key. Uses the anchors saved in the app (or with `save_anchor`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AnchorSongParams {
+    #[serde(default)]
+    pub mode: AnchorMode,
+    /// Anchor ids or titles to use; empty uses every saved anchor (those with a melody for
+    /// `key_check`).
+    #[serde(default)]
+    pub anchors: Vec<String>,
+    /// Semitone shifts used when the phrase is not in the original key (`key_check`).
+    #[serde(default = "d_anchor_shifts")]
+    pub shifts: Vec<i32>,
+    /// Fraction of `key_check` trials played in the original key.
+    #[serde(default = "d_half")]
+    pub original_rate: f32,
+    #[serde(default = "d_ms_4000")]
+    pub response_ms: u32,
+    #[serde(default)]
+    pub pre_mask: Mask,
+    /// Play the first note after a sung attempt.
+    #[serde(default = "d_true")]
+    pub reveal_target_after: bool,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+fn d_incidental_classes() -> ClassSet {
+    ClassSet::List(vec![PitchClass::new(0), PitchClass::new(4), PitchClass::new(8), PitchClass::new(2)])
+}
+
+fn d_ms_300() -> u32 {
+    300
+}
+
+fn d_mismatch() -> f32 {
+    0.1
+}
+
+/// The colour each pitch class is always paired with in incidental pairing.
+pub const PAIRING_COLORS: [(&str, &str); 12] = [
+    ("red", "Red"),
+    ("orange", "Orange"),
+    ("yellow", "Yellow"),
+    ("olive", "Olive"),
+    ("green", "Green"),
+    ("teal", "Teal"),
+    ("sky", "Sky"),
+    ("blue", "Blue"),
+    ("indigo", "Indigo"),
+    ("purple", "Purple"),
+    ("pink", "Pink"),
+    ("brown", "Brown"),
+];
+
+/// Incidental pairing: a colour task in which each colour always comes with the same pitch class.
+/// Press the colour shown; the tone is never mentioned. Logged as exposure, never as evidence of
+/// absolute pitch. A few mismatched trials show, through response times, whether the pairing is
+/// being learnt.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct IncidentalPairingParams {
+    /// Pitch classes, each with its fixed colour (C red, E green, G♯ indigo, D yellow …).
+    #[serde(default = "d_incidental_classes")]
+    pub classes: ClassSet,
+    #[serde(default = "d_octaves")]
+    pub octaves: Vec<i32>,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+    #[serde(default)]
+    pub pool: Pool,
+    #[serde(default = "d_ms_1000")]
+    pub duration_ms: u32,
+    /// Delay from the tone's onset to the colour appearing.
+    #[serde(default = "d_ms_300")]
+    pub cue_delay_ms: u32,
+    /// Fraction of trials whose tone belongs to another colour.
+    #[serde(default = "d_mismatch")]
+    pub mismatch_rate: f32,
+}
+
 // ---------------------------------------------------------------------------------------------
 // Blocks and sessions
 // ---------------------------------------------------------------------------------------------
@@ -846,6 +962,8 @@ pub enum Exercise {
     Pattern(PatternParams),
     SightSing(SightSingParams),
     MelodicDictation(DictationParams),
+    AnchorSong(AnchorSongParams),
+    IncidentalPairing(IncidentalPairingParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -864,10 +982,12 @@ pub enum ExerciseKind {
     Pattern,
     SightSing,
     MelodicDictation,
+    AnchorSong,
+    IncidentalPairing,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 13] = [
+    pub const ALL: [ExerciseKind; 15] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -881,6 +1001,8 @@ impl ExerciseKind {
         ExerciseKind::Pattern,
         ExerciseKind::SightSing,
         ExerciseKind::MelodicDictation,
+        ExerciseKind::AnchorSong,
+        ExerciseKind::IncidentalPairing,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -898,6 +1020,8 @@ impl ExerciseKind {
             ExerciseKind::Pattern => "pattern",
             ExerciseKind::SightSing => "sight_sing",
             ExerciseKind::MelodicDictation => "melodic_dictation",
+            ExerciseKind::AnchorSong => "anchor_song",
+            ExerciseKind::IncidentalPairing => "incidental_pairing",
         }
     }
 
@@ -920,6 +1044,8 @@ impl ExerciseKind {
             ExerciseKind::Pattern => "Sung patterns",
             ExerciseKind::SightSing => "Sight singing",
             ExerciseKind::MelodicDictation => "Melodic dictation",
+            ExerciseKind::AnchorSong => "Anchor songs",
+            ExerciseKind::IncidentalPairing => "Colour task (incidental pairing)",
         }
     }
 
@@ -938,6 +1064,8 @@ impl ExerciseKind {
             ExerciseKind::Pattern => &["voice.pattern"],
             ExerciseKind::SightSing => &["voice.sight_singing"],
             ExerciseKind::MelodicDictation => &["ear.dictation"],
+            ExerciseKind::AnchorSong => &["ap.anchor"],
+            ExerciseKind::IncidentalPairing => &["ap.exposure"],
         }
     }
 
@@ -970,6 +1098,8 @@ impl Exercise {
             Exercise::Pattern(_) => ExerciseKind::Pattern,
             Exercise::SightSing(_) => ExerciseKind::SightSing,
             Exercise::MelodicDictation(_) => ExerciseKind::MelodicDictation,
+            Exercise::AnchorSong(_) => ExerciseKind::AnchorSong,
+            Exercise::IncidentalPairing(_) => ExerciseKind::IncidentalPairing,
         }
     }
 
@@ -977,6 +1107,7 @@ impl Exercise {
         match self {
             Exercise::PitchId(p) => Some(p.pool),
             Exercise::PitchPairing(p) => Some(p.pool),
+            Exercise::IncidentalPairing(p) => Some(p.pool),
             _ => None,
         }
     }
@@ -1154,11 +1285,28 @@ pub struct IdentifyTrial {
     /// The stimulus description used for statistics, e.g. `{"pitch_class": "F#", "octave": 4}`.
     #[ts(type = "Record<string, unknown>")]
     pub stimulus: serde_json::Value,
+    /// A colour shown after the sound starts (incidental pairing); response times count from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cue: Option<VisualCue>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct VisualCue {
+    /// A colour id from `PAIRING_COLORS`.
+    pub color: String,
+    pub delay_ms: u32,
+}
+
+fn d_sing_pitch_kind() -> ExerciseKind {
+    ExerciseKind::SingPitch
 }
 
 /// Sing a named pitch with no reference.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SingPitchTrial {
+    /// `sing_pitch`, or `anchor_song` for "sing the first note of …".
+    #[serde(default = "d_sing_pitch_kind")]
+    pub exercise: ExerciseKind,
     pub prompt: String,
     pub target_class: PitchClass,
     pub target_midi: Option<i32>,

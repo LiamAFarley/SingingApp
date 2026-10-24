@@ -81,6 +81,9 @@ pub fn run() {
             commands::set_range_profile,
             commands::add_comfort_report,
             commands::get_stats,
+            commands::list_anchors,
+            commands::save_anchor,
+            commands::remove_anchor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Singing Trainer");

@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use ts_rs::TS;
 
 use crate::pitch::{PitchFrame, PitchTrack};
-use crate::schema::{NoteRange, SessionSpec};
+use crate::generate::GenContext;
+use crate::schema::{Anchor, NoteRange, SessionSpec};
 use crate::theory::Note;
 
 const MIGRATION_1: &str = r#"
@@ -142,8 +143,19 @@ CREATE TABLE presets (
 );
 "#;
 
+const MIGRATION_2: &str = r#"
+CREATE TABLE anchors (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  first_note TEXT NOT NULL,
+  melody_json TEXT,
+  created_at TEXT NOT NULL,
+  source TEXT NOT NULL
+);
+"#;
+
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(MIGRATION_1)])
+    Migrations::new(vec![M::up(MIGRATION_1), M::up(MIGRATION_2)])
 }
 
 pub fn now() -> DateTime<Utc> {
@@ -959,6 +971,87 @@ impl Db {
         Ok(note)
     }
 
+    // --- anchor songs ---------------------------------------------------------------------------
+
+    pub fn anchors(&self) -> Result<Vec<Anchor>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, first_note, melody_json, created_at, source FROM anchors ORDER BY title COLLATE NOCASE",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+                r.get::<_, String>(4)?,
+                r.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, title, first, melody, created_at, source) = row?;
+            let Ok(first_note) = first.parse() else { continue };
+            out.push(Anchor {
+                id,
+                title,
+                first_note,
+                melody: melody.and_then(|m| serde_json::from_str(&m).ok()),
+                created_at,
+                source,
+            });
+        }
+        Ok(out)
+    }
+
+    /// Adds an anchor, or replaces the one with the same id (or, without an id, the same title).
+    pub fn save_anchor(&self, a: &Anchor, source: &str) -> Result<Anchor> {
+        if a.title.trim().is_empty() {
+            return Err(anyhow!("an anchor needs a title"));
+        }
+        if let Some(m) = &a.melody {
+            crate::score::Score::from_compact(m, 90.0).map_err(|e| anyhow!("melody: {e}"))?;
+        }
+        let existing = self
+            .anchors()?
+            .into_iter()
+            .find(|x| (!a.id.is_empty() && x.id == a.id) || (a.id.is_empty() && x.title.eq_ignore_ascii_case(a.title.trim())));
+        let saved = Anchor {
+            id: existing.as_ref().map(|x| x.id.clone()).unwrap_or_else(|| if a.id.is_empty() { new_id() } else { a.id.clone() }),
+            title: a.title.trim().to_string(),
+            first_note: a.first_note,
+            melody: a.melody.clone(),
+            created_at: existing.map(|x| x.created_at).unwrap_or_else(|| now().to_rfc3339()),
+            source: source.to_string(),
+        };
+        self.conn.execute(
+            "INSERT INTO anchors(id, title, first_note, melody_json, created_at, source) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET title = excluded.title, first_note = excluded.first_note,
+               melody_json = excluded.melody_json, source = excluded.source",
+            params![
+                saved.id,
+                saved.title,
+                saved.first_note.name(),
+                saved.melody.as_ref().map(serde_json::to_string).transpose()?,
+                saved.created_at,
+                saved.source
+            ],
+        )?;
+        Ok(saved)
+    }
+
+    pub fn remove_anchor(&self, id: &str) -> Result<bool> {
+        Ok(self.conn.execute("DELETE FROM anchors WHERE id = ?1", params![id])? > 0)
+    }
+
+    /// Everything trial generation needs from the database: range, stimulus pools, anchors.
+    pub fn gen_context(&self) -> Result<GenContext> {
+        Ok(GenContext {
+            comfortable: self.range_profile()?.comfortable(),
+            pools: self.get_setting("stimulus_pools")?.unwrap_or_default(),
+            anchors: self.anchors()?,
+        })
+    }
+
     pub fn coach_notes(&self, tag: Option<&str>, limit: u32) -> Result<Vec<CoachNote>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, created_at, tags_json, text FROM coach_notes
@@ -1285,5 +1378,33 @@ mod tests {
         b.queue_session(&spec(), "llm", None).unwrap();
         assert_ne!(a.data_version().unwrap(), v0);
         assert_eq!(a.queued_sessions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn anchors_round_trip_and_reach_the_generation_context() {
+        let db = Db::open_in_memory().unwrap();
+        assert!(db.anchors().unwrap().is_empty());
+        let a: Anchor = serde_json::from_value(serde_json::json!({
+            "title": "Happy Birthday",
+            "first_note": "G3",
+            "melody": {"key": "C major", "time": "3/4", "notes": [{"note": "G3", "beats": 0.75}, {"note": "G3", "beats": 0.25}, {"note": "A3", "beats": 1}]}
+        }))
+        .unwrap();
+        let saved = db.save_anchor(&a, "manual").unwrap();
+        assert!(!saved.id.is_empty());
+        // Saving the same title again updates instead of duplicating.
+        let mut b = a.clone();
+        b.first_note = "A3".parse().unwrap();
+        let again = db.save_anchor(&b, "llm").unwrap();
+        assert_eq!(again.id, saved.id);
+        let all = db.anchors().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].first_note.name(), "A3");
+        assert!(all[0].melody.is_some());
+        assert_eq!(db.gen_context().unwrap().anchors.len(), 1);
+        assert!(db.remove_anchor(&saved.id).unwrap());
+        assert!(db.anchors().unwrap().is_empty());
+        let bad = Anchor { title: " ".into(), ..a };
+        assert!(db.save_anchor(&bad, "manual").is_err());
     }
 }

@@ -1030,3 +1030,40 @@ pre.code {
 .editor .staff-overlay {
   cursor: crosshair;
 }
+
+/* Colour task ------------------------------------------------------------- */
+
+.swatch {
+  width: 200px;
+  height: 120px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.color-key {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.color-key .dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+}
+
+.color-key.correct {
+  border-color: var(--correct);
+  background: var(--correct-soft);
+}
+
+.color-key.wrong {
+  border-color: var(--wrong);
+  background: var(--wrong-soft);
+}

@@ -89,4 +89,24 @@ export const KIND_TITLES: Record<string, string> = {
   sustain: "Sustained note",
   sing_interval: "Interval singing",
   pattern: "Sung patterns",
+  sight_sing: "Sight singing",
+  melodic_dictation: "Melodic dictation",
+  anchor_song: "Anchor songs",
+  incidental_pairing: "Colour task",
+};
+
+/** Colours of the incidental-pairing task (same ids as the backend's PAIRING_COLORS). */
+export const PAIRING_COLORS: Record<string, string> = {
+  red: "#d1242f",
+  orange: "#e16f24",
+  yellow: "#d4a72c",
+  olive: "#7d8b1d",
+  green: "#1a7f37",
+  teal: "#138a8a",
+  sky: "#3a9ad9",
+  blue: "#2d4fdf",
+  indigo: "#5b3fc4",
+  purple: "#9a46c9",
+  pink: "#d6409f",
+  brown: "#8a5a2b",
 };

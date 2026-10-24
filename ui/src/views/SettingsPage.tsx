@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import type { Anchor } from "../bindings/Anchor";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { AppSettings } from "../bindings/AppSettings";
 import type { RangeProfile } from "../bindings/RangeProfile";
@@ -152,6 +153,8 @@ export function SettingsPage({ onSaved }: { onSaved: (s: AppSettings) => void })
         </div>
       </div>
 
+      <AnchorSongs />
+
       <div className="card section">
         <h3>Coach (MCP)</h3>
         <p className="small muted">
@@ -209,6 +212,110 @@ function Snippet({ title, text }: { title: string; text: string }) {
         </button>
       </div>
       <pre className="code">{text}</pre>
+    </div>
+  );
+}
+
+/** Songs the user knows in their original key, for the anchor-song exercise. */
+function AnchorSongs() {
+  const [anchors, setAnchors] = useState<Anchor[]>([]);
+  const [title, setTitle] = useState("");
+  const [first, setFirst] = useState(55);
+  const [error, setError] = useState<string | null>(null);
+  const load = () => api("listAnchors").then(setAnchors).catch((e) => setError(e.message));
+  useEffect(() => {
+    load();
+  }, []);
+
+  const add = async () => {
+    setError(null);
+    try {
+      await api("saveAnchor", { id: "", title, first_note: noteId(first), melody: null, created_at: "", source: "" });
+      setTitle("");
+      load();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const practise = async (mode: "sing_first_note" | "key_check") => {
+    setError(null);
+    const n = mode === "key_check" ? anchors.filter((a) => a.melody).length : anchors.length;
+    const spec = {
+      title: mode === "key_check" ? "Anchor songs: original key?" : "Anchor songs: first notes",
+      blocks: [{ type: "anchor_song", count: Math.max(8, n * 2), feedback: "after_trial", params: { mode } }],
+    };
+    try {
+      await api("startSession", { source: "spec", spec });
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const withMelody = anchors.some((a) => a.melody);
+  return (
+    <div className="card section">
+      <div className="section-head">
+        <h3>Anchor songs</h3>
+        <div className="row">
+          <button className="btn small" disabled={anchors.length === 0} onClick={() => practise("sing_first_note")}>
+            Practise first notes
+          </button>
+          <button className="btn small" disabled={!withMelody} onClick={() => practise("key_check")} title={withMelody ? "" : "Needs an opening phrase, which your coach can add"}>
+            Original key or shifted?
+          </button>
+        </div>
+      </div>
+      <p className="small muted">
+        Songs you know well in their original key. Practice asks you to sing each song's first note from memory. When an opening phrase is saved (your coach
+        can add one with <code>save_anchor</code>), it also plays the opening in or out of the original key.
+      </p>
+      {error && <div className="notice error">{error}</div>}
+      {anchors.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Song</th>
+              <th>First note</th>
+              <th>Opening phrase</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {anchors.map((a) => (
+              <tr key={a.id}>
+                <td>{a.title}</td>
+                <td className="num">{a.first_note.replace("#", "♯").replace(/b(?=-?\d)/, "♭")}</td>
+                <td className="muted">{a.melody ? `${a.melody.notes.length} notes` : "–"}</td>
+                <td style={{ textAlign: "right" }}>
+                  <button className="btn small quiet" onClick={() => api("removeAnchor", a.id).then(load).catch(() => undefined)}>
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="row" style={{ gap: 12, alignItems: "flex-end" }}>
+        <label className="field grow">
+          Song
+          <input type="text" value={title} placeholder="Title (artist)" onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        <label className="field">
+          First note
+          <select value={first} onChange={(e) => setFirst(parseInt(e.target.value, 10))}>
+            {Array.from({ length: 49 }, (_, i) => 36 + i).map((m) => (
+              <option key={m} value={m}>
+                {noteDisplay(m)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button className="btn" disabled={!title.trim()} onClick={add}>
+          Add
+        </button>
+      </div>
     </div>
   );
 }

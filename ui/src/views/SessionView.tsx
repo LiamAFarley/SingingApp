@@ -15,7 +15,7 @@ import { beatTicks, describeKey } from "../notation/layout";
 // VexFlow is large; load it with the first notated exercise.
 const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
 const ScoreEditor = lazy(() => import("../notation/ScoreEditor").then((m) => ({ default: m.ScoreEditor })));
-import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
+import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, PAIRING_COLORS, pct } from "../music";
 
 const FEEDBACK_TEXT: Record<string, string> = {
   continuous: "Live pitch line and results after each trial",
@@ -208,6 +208,10 @@ function KindHelp({ kind }: { kind: string | null }) {
     sustain: "Hold the note steadily until the bar ends. Vibrato is fine; the note centre is what counts.",
     sing_interval: "The first note sounds during the count-in. Sing both notes in time with the clicks.",
     pattern: "Follow the bars in time with the metronome. In echo mode you hear the pattern first, then sing it.",
+    sight_sing: "Read the melody on the staff. The key and first note are played, then a bar is counted in: sing in time with the clicks.",
+    melodic_dictation: "Listen, then write the melody on the staff. 2–6 choose the length, A–G enter notes in the key, Enter checks.",
+    anchor_song: "Sing the first note of each song as it sounds on the original recording, or say whether the opening is in its original key.",
+    incidental_pairing: "A tone plays and a colour appears. Press the colour as fast as you can with the number keys. Nothing is asked about the tone.",
   };
   return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
 }
@@ -262,6 +266,7 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
       {trial.layout === "pitch_classes" && <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "notes" && <NotesPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "list" && <ChoiceGrid choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "colors" && <ColorTask trial={trial} enabled={enabled} states={states} onPick={pick} />}
       <Result runner={runner} />
       <div className="controls">
         {phase === "answering" && trial.can_replay && (
@@ -381,6 +386,39 @@ function PairingStage({ trial }: { trial: TrialView }) {
       <div className="prompt-sub">Listen</div>
       <div className="big-label" style={{ minHeight: 64 }}>
         {show ? trial.label : ""}
+      </div>
+    </div>
+  );
+}
+
+/** Incidental pairing: the colour appears shortly after the tone; press it. */
+function ColorTask({ trial, enabled, states, onPick }: { trial: TrialView; enabled: boolean; states: Record<string, KeyState>; onPick: (id: string) => void }) {
+  useAnimationFrame(trial.label_at_s != null);
+  const shown = trial.label != null && trial.label_at_s != null && live.now() >= trial.label_at_s ? trial.label : null;
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= trial.choices.length) {
+        e.preventDefault();
+        onPick(trial.choices[n - 1].id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  return (
+    <div className="section" style={{ alignItems: "center", gap: 18 }}>
+      <div className="swatch" style={{ background: shown ? PAIRING_COLORS[shown] : "var(--surface-muted)" }} />
+      <div className="row" style={{ gap: 10 }}>
+        {trial.choices.map((c, i) => (
+          <button key={c.id} className={`color-key ${states[c.id] ?? ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
+            <span className="dot" style={{ background: PAIRING_COLORS[c.id] }} />
+            {c.label}
+            <span className="kbd">{i + 1}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

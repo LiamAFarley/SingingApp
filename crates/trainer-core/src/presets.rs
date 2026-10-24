@@ -94,6 +94,12 @@ const FILES: &[(&str, &str, &str, &str)] = &[
         include_str!("../presets/ap_pairing.json"),
     ),
     (
+        "ap_incidental",
+        "Absolute pitch",
+        "A quick colour task in which each colour always comes with the same note. Exposure only.",
+        include_str!("../presets/ap_incidental.json"),
+    ),
+    (
         "ap_key_finding",
         "Absolute pitch",
         "Name the key of a cadence with no reference tone.",

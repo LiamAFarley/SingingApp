@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use ts_rs::TS;
 
 use crate::schema::{
-    ChordIdParams, DictationParams, ExerciseKind, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
+    AnchorSongParams, ChordIdParams, DictationParams, ExerciseKind, IncidentalPairingParams, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
     PitchPairingParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams,
     SustainParams, TonalCenterIdParams,
 };
@@ -420,6 +420,18 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Melodic dictation: the key is played (cadence), a bar is counted in and the melody plays; the user writes it on a staff in the score editor (durations, dots, rests, accidentals) and checks it. Graded note by note after aligning the written notes to the melody, so one rhythm slip does not cost later pitches; grade_rhythm=false grades pitches only. melody works as in sight_sing (generate or given). max_plays limits hearings (0 = no limit); give_first_note writes the first note in.",
             schema_of::<DictationParams>(),
             json!({"type": "melodic_dictation", "count": 6, "feedback": "after_trial", "params": {"melody": {"generate": {"keys": ["C", "F", "G"], "bars": 2, "rhythms": ["half", "quarter"], "max_leap": 2}}, "max_plays": 4}}),
+        ),
+        entry(
+            ExerciseKind::AnchorSong,
+            "Anchor songs (songs the user knows in their original key, saved in the app or with save_anchor). mode sing_first_note: 'Sing the first note of …', graded by pitch class with the octave reported. mode key_check: the saved opening phrase plays in the original key or shifted by one of `shifts`; answer original or shifted (needs anchors with a melody). Fails validation when no matching anchors are saved; check list_anchors first.",
+            schema_of::<AnchorSongParams>(),
+            json!({"type": "anchor_song", "count": 8, "params": {"mode": "sing_first_note"}}),
+        ),
+        entry(
+            ExerciseKind::IncidentalPairing,
+            "Incidental pairing: a colour task in which each colour always comes with the same pitch class (fixed colours: C red, C# orange, D yellow, D# olive, E green, F teal, F# sky, G blue, G# indigo, A purple, A# pink, B brown). The user presses the colour; the tone is never mentioned. Exposure only, never evidence of absolute pitch; transfer is measured with pitch_id. mismatch_rate trials pair a colour with another class: slower responses on those (get_stats grouped by stimulus.matched, field rt) suggest the pairing is being learnt.",
+            schema_of::<IncidentalPairingParams>(),
+            json!({"type": "incidental_pairing", "count": 60, "params": {"classes": ["C", "E", "G#", "D"]}}),
         ),
     ]
 }

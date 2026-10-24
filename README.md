@@ -94,6 +94,6 @@ TypeScript types in `ui/src/bindings` are generated from the Rust types by `carg
 | --- | --- |
 | `crates/trainer-core` | Theory, session schema, generators, pitch tracking, grading, storage, stats, presets, reports |
 | `crates/trainer-audio` | Real-time engine, cpal/ASIO device layer, SoundFont and synth rendering, calibration |
-| `crates/trainer-mcp` | MCP server (19 tools) |
+| `crates/trainer-mcp` | MCP server (22 tools) |
 | `crates/trainer-app` | Tauri app: session runner, live pitch forwarding, commands |
 | `ui` | React UI |

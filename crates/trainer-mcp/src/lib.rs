@@ -34,7 +34,9 @@ Rules:\n\
 - Holdout stimuli (pool \"holdout\") are for assessment only. Put assessments at the start of a session, with no feedback.\n\
 - Fade feedback as accuracy stabilises: continuous -> after_trial -> none. Test transfer (new octaves, timbres, keys) before \
 calling something learned, and retest after gaps for retention.\n\
-- pitch_pairing and other passive exposure are not evidence of absolute pitch.\n\
+- pitch_pairing, incidental_pairing and other exposure are not evidence of absolute pitch.\n\
+- Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated or written by you \
+({\"given\": [{key, time, notes: [{note, beats}]}]}). Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \
 -> no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence \
 of healthy technique.\n\
@@ -131,6 +133,16 @@ pub struct PresetIdRequest {
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SaveAnchorRequest {
+    pub anchor: trainer_core::schema::Anchor,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveAnchorRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CoachNoteRequest {
     pub text: String,
     #[serde(default)]
@@ -163,14 +175,7 @@ impl TrainerServer {
     }
 
     fn gen_context(&self) -> Result<GenContext, String> {
-        self.with_db(|db| {
-            let range = db.range_profile()?;
-            let pools: PoolConfig = db.get_setting("stimulus_pools")?.unwrap_or_default();
-            Ok(GenContext {
-                comfortable: range.comfortable(),
-                pools,
-            })
-        })
+        self.with_db(|db| db.gen_context())
     }
 }
 
@@ -475,6 +480,40 @@ impl TrainerServer {
     }
 
     #[tool(
+        description = "Anchor songs the user saved: songs they know in the original key, with the first sung note and optionally the opening phrase (used by the anchor_song exercise)."
+    )]
+    async fn list_anchors(&self) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| db.anchors()) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Save an anchor song (or update one with the same id or title): title, first_note as recorded in the original key (e.g. \"G4\"), and optionally melody = the opening phrase in the original key as {key, time, notes: [{note, beats} | {rest}]} for key_check trials. Only save what the user confirms; never guess a recording's key."
+    )]
+    async fn save_anchor(
+        &self,
+        Parameters(req): Parameters<SaveAnchorRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| db.save_anchor(&req.anchor, "llm")) {
+            Ok(a) => text(&a),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(description = "Remove an anchor song by id.")]
+    async fn remove_anchor(
+        &self,
+        Parameters(req): Parameters<RemoveAnchorRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| db.remove_anchor(&req.id)) {
+            Ok(removed) => text(&json!({ "removed": removed })),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
         description = "Persist a coaching note (plan, observation, next steps). Kept with the training data, so it survives across conversations and agents."
     )]
     async fn save_coach_note(
@@ -595,6 +634,8 @@ mod tests {
             "queue_session",
             "list_exercise_types",
             "save_coach_note",
+            "save_anchor",
+            "list_anchors",
         ] {
             assert!(names.iter().any(|x| x == n), "missing tool {n}");
         }
@@ -634,6 +675,17 @@ mod tests {
             b["validation"]["errors"][0]["path"],
             json!("blocks[0].params")
         );
+
+        // Anchor songs: refused until one is saved, then generated from it.
+        let anchors_session = json!({"title": "Anchors", "blocks": [{"type": "anchor_song", "count": 4}]});
+        let (_, a) = call(&client, "queue_session", json!({"session": anchors_session, "dry_run": true})).await;
+        assert_eq!(a["validation"]["ok"], json!(false));
+        let (err, saved) = call(&client, "save_anchor", json!({"anchor": {"title": "Yesterday", "first_note": "G4"}})).await;
+        assert!(!err, "{saved}");
+        let (_, list) = call(&client, "list_anchors", json!({})).await;
+        assert_eq!(list.as_array().unwrap().len(), 1);
+        let (_, a) = call(&client, "queue_session", json!({"session": anchors_session, "dry_run": true})).await;
+        assert_eq!(a["validation"]["ok"], json!(true), "{a}");
 
         let (_, sessions) = call(&client, "list_sessions", json!({"status": "queued"})).await;
         assert_eq!(sessions.as_array().unwrap().len(), 1);

@@ -433,7 +433,11 @@ impl<'a> SessionRun<'a> {
         let onset_frame = at;
         let onset = Instant::now()
             + Duration::from_secs_f64(onset_frame.saturating_sub(engine.now()) as f64 / sr);
+        // With a visual cue (incidental pairing) response times and the deadline count from it.
+        let cue_delay = Duration::from_millis(t.cue.as_ref().map(|c| c.delay_ms as u64).unwrap_or(0));
+        let rt_from = onset + cue_delay;
         let layout = match t.exercise {
+            ExerciseKind::IncidentalPairing => ChoiceLayout::Colors,
             ExerciseKind::PitchId | ExerciseKind::TonalCenterId
                 if t.choices.iter().all(|c| {
                     c.id.parse::<trainer_core::theory::PitchClass>().is_ok() || c.id == "other"
@@ -451,6 +455,11 @@ impl<'a> SessionRun<'a> {
         view.can_replay = t.deadline_ms.is_none();
         view.can_reference = t.reference.is_some();
         view.response_start_s = Some(secs(engine, onset_frame));
+        if let Some(c) = &t.cue {
+            view.label = Some(c.color.clone());
+            view.label_at_s = Some(secs(engine, onset_frame) + c.delay_ms as f64 / 1000.0);
+            view.can_replay = false;
+        }
         let _ = feedback;
         self.set(|st| {
             st.phase = Phase::Listening;
@@ -458,7 +467,7 @@ impl<'a> SessionRun<'a> {
         });
         let deadline = t
             .deadline_ms
-            .map(|d| onset + Duration::from_millis(d as u64));
+            .map(|d| rt_from + Duration::from_millis(d as u64));
         let mut answering = false;
         let mut replays = 0u32;
         let (answer, rt) = loop {
@@ -479,10 +488,13 @@ impl<'a> SessionRun<'a> {
                     }
                 }
                 Some(RunnerCommand::Answer { choice }) if answering => {
-                    let rt = Instant::now()
-                        .saturating_duration_since(onset)
-                        .as_secs_f64()
-                        * 1000.0;
+                    // Negative when a cued answer comes before its cue (anticipation).
+                    let now_i = Instant::now();
+                    let rt = if now_i >= rt_from {
+                        now_i.duration_since(rt_from).as_secs_f64() * 1000.0
+                    } else {
+                        -(rt_from.duration_since(now_i).as_secs_f64() * 1000.0)
+                    };
                     break (Some(choice), Some(rt));
                 }
                 Some(RunnerCommand::Replay) if answering && deadline.is_none() => {
@@ -590,12 +602,7 @@ impl<'a> SessionRun<'a> {
         }
         let rec_start = at + engine.frames_from_ms(t.delay_ms as f64);
         let rec_end = rec_start + engine.frames_from_ms(t.response_ms as f64);
-        let mut view = self.base_view(
-            ExerciseKind::SingPitch,
-            Interaction::SingPitch,
-            &t.prompt,
-            attempt,
-        );
+        let mut view = self.base_view(t.exercise, Interaction::SingPitch, &t.prompt, attempt);
         view.show_live_pitch = feedback == FeedbackMode::Continuous;
         view.response_start_s = Some(secs(engine, rec_start));
         view.response_end_s = Some(secs(engine, rec_end));

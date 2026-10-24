@@ -642,7 +642,7 @@ pub fn note_events(notes: &[ScoreNote], time: TimeSig, tempo_bpm: f32, timbre: &
 }
 
 /// A melody written by the coach.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct CompactMelody {
     /// Key, e.g. "C major", "Eb major", "F# minor".
     pub key: String,
@@ -664,7 +664,7 @@ fn d_common_time() -> TimeSig {
     TimeSig::COMMON
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(untagged)]
 pub enum CompactNote {
     Note { note: Pitch, beats: f32 },

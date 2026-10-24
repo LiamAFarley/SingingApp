@@ -755,6 +755,7 @@ mod tests {
 
     fn id_trial(correct: &str) -> IdentifyTrial {
         IdentifyTrial {
+            cue: None,
             exercise: ExerciseKind::PitchId,
             prompt: "Name the note".into(),
             events: vec![],
@@ -795,6 +796,7 @@ mod tests {
         sig.extend(silence(SR, 0.3));
         let tr = track(&sig, &TrackOptions::new(SR));
         let trial = SingPitchTrial {
+            exercise: ExerciseKind::SingPitch,
             prompt: "Sing E♭".into(),
             target_class: PitchClass::new(3),
             target_midi: None,

@@ -14,6 +14,7 @@ import type { SessionReport } from "./bindings/SessionReport";
 import type { SessionRow } from "./bindings/SessionRow";
 import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
+import type { Anchor } from "./bindings/Anchor";
 import type { Score } from "./bindings/Score";
 import type { ScoreNote } from "./bindings/ScoreNote";
 
@@ -74,6 +75,18 @@ function session(id: string, title: string, accuracy: number, hoursAgo: number):
     summary: { accuracy, trials: 48 },
   };
 }
+
+let anchors: Anchor[] = [
+  { id: "a1", title: "Yesterday (The Beatles)", first_note: "G4", melody: null, created_at: "", source: "manual" },
+  {
+    id: "a2",
+    title: "Happy Birthday (as the family sings it)",
+    first_note: "G3",
+    melody: { key: "C major", time: "3/4", clef: "auto", tempo_bpm: 100, notes: [{ note: "G3", beats: 0.75 }, { note: "G3", beats: 0.25 }, { note: "A3", beats: 1 }, { note: "G3", beats: 1 }, { note: "C4", beats: 1 }, { note: "B3", beats: 2 }], title: null },
+    created_at: "",
+    source: "llm",
+  },
+];
 
 let state: RunnerState = idle();
 let seq = 0;
@@ -396,6 +409,37 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
   };
 }
 
+function colorTrial(): TrialView {
+  const now = clock();
+  return {
+    kind: "incidental_pairing",
+    interaction: "choice",
+    prompt: "Press the colour",
+    choices: [
+      { id: "red", label: "Red" },
+      { id: "yellow", label: "Yellow" },
+      { id: "green", label: "Green" },
+      { id: "indigo", label: "Indigo" },
+    ],
+    layout: "colors",
+    deadline_ms: 3000,
+    can_replay: false,
+    can_reference: false,
+    lane: null,
+    show_live_pitch: false,
+    label: "green",
+    label_at_s: now + 0.3,
+    timeline_start_s: null,
+    response_start_s: now,
+    response_end_s: null,
+    attempt: 0,
+    assisted: false,
+    score: null,
+    plays: 0,
+    max_plays: 0,
+  };
+}
+
 function scaleLane(): LaneSpec {
   const beat = 60 / 96;
   const degrees = [0, 2, 4, 5, 7, 9, 11, 12, 11, 9, 7, 5, 4, 2, 0];
@@ -561,6 +605,8 @@ function startScenario() {
       ];
       emit({ phase: "feedback", feedback: dictationFeedback(answer) });
     }
+  } else if (scenario === "colors") {
+    emit({ phase: "answering", session_id: "demo", title: "Colour task (incidental pairing)", block_count: 1, block_title: "Press the colour", block_kind: "incidental_pairing", trial_index: 11, trial_count: 60, done_in_block: 11, correct_in_block: 11, trial: colorTrial() });
   } else if (scenario === "summary") {
     emit({ phase: "session_summary", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, session_report: report });
   }
@@ -742,6 +788,17 @@ export function mockBackend(): Backend {
     setRangeProfile: async (p) => p,
     addComfortReport: async () => {},
     getStats: async () => [],
+    listAnchors: async () => anchors,
+    saveAnchor: async (a) => {
+      const saved = { ...a, id: a.id || `a${anchors.length + 1}`, created_at: new Date().toISOString(), source: "manual" };
+      anchors = [...anchors.filter((x) => x.id !== saved.id), saved].sort((x, y) => x.title.localeCompare(y.title));
+      return saved;
+    },
+    removeAnchor: async (id) => {
+      const before = anchors.length;
+      anchors = anchors.filter((x) => x.id !== id);
+      return anchors.length < before;
+    },
     subscribeLive: async (onBatch) => {
       let t0 = clock();
       setInterval(() => {
