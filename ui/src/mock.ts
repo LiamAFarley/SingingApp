@@ -151,6 +151,7 @@ function choiceTrial(): TrialView {
     can_reference: false,
     lane: null,
     show_live_pitch: false,
+    grading_mode: null,
     label: null,
     label_at_s: null,
     timeline_start_s: null,
@@ -177,6 +178,7 @@ function singPitchTrial(): TrialView {
     can_reference: false,
     lane: null,
     show_live_pitch: true,
+    grading_mode: null,
     label: null,
     label_at_s: null,
     timeline_start_s: null,
@@ -202,6 +204,7 @@ function pairingTrial(): TrialView {
     can_reference: false,
     lane: null,
     show_live_pitch: false,
+    grading_mode: null,
     label: "F♯",
     label_at_s: clock() + 0.3,
     timeline_start_s: null,
@@ -277,7 +280,8 @@ function sightTrial(phaseOffset: number): TrialView {
     can_replay: false,
     can_reference: false,
     lane,
-    show_live_pitch: false,
+    show_live_pitch: true,
+    grading_mode: "any_octave",
     label: null,
     label_at_s: null,
     timeline_start_s: laneStart,
@@ -379,6 +383,7 @@ function dictationTrial(): TrialView {
     can_reference: true,
     lane: null,
     show_live_pitch: false,
+    grading_mode: null,
     label: null,
     label_at_s: null,
     timeline_start_s: clock(),
@@ -441,6 +446,7 @@ function colorTrial(): TrialView {
     can_reference: false,
     lane: null,
     show_live_pitch: false,
+    grading_mode: null,
     label: "green",
     label_at_s: now + 0.3,
     timeline_start_s: null,
@@ -467,6 +473,7 @@ function degreeTrial(): TrialView {
     can_reference: false,
     lane: null,
     show_live_pitch: false,
+    grading_mode: null,
     label: null,
     label_at_s: null,
     timeline_start_s: null,
@@ -550,6 +557,7 @@ function harmonyTrial(): TrialView {
     lane,
     assisted: practice,
     show_live_pitch: true,
+    grading_mode: "absolute",
     timeline_start_s: laneStart,
     response_start_s: laneStart + lane.sing_start_s,
     response_end_s: laneStart + lane.total_s,
@@ -570,6 +578,7 @@ function sungTrial(): TrialView {
     can_reference: false,
     lane,
     show_live_pitch: true,
+    grading_mode: "any_octave",
     label: null,
     label_at_s: null,
     timeline_start_s: laneStart,
@@ -701,7 +710,7 @@ function startScenario() {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });
   } else if (scenario === "pairing") {
     emit({ phase: "listening", session_id: "demo", title: "Absolute pitch: pairing", block_count: 1, block_title: "Hear and label", block_kind: "pitch_pairing", trial_index: 4, trial_count: 24, feedback_mode: "none", trial: pairingTrial() });
-  } else if (scenario === "sight" || scenario === "sight-feedback" || scenario === "sight-intro") {
+  } else if (scenario === "sight" || scenario === "sight-octave" || scenario === "sight-feedback" || scenario === "sight-intro") {
     kind = "sung";
     const offset = scenario === "sight-intro" ? 1.5 : 60 / 72 * 10.5;
     const trial = sightTrial(offset);
@@ -990,6 +999,8 @@ export function mockBackend(): Backend {
           let midi: number | null;
           if (state.phase === "recording" && lane && state.trial?.interaction === "sung") {
             midi = simulatedMidi(t - laneStart);
+            // A man reading treble clef an octave down.
+            if (midi != null && scenario === "sight-octave") midi -= 12;
           } else if (scenario === "sing-pitch-feedback") {
             // Gliding up from G onto A-flat.
             midi = 56 - Math.max(0, 0.8 - (t - mockStart) * 0.3) + 0.05 * Math.sin(2 * Math.PI * 5.2 * t);

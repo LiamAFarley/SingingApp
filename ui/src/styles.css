@@ -866,10 +866,28 @@ pre.code {
 .staff-trace path {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 1.6;
+  stroke-width: 1.8;
   stroke-linejoin: round;
   stroke-linecap: round;
-  opacity: 0.85;
+  opacity: 0.9;
+}
+
+/* Tinted by how close the voice is to the written note. */
+.staff-trace path.good {
+  stroke: var(--correct);
+}
+
+.staff-trace path.near {
+  /* Brighter than --marginal so a thin line still reads as yellow. */
+  stroke: #bf8700;
+}
+
+.staff-trace path.off {
+  stroke: var(--wrong);
+}
+
+.staff-trace path.rest {
+  stroke: var(--text-faint);
 }
 
 .marker path,

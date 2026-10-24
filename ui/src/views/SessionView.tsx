@@ -16,7 +16,7 @@ import { beatTicks, describeKey } from "../notation/layout";
 // VexFlow is large; load it with the first notated exercise.
 const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
 const ScoreEditor = lazy(() => import("../notation/ScoreEditor").then((m) => ({ default: m.ScoreEditor })));
-import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, PAIRING_COLORS, pct } from "../music";
+import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, PAIRING_COLORS, pct, traceStyle } from "../music";
 
 const FEEDBACK_TEXT: Record<string, string> = {
   continuous: "Live pitch line and results after each trial",
@@ -540,7 +540,14 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
         </div>
       </div>
       <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 200 }} />}>
-        <Staff score={score} trace={graded ? graded.trace : liveTrace} timing={timing} results={graded ? graded.notes : null} cursorTick={cursorTick} />
+        <Staff
+          score={score}
+          trace={graded ? graded.trace : liveTrace}
+          {...traceStyle(trial.grading_mode)}
+          timing={timing}
+          results={graded ? graded.notes : null}
+          cursorTick={cursorTick}
+        />
       </Suspense>
       {recording && <Steps lane={lane} t={t} />}
       {recording && lane.metronome && <BeatDots lane={lane} t={t} />}

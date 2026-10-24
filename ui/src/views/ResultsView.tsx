@@ -1,11 +1,12 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import type { NoteResult } from "../bindings/NoteResult";
+import type { PitchRefMode } from "../bindings/PitchRefMode";
 import type { Score } from "../bindings/Score";
 import type { SessionReport } from "../bindings/SessionReport";
 import type { SessionRow } from "../bindings/SessionRow";
 import type { TrialBrief } from "../bindings/TrialBrief";
-import { fmtCents, fmtDate, fmtDuration, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
+import { fmtCents, fmtDate, fmtDuration, fmtMs, KIND_TITLES, noteDisplay, pct, traceStyle } from "../music";
 
 const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
 
@@ -190,6 +191,7 @@ function TrialDetail({ trial }: { trial: TrialBrief }) {
             score={spec.score}
             maxHeight={360}
             trace={rows}
+            {...traceStyle(metrics.mode as PitchRefMode | undefined)}
             timing={{ singStartS: (spec.sing_start_beat ?? 0) * beatS, beatS }}
             results={(metrics.notes as NoteResult[] | undefined) ?? null}
           />

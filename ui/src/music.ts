@@ -1,3 +1,5 @@
+import type { PitchRefMode } from "./bindings/PitchRefMode";
+
 const DISPLAY = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
 const SHARP_IDS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -75,6 +77,18 @@ export function fmtDuration(s: number | null | undefined): string {
   const m = Math.floor(s / 60);
   const r = Math.round(s % 60);
   return m > 0 ? `${m} min ${r.toString().padStart(2, "0")} s` : `${r} s`;
+}
+
+/**
+ * How a sung trace is drawn on a staff for the trial's grading mode: tinted by its distance from
+ * the written notes unless graded relative to the singer's own start, and moved into the written
+ * octave when the octave does not count.
+ */
+export function traceStyle(mode: PitchRefMode | null | undefined): { tint: boolean; foldOctaves: boolean } {
+  return {
+    tint: mode !== "relative_to_first" && mode !== "relative_drift_tolerant",
+    foldOctaves: mode === "any_octave" || mode === "pitch_class",
+  };
 }
 
 export const KIND_TITLES: Record<string, string> = {

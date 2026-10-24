@@ -273,7 +273,8 @@ Units: `midi = 69 + 12·log2(f / A4)`, cents = 100 × midi. A4 defaults to 440 H
 
 | Mode | Use |
 |---|---|
-| `absolute` | error vs the target pitch (pitch matching, sustain, AP production with octave) |
+| `absolute` | error vs the target pitch (harmony against another voice, AP production with octave) |
+| `any_octave` | absolute, but the whole line may be sung a whole number of octaves above or below; the shift is estimated from the take (median of sung minus target over overlapping notes), reported as `octave_offset` and in the summary. Default for sung exercises that are not absolute pitch (pitch matching, sustain, intervals, patterns, sight singing with a given start) |
 | `pitch_class` | absolute with octave ignored (AP production; octave reported separately) |
 | `relative_to_first` | targets re-anchored to the singer's first note (interval singing, melodies without a given pitch) |
 | `relative_drift_tolerant` | a global offset and a drift line are fitted across the phrase and reported separately from per-note errors (long unaccompanied melodies) |
@@ -506,10 +507,10 @@ Separate rhythm types (reproduction, reading, error detection) are dropped: rhyt
 
 | Type | Description | Grading mode |
 |---|---|---|
-| `pitch_match` | Hear a reference → sing it (together with it or after it). | absolute |
-| `sustain` | Hold a note for N seconds, optionally over a drone. | absolute; centre error, drift, stability, vibrato |
-| `sing_interval` | From a start note (played or self-chosen), sing an interval up or down. | relative_to_first or absolute |
-| `pattern` | Scales, arpeggios, slides and vocalise patterns, transposed stepwise through a range. | absolute or relative |
+| `pitch_match` | Hear a reference → sing it (together with it or after it). | any_octave |
+| `sustain` | Hold a note for N seconds, optionally over a drone. | any_octave; centre error, drift, stability, vibrato |
+| `sing_interval` | From a start note (played or self-chosen), sing an interval up or down. | any_octave, or relative_to_first |
+| `pattern` | Scales, arpeggios, slides and vocalise patterns, transposed stepwise through a range. | any_octave, or relative_drift_tolerant when nothing is played |
 | `harmony` | Sing one voice while the app plays another: a diatonic third, fourth, fifth or sixth below or above a melody (generated, coach-written or from the library; by ear or read from the staff), the melody over that voice, or one voice of a two- to four-part piece the coach writes (inline as `source.given`, or in the library), sung as written with any intervals; `play_parts` chooses the accompanying voices. A parallel voice that would form a tritone takes a perfect fourth instead; written parts are never changed. Practice mode plays the singer's part along (stored as assisted). The other voice shows in the lane. | absolute; equal or just tuning (each note against the pure interval over the other voice) |
 | `echo` | Hear a phrase → sing it back. | melody alignment |
 | `own_voice_match` | Match a stored best take of your own voice. | absolute |
@@ -519,6 +520,7 @@ Separate rhythm types (reproduction, reading, error detection) are dropped: rhyt
 - **Tuner** (its own view, and available in any free-singing moment): large note name, cents meter, frequency, a scrolling pitch history, and an optional reference tone or drone. Uses the live pitch pass (§5).
 - **Follow-along pitch lane** for every sung exercise with more than one note: target notes are bars on a semitone grid that scroll past a fixed "now" line in time with the metronome; the live pitch trace is drawn over them; the current note is highlighted; a count-in precedes the first note. After the attempt the bars are coloured by grade (§15 colours).
 - The lane follows the block's feedback mode: `continuous` shows the live trace during the attempt; `after_trial` reveals the trace and grades afterwards; `none` hides both. For sight singing, `lane_targets: hidden_until_done` keeps the target bars hidden so the lane does not give the pitches away; the score is the only guide.
+- On a staff (sight singing, harmony read from the score) the live line is drawn over the notes on every attempt whose result the block shows, from the first: it gives nothing away that the score does not. It is tinted by distance from the written note, averaged over ±0.1 s so vibrato does not flicker it: green within 25 cents, yellow within 50, red beyond, grey between notes. Under `any_octave` it is drawn in the written octave; graded relative to the singer's first note, it is left untinted. The runner sends the trial's grading mode with the view for this.
 
 ### Range profile
 

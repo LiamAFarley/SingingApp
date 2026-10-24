@@ -35,7 +35,8 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
   - Optional just-intonation grading against the other voice.
 - **Sight singing:** melodies read from staff notation.
   - The key and first note are played, a bar is counted in, then you sing.
-  - Afterwards your pitch trace is drawn on the staff, with a mark under each note.
+  - Your voice is drawn on the staff as you sing, from the first attempt: green within 25 cents of the written note, yellow within 50, red beyond. Afterwards each note gets a mark under it.
+  - Any octave counts: a melody sung an octave below (or above) the written pitches is graded on its notes, drawn in the written octave, and the result says which octave you sang in. This applies to every sung exercise except harmony, where the octave changes the interval.
   - Melodies are generated, written by the coach, or taken from the melody library.
 - **Melodic dictation:** hear a melody and write it in the score editor, then check it note by note.
   - 2–6 set the note length, `.` adds a dot, `0` enters a rest.

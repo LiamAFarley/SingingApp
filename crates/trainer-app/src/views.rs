@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use trainer_audio::{EngineInfo, EngineSettings, EngineStatus};
 use trainer_core::grade::NoteResult;
 use trainer_core::reports::{BlockReport, SessionReport};
-use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode};
+use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode, PitchRefMode};
 use trainer_core::score::{Score, ScoreNote};
 use trainer_core::storage::CalibrationRow;
 use ts_rs::TS;
@@ -116,8 +116,13 @@ pub struct TrialView {
     pub can_replay: bool,
     pub can_reference: bool,
     pub lane: Option<LaneSpec>,
-    /// Show the live pitch line (only with continuous feedback).
+    /// Show the live pitch line: with continuous feedback, when singing along, and on a staff
+    /// whenever the block shows results.
     pub show_live_pitch: bool,
+    /// Sung trials: how pitches are compared with the targets. On a staff the trace is tinted by
+    /// its distance from the written notes, unless the grading is relative to the singer's own
+    /// start, and drawn in the written octave when the octave does not count.
+    pub grading_mode: Option<PitchRefMode>,
     /// Pairing label, shown once `label_at_s` has passed on the master clock.
     pub label: Option<String>,
     pub label_at_s: Option<f64>,

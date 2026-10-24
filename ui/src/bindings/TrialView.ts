@@ -4,13 +4,21 @@ import type { ChoiceLayout } from "./ChoiceLayout";
 import type { ExerciseKind } from "./ExerciseKind";
 import type { Interaction } from "./Interaction";
 import type { LaneSpec } from "./LaneSpec";
+import type { PitchRefMode } from "./PitchRefMode";
 import type { Score } from "./Score";
 
 export type TrialView = { kind: ExerciseKind, interaction: Interaction, prompt: string, choices: Array<Choice>, layout: ChoiceLayout, deadline_ms: number | null, can_replay: boolean, can_reference: boolean, lane: LaneSpec | null, 
 /**
- * Show the live pitch line (only with continuous feedback).
+ * Show the live pitch line: with continuous feedback, when singing along, and on a staff
+ * whenever the block shows results.
  */
 show_live_pitch: boolean, 
+/**
+ * Sung trials: how pitches are compared with the targets. On a staff the trace is tinted by
+ * its distance from the written notes, unless the grading is relative to the singer's own
+ * start, and drawn in the written octave when the octave does not count.
+ */
+grading_mode: PitchRefMode | null, 
 /**
  * Pairing label, shown once `label_at_s` has passed on the master clock.
  */

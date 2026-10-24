@@ -99,8 +99,12 @@ pub fn default_mode(trial: &TrialSpec) -> PitchRefMode {
                 PitchRefMode::RelativeDriftTolerant
             } else if t.exercise == ExerciseKind::SightSing && unprompted {
                 PitchRefMode::RelativeToFirst
-            } else {
+            } else if t.exercise == ExerciseKind::Harmony {
+                // Against another voice the octave changes the interval.
                 PitchRefMode::Absolute
+            } else {
+                // Not absolute pitch: the line may be sung in another octave.
+                PitchRefMode::AnyOctave
             }
         }
         _ => PitchRefMode::Absolute,
@@ -2411,7 +2415,7 @@ mod tests {
                 ctx.comfortable.contains(t.notes[0].midi)
                     && ctx.comfortable.contains(t.notes[1].midi)
             );
-            assert_eq!(default_mode(&TrialSpec::Sung(t)), PitchRefMode::Absolute);
+            assert_eq!(default_mode(&TrialSpec::Sung(t)), PitchRefMode::AnyOctave);
         }
     }
 
@@ -2454,7 +2458,7 @@ mod tests {
             assert_eq!(t.sing_start_beat, 9.0 + score.time.beats as f32);
             let labels: Vec<&str> = t.sections.iter().map(|s| s.label.as_str()).collect();
             assert_eq!(labels, ["Establish key", "First note", "Count-in", "Sing"]);
-            assert_eq!(default_mode(&TrialSpec::Sung(t.clone())), PitchRefMode::Absolute);
+            assert_eq!(default_mode(&TrialSpec::Sung(t.clone())), PitchRefMode::AnyOctave);
         }
     }
 

@@ -397,6 +397,7 @@ impl<'a> SessionRun<'a> {
             can_reference: false,
             lane: None,
             show_live_pitch: false,
+            grading_mode: None,
             label: None,
             label_at_s: None,
             timeline_start_s: None,
@@ -664,7 +665,12 @@ impl<'a> SessionRun<'a> {
         let mut view = self.base_view(t.exercise, Interaction::Sung, &t.prompt, attempt);
         view.lane = Some(lane_for(t));
         view.score = t.score.clone();
-        view.show_live_pitch = feedback == FeedbackMode::Continuous || assisted;
+        // On a staff the live line never gives the notes away, so it shows on every attempt
+        // whose result the block shows.
+        view.show_live_pitch = feedback == FeedbackMode::Continuous
+            || assisted
+            || (t.score.is_some() && feedback.shows_trial_result());
+        view.grading_mode = Some(cfg.mode);
         view.timeline_start_s = Some(secs(engine, start));
         view.response_start_s = Some(secs(engine, start) + t.sing_start_ms() / 1000.0);
         view.response_end_s = Some(secs(engine, start + total));
@@ -885,6 +891,9 @@ impl<'a> SessionRun<'a> {
             .get("capture_offset_s")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0) as f32;
+        // A line sung in another octave is drawn in the octave of the targets it was graded against.
+        let octave_shift = 12.0
+            * outcome.metrics.get("octave_offset").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
         let trace: Vec<(f32, Option<f32>)> = if show {
             extras
                 .track
@@ -892,7 +901,7 @@ impl<'a> SessionRun<'a> {
                 .map(|tr| {
                     tr.frames
                         .iter()
-                        .map(|f| (f.t - capture_offset, f.midi))
+                        .map(|f| (f.t - capture_offset, f.midi.map(|m| m - octave_shift)))
                         .collect()
                 })
                 .unwrap_or_default()

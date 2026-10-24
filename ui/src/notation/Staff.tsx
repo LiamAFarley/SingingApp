@@ -13,8 +13,10 @@ import {
   layoutTokens,
   lineFor,
   makePitchToDiatonic,
+  parsePitch,
   parseTime,
   pitchDisplay,
+  pitchMidi,
   restKey,
   vexClef,
   vexKey,
@@ -80,6 +82,10 @@ interface Props {
   maxHeight?: number;
   /** Graded or live pitch trace: (seconds on the trial timeline, MIDI or null). */
   trace?: [number, number | null][];
+  /** Tint the trace by how close it is to the written note it is sung against. */
+  tint?: boolean;
+  /** Draw the trace in the octave of the written note (for exercises where the octave does not count). */
+  foldOctaves?: boolean;
   /** Maps trial-timeline seconds to score ticks. */
   timing?: { singStartS: number; beatS: number };
   /** One result per sounding note, in order. */
@@ -100,7 +106,7 @@ interface Props {
   onPointerDown?: (p: StaffPointer) => void;
 }
 
-export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, timing, results, cursorTick, noteColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
+export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, tint = false, foldOctaves = false, timing, results, cursorTick, noteColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -187,7 +193,9 @@ export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, timin
           {selected != null && <Selection geom={geom} index={selected} />}
           {caretTick != null && <Caret geom={geom} tick={caretTick} />}
           {ghost && <Ghost geom={geom} ghost={ghost} clef={score.clef} />}
-          {trace && timing && <Trace geom={geom} trace={trace} timing={timing} beatTicks={bt} toDiatonic={toDiatonic} score={score} />}
+          {trace && timing && (
+            <Trace geom={geom} trace={trace} timing={timing} beatTicks={bt} toDiatonic={toDiatonic} score={score} tint={tint} fold={foldOctaves} />
+          )}
           {results && <Markers geom={geom} results={results} />}
           {cursorTick != null && <Cursor geom={geom} tick={cursorTick} />}
         </svg>
@@ -414,6 +422,12 @@ function xToTick(s: SystemGeom, x: number): number {
 
 const lineY = (s: SystemGeom, line: number) => s.topLineY + (5 - line) * SPACING;
 
+/** How close a sung pitch is to the written note, in cents: in tune, near, or off. */
+function tint(cents: number): "good" | "near" | "off" {
+  const c = Math.abs(cents);
+  return c <= 25 ? "good" : c <= 50 ? "near" : "off";
+}
+
 function Trace({
   geom,
   trace,
@@ -421,6 +435,8 @@ function Trace({
   beatTicks: bt,
   toDiatonic,
   score,
+  tint: tinted,
+  fold,
 }: {
   geom: StaffGeometry;
   trace: [number, number | null][];
@@ -428,18 +444,27 @@ function Trace({
   beatTicks: number;
   toDiatonic: (m: number) => number;
   score: Score;
+  tint: boolean;
+  fold: boolean;
 }) {
   const total = geom.systems.at(-1)?.endTick ?? 0;
-  const paths: string[] = [];
-  let d = "";
-  let lastSystem = -1;
+  // The written notes as (start tick, end tick, MIDI), to compare the trace with.
+  const written = useMemo(
+    () =>
+      score.notes.flatMap((n) => {
+        const p = n.pitch ? parsePitch(n.pitch) : null;
+        return p ? [{ start: n.start, end: n.start + n.dur, midi: pitchMidi(p) }] : [];
+      }),
+    [score],
+  );
+  // Placed points; a gap in time or a new system starts a new segment.
+  const pts: { x: number; y: number; system: number; seg: number; t: number; cents: number | null; note: number }[] = [];
+  let seg = 0;
   let lastT = -Infinity;
   for (const [t, m] of trace) {
     const tick = ((t - timing.singStartS) / timing.beatS) * bt;
     if (m == null || tick < -bt * 0.5 || tick > total + bt * 0.25 || t - lastT > 0.08) {
-      if (d) paths.push(d);
-      d = "";
-      lastSystem = -1;
+      seg++;
       if (m == null) {
         lastT = -Infinity;
         continue;
@@ -447,21 +472,50 @@ function Trace({
     }
     const p = tickToPoint(geom, Math.max(0, Math.min(total - 0.01, tick)));
     if (!p) continue;
-    const s = geom.systems[p.system];
-    const y = lineY(s, lineFor(toDiatonic(m), score.clef));
-    if (p.system !== lastSystem && d) {
-      paths.push(d);
-      d = "";
-    }
-    d += `${d ? "L" : "M"}${p.x.toFixed(1)} ${y.toFixed(1)} `;
-    lastSystem = p.system;
+    const ti = written.findIndex((n) => tick >= n.start && tick < n.end);
+    const target = ti >= 0 ? written[ti] : null;
+    // Sung against a written note: in its octave when the octave does not count.
+    const shown = target && fold ? m + 12 * Math.round((target.midi - m) / 12) : m;
+    if (pts.length && pts[pts.length - 1].system !== p.system) seg++;
+    const y = lineY(geom.systems[p.system], lineFor(toDiatonic(shown), score.clef));
+    pts.push({ x: p.x, y, system: p.system, seg, t, cents: target ? (shown - target.midi) * 100 : null, note: ti });
     lastT = t;
   }
-  if (d) paths.push(d);
+  // Tint by the note's centre rather than each vibrato swing: the mean over about 0.2 s of the
+  // same note and segment.
+  const HALF = 0.1;
+  const tintOf = pts.map((p, i) => {
+    if (!tinted) return "";
+    if (p.cents == null) return "rest";
+    let sum = 0;
+    let n = 0;
+    const add = (j: number) => {
+      if (pts[j].seg === p.seg && pts[j].note === p.note) {
+        sum += pts[j].cents!;
+        n++;
+      }
+    };
+    for (let j = i; j >= 0 && p.t - pts[j].t <= HALF; j--) add(j);
+    for (let j = i + 1; j < pts.length && pts[j].t - p.t <= HALF; j++) add(j);
+    return tint(sum / n);
+  });
+  // Runs of one tint; each starts where the previous ended so the line stays continuous.
+  const runs: { cls: string; d: string }[] = [];
+  let run: { cls: string; d: string } | null = null;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const prev = i > 0 && pts[i - 1].seg === p.seg ? pts[i - 1] : null;
+    if (!prev) run = null;
+    if (!run || run.cls !== tintOf[i]) {
+      run = { cls: tintOf[i], d: prev ? `M${prev.x.toFixed(1)} ${prev.y.toFixed(1)} ` : "" };
+      runs.push(run);
+    }
+    run.d += `${run.d ? "L" : "M"}${p.x.toFixed(1)} ${p.y.toFixed(1)} `;
+  }
   return (
     <g className="staff-trace">
-      {paths.map((p, i) => (
-        <path key={i} d={p} />
+      {runs.map((r, i) => (
+        <path key={i} d={r.d} className={r.cls || undefined} />
       ))}
     </g>
   );

@@ -345,6 +345,39 @@ fn median_f32(mut v: Vec<f32>) -> Option<f32> {
     Some(v[v.len() / 2])
 }
 
+/// "an octave lower", "two octaves higher", or nothing for no move.
+fn octave_words(shift_semis: f32) -> Option<String> {
+    let k = (shift_semis / 12.0).round() as i32;
+    let dir = if k < 0 { "lower" } else { "higher" };
+    match k.abs() {
+        0 => None,
+        1 => Some(format!("an octave {dir}")),
+        2 => Some(format!("two octaves {dir}")),
+        n => Some(format!("{n} octaves {dir}")),
+    }
+}
+
+/// How far the singer is from the targets in semitones: the median difference between each
+/// target and the segment that overlaps it most in time (or, with no overlaps at all, between
+/// the middle of what was sung and the middle of the targets). Used to find the octave.
+fn register_offset(expected: &[Expected], segs: &[NoteSegment]) -> f32 {
+    let diffs: Vec<f32> = expected
+        .iter()
+        .filter_map(|e| {
+            let overlap = |s: &NoteSegment| (s.offset_s.min(e.onset + e.dur) - s.onset_s.max(e.onset)).max(0.0);
+            segs.iter()
+                .filter(|s| overlap(s) > 0.0)
+                .max_by(|a, b| overlap(a).total_cmp(&overlap(b)))
+                .map(|s| s.median_midi - e.midi)
+        })
+        .collect();
+    median_f32(diffs).unwrap_or_else(|| {
+        let sung = median_f32(segs.iter().map(|s| s.median_midi).collect()).unwrap_or(0.0);
+        let target = median_f32(expected.iter().map(|e| e.midi).collect()).unwrap_or(0.0);
+        sung - target
+    })
+}
+
 /// Grades a sung timeline. `sing_start_s` is the capture time at which the trial's
 /// `sing_start_beat` falls (already latency-compensated).
 pub fn grade_sung(
@@ -378,6 +411,16 @@ pub fn grade_sung(
     if segs.is_empty() || expected.is_empty() {
         return no_voice_outcome();
     }
+    // Any octave: the targets move by the whole octaves the singer is away from them.
+    let octave_shift = if cfg.mode == PitchRefMode::AnyOctave {
+        (register_offset(&expected, &segs) / 12.0).round() * 12.0
+    } else {
+        0.0
+    };
+    let expected: Vec<Expected> = expected
+        .into_iter()
+        .map(|e| Expected { midi: e.midi + octave_shift, ..e })
+        .collect();
 
     let single = expected.len() == 1;
     let alignment: Vec<Option<usize>> = if single {
@@ -434,7 +477,7 @@ pub fn grade_sung(
     let mut offset_cents = 0.0f32;
     let mut drift_cents_per_s = 0.0f32;
     let adjusted: Vec<Option<f32>> = match cfg.mode {
-        PitchRefMode::Absolute => abs_errors.clone(),
+        PitchRefMode::Absolute | PitchRefMode::AnyOctave => abs_errors.clone(),
         PitchRefMode::PitchClass => abs_errors
             .iter()
             .map(|e| e.map(|c| crate::theory::wrap_semitones((c / 100.0) as f64) as f32 * 100.0))
@@ -480,7 +523,8 @@ pub fn grade_sung(
             .map(|e| e.abs() <= cfg.category_tol_cents)
             .unwrap_or(false);
         results.push(NoteResult {
-            target_midi: x.midi.round() as i32,
+            // The written note, before any octave move.
+            target_midi: (x.midi - octave_shift).round() as i32,
             expected_onset_s: x.onset,
             matched: m.is_some(),
             sung_midi: m.map(|m| m.target_midi + m.centre_cents / 100.0),
@@ -517,6 +561,9 @@ pub fn grade_sung(
         "mean_abs_cents": mean_abs,
         "mode": cfg.mode,
     });
+    if cfg.mode == PitchRefMode::AnyOctave {
+        metrics["octave_offset"] = json!((octave_shift / 12.0) as i32);
+    }
     if matches!(
         cfg.mode,
         PitchRefMode::RelativeToFirst | PitchRefMode::RelativeDriftTolerant
@@ -579,6 +626,9 @@ pub fn grade_sung(
                 "; drifted {:+.0} cents per bar",
                 drift_cents_per_s * beat_s * trial.beats_per_bar as f32
             ));
+        }
+        if let Some(octaves) = octave_words(octave_shift) {
+            s.push_str(&format!(" (sung {octaves})"));
         }
         s
     };
@@ -953,6 +1003,30 @@ mod tests {
         let ie = o.metrics["interval_cents_error"].as_f64().unwrap();
         assert!((ie - -20.0).abs() < 3.0, "{ie}");
         assert_eq!(o.metrics["interval_correct"], json!(true));
+    }
+
+    #[test]
+    fn any_octave_forgives_a_melody_sung_an_octave_down() {
+        // C5 D5 E5 sung as C4 D4 E4, the middle note 30 cents sharp.
+        let trial = sung_trial(&[(72, 0.0, 1.0), (74, 1.0, 1.0), (76, 2.0, 1.0)], 120.0, ExerciseKind::SightSing);
+        let sung = |t: f32| if t < 0.5 { 60.0 } else if t < 1.0 { 62.3 } else { 64.0 };
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 1.5, 440.0, sung));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let grade = |mode| grade_sung(&trial, &tr, &GradingConfig::resolve(&GradingOverrides::default(), mode), 1.0);
+
+        let o = grade(PitchRefMode::AnyOctave);
+        assert_eq!(o.correct, Some(true), "{:?}", o.metrics);
+        assert_eq!(o.metrics["octave_offset"], json!(-1));
+        assert!(o.summary.ends_with("(sung an octave lower)"), "{}", o.summary);
+        let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert_eq!(notes.iter().map(|n| n.target_midi).collect::<Vec<_>>(), [72, 74, 76]);
+        let c = notes[1].cents_error.unwrap();
+        assert!((c - 30.0).abs() < 3.0, "{c}");
+
+        // Exact pitch still counts the octave as wrong.
+        assert_eq!(grade(PitchRefMode::Absolute).score, Some(0.0));
     }
 
     #[test]

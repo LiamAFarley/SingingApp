@@ -160,6 +160,9 @@ impl NoteRange {
 pub enum PitchRefMode {
     /// Error against the exact target pitch.
     Absolute,
+    /// Against the exact pitches, but the whole line may be sung a whole number of octaves
+    /// higher or lower (a man reading treble clef an octave down).
+    AnyOctave,
     /// Absolute, octave ignored.
     PitchClass,
     /// Targets re-anchored to the singer's first note.
