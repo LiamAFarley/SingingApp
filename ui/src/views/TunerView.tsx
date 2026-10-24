@@ -18,13 +18,20 @@ export function TunerView({ a4 }: { a4: number }) {
 
   useEffect(() => () => void api("setDrone", null).catch(() => undefined), []);
 
+  // A piano decays, so the drone uses a sustained sound in its place.
+  const droneTimbre = timbre === "gm:0" ? "gm:52" : timbre;
+
+  // A running drone follows changes of note and sound.
+  useEffect(() => {
+    if (drone) api("setDrone", refNote, droneTimbre).catch(() => setDrone(false));
+  }, [drone, refNote, droneTimbre]);
+
   const toggleDrone = async () => {
-    try {
-      if (drone) await api("setDrone", null);
-      else await api("setDrone", refNote, timbre === "gm:0" ? "gm:52" : timbre);
-      setDrone(!drone);
-    } catch {
+    if (drone) {
       setDrone(false);
+      await api("setDrone", null).catch(() => undefined);
+    } else {
+      setDrone(true);
     }
   };
 
