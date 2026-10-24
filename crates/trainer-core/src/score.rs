@@ -10,7 +10,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use ts_rs::TS;
 
-use crate::schema::{KeyMode, TargetNote};
+use crate::schema::{KeyMode, SoundEvent, TargetNote};
 
 /// Grid resolution: a quarter note is four ticks (sixteenth notes; no tuplets yet).
 pub const TICKS_PER_QUARTER: u32 = 4;
@@ -620,6 +620,25 @@ impl Score {
             .collect::<Vec<_>>()
             .join(" ")
     }
+}
+
+/// Sound events for notes on the tick grid (to play back a written melody).
+pub fn note_events(notes: &[ScoreNote], time: TimeSig, tempo_bpm: f32, timbre: &str) -> Vec<SoundEvent> {
+    let beat_ms = 60_000.0 / tempo_bpm.max(20.0) as f64;
+    let tick_ms = beat_ms / time.beat_ticks() as f64;
+    notes
+        .iter()
+        .filter_map(|n| {
+            n.pitch.map(|p| SoundEvent {
+                midi: p.midi(),
+                start_ms: n.start as f64 * tick_ms,
+                dur_ms: n.dur as f64 * tick_ms * 0.95,
+                timbre: timbre.to_string(),
+                gain_db: -6.0,
+                detune_cents: 0.0,
+            })
+        })
+        .collect()
 }
 
 /// A melody written by the coach.

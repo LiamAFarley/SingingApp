@@ -88,6 +88,8 @@ interface Props {
   cursorTick?: number | null;
   /** Colour per score.notes index (noteheads). */
   noteColors?: (string | null | undefined)[];
+  /** Colour of rests that only fill unwritten space (the editor's placeholders). */
+  fillerColor?: string;
   /** Highlight for the editor: a score.notes index. */
   selected?: number | null;
   /** Editor caret in ticks (drawn as a thin line). */
@@ -98,7 +100,7 @@ interface Props {
   onPointerDown?: (p: StaffPointer) => void;
 }
 
-export function Staff({ score, scale, maxHeight = 460, trace, timing, results, cursorTick, noteColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
+export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, timing, results, cursorTick, noteColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -128,14 +130,14 @@ export function Staff({ score, scale, maxHeight = 460, trace, timing, results, c
     if (!el || !fontOk || width < 100) return;
     el.innerHTML = "";
     try {
-      setGeom(render(el, score, width, scale ? [scale] : SCALES, maxHeight, noteColors ?? [], selected ?? null));
+      setGeom(render(el, score, width, scale ? [scale] : SCALES, maxHeight, noteColors ?? [], selected ?? null, fillerColor ?? null));
     } catch (e) {
       el.textContent = `Could not draw the score: ${(e as Error).message}`;
       setGeom(null);
     }
     // noteColors is compared through colorsKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [score, width, scale, maxHeight, fontOk, colorsKey, selected]);
+  }, [score, width, scale, maxHeight, fontOk, colorsKey, selected, fillerColor]);
 
   const toDiatonic = useMemo(() => makePitchToDiatonic(score), [score]);
   const bt = beatTicks(score);
@@ -250,6 +252,7 @@ function render(
   maxHeight: number,
   colors: (string | null | undefined)[],
   selected: number | null,
+  fillerColor: string | null,
 ): StaffGeometry {
   const bars = layoutTokens(score);
   const time = parseTime(score.time);
@@ -318,7 +321,7 @@ function render(
 
       const tokens = bars[b];
       const notes = tokens.map((t) => {
-        const color = t.scoreIndex >= 0 ? colors[t.scoreIndex] : null;
+        const color = t.scoreIndex >= 0 ? colors[t.scoreIndex] : t.kind === "rest" ? fillerColor : null;
         const sn =
           t.kind === "note" && t.pitch
             ? new StaveNote({ keys: [vexKey(t.pitch, score.clef)], duration: t.code, dots: t.dots, clef: vexClef(score.clef), autoStem: true })

@@ -1,0 +1,15 @@
+{
+  "title": "Dictation: two bars, stepwise",
+  "blocks": [
+    {
+      "type": "melodic_dictation",
+      "title": "Write what you hear",
+      "instructions": "The key is played, then a bar is counted in and the melody plays. Write it on the staff: 2–6 choose the length, A–G enter notes in the key, Enter checks. Replay with R.",
+      "count": 6,
+      "feedback": "after_trial",
+      "params": {
+        "melody": { "generate": { "keys": ["C", "G", "F"], "bars": 2, "rhythms": ["half", "quarter"], "max_leap": 2, "step_rate": 0.85 } }
+      }
+    }
+  ]
+}

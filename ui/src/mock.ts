@@ -15,6 +15,7 @@ import type { SessionRow } from "./bindings/SessionRow";
 import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { Score } from "./bindings/Score";
+import type { ScoreNote } from "./bindings/ScoreNote";
 
 const clock = () => performance.now() / 1000;
 
@@ -136,6 +137,8 @@ function choiceTrial(): TrialView {
     attempt: 0,
     assisted: false,
     score: null,
+    plays: 0,
+    max_plays: 0,
   };
 }
 
@@ -160,6 +163,8 @@ function singPitchTrial(): TrialView {
     attempt: 0,
     assisted: false,
     score: null,
+    plays: 0,
+    max_plays: 0,
   };
 }
 
@@ -183,6 +188,8 @@ function pairingTrial(): TrialView {
     attempt: 0,
     assisted: false,
     score: null,
+    plays: 0,
+    max_plays: 0,
   };
 }
 
@@ -256,6 +263,8 @@ function sightTrial(phaseOffset: number): TrialView {
     attempt: 0,
     assisted: false,
     score: sightScore(),
+    plays: 0,
+    max_plays: 0,
   };
 }
 
@@ -308,6 +317,82 @@ function sightFeedback(): FeedbackView {
     can_play_answer: true,
     auto_advance_ms: null,
     hidden: false,
+    dictation: null,
+  };
+}
+
+// --- melodic dictation -------------------------------------------------------------------------
+
+const DICTATION_TARGET: [string | null, number, number][] = [
+  ["G4", 0, 4], ["A4", 4, 2], ["B4", 6, 2], ["C5", 8, 4], ["B4", 12, 4],
+  ["A4", 16, 4], ["F#4", 20, 4], ["G4", 24, 8],
+];
+
+function dictationScore(notes: [string | null, number, number][]): Score {
+  return {
+    key: { tonic: "G", mode: "major", fifths: 1 },
+    time: "4/4",
+    clef: "treble",
+    tempo_bpm: 80,
+    bars: 2,
+    notes: notes.map(([pitch, start, dur]) => ({ pitch, start, dur })),
+    title: null,
+  };
+}
+
+let dictationPlays = 1;
+
+function dictationTrial(): TrialView {
+  return {
+    kind: "melodic_dictation",
+    interaction: "dictation",
+    prompt: "Write the melody",
+    choices: [],
+    layout: "list",
+    deadline_ms: null,
+    can_replay: true,
+    can_reference: true,
+    lane: null,
+    show_live_pitch: false,
+    label: null,
+    label_at_s: null,
+    timeline_start_s: clock(),
+    response_start_s: null,
+    response_end_s: null,
+    attempt: 0,
+    assisted: false,
+    score: dictationScore([DICTATION_TARGET[0]]),
+    plays: dictationPlays,
+    max_plays: 4,
+  };
+}
+
+/** A simple stand-in for the backend's grading: same pitch at the same position and length. */
+function dictationFeedback(answer: ScoreNote[]): FeedbackView {
+  const target = dictationScore(DICTATION_TARGET);
+  const key = (n: ScoreNote) => `${n.pitch}@${n.start}/${n.dur}`;
+  const written = new Set(answer.filter((n) => n.pitch).map(key));
+  const wanted = new Set(target.notes.map(key));
+  const target_marks = target.notes.map((n) => (written.has(key(n)) ? "correct" : answer.some((a) => a.start === n.start && a.pitch) ? "wrong" : "missed"));
+  const answer_marks = answer.map((n) => (n.pitch ? (wanted.has(key(n)) ? "correct" : "wrong") : null));
+  const right = target_marks.filter((m) => m === "correct").length;
+  const all = right === target.notes.length && answer_marks.every((m) => m !== "wrong");
+  return {
+    correct: all,
+    summary: all ? `All ${right} notes right.` : `${right} of ${target.notes.length} notes right.`,
+    correct_choice: null,
+    answered: null,
+    cents: null,
+    notes: [],
+    trace: [],
+    can_retry: true,
+    can_sing_along: false,
+    can_listen: true,
+    can_show_answer: false,
+    can_play_answer: answer.length > 0,
+    auto_advance_ms: null,
+    hidden: false,
+    dictation: { target, answer: { ...target, notes: answer }, target_marks, answer_marks },
   };
 }
 
@@ -354,6 +439,8 @@ function sungTrial(): TrialView {
     attempt: 0,
     assisted: false,
     score: null,
+    plays: 0,
+    max_plays: 0,
   };
 }
 
@@ -410,6 +497,7 @@ function sungFeedback(): FeedbackView {
     can_play_answer: true,
     auto_advance_ms: null,
     hidden: false,
+    dictation: null,
   };
 }
 
@@ -463,6 +551,16 @@ function startScenario() {
     const trial = sightTrial(offset);
     emit({ phase: "recording", session_id: "demo", title: "Sight singing: stepwise", block_count: 1, block_title: "Four bars, major keys", block_kind: "sight_sing", trial_index: 2, trial_count: 6, done_in_block: 2, correct_in_block: 1, feedback_mode: "after_trial", trial });
     if (scenario === "sight-feedback") emit({ phase: "feedback", feedback: sightFeedback() });
+  } else if (scenario === "dictation" || scenario === "dictation-feedback") {
+    emit({ phase: "answering", session_id: "demo", title: "Melodic dictation", block_count: 1, block_title: "Two bars, stepwise", block_kind: "melodic_dictation", trial_index: 1, trial_count: 6, done_in_block: 1, correct_in_block: 1, feedback_mode: "after_trial", trial: dictationTrial() });
+    if (scenario === "dictation-feedback") {
+      const answer: ScoreNote[] = [
+        { pitch: "G4", start: 0, dur: 4 }, { pitch: "A4", start: 4, dur: 2 }, { pitch: "B4", start: 6, dur: 2 },
+        { pitch: "C5", start: 8, dur: 4 }, { pitch: "A4", start: 12, dur: 4 },
+        { pitch: "A4", start: 16, dur: 4 }, { pitch: "F4", start: 20, dur: 4 }, { pitch: "G4", start: 24, dur: 8 },
+      ];
+      emit({ phase: "feedback", feedback: dictationFeedback(answer) });
+    }
   } else if (scenario === "summary") {
     emit({ phase: "session_summary", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, session_report: report });
   }
@@ -470,6 +568,19 @@ function startScenario() {
 
 function runnerCommand(c: RunnerCommand) {
   switch (c.kind) {
+    case "submit_score":
+      if (state.phase === "answering" && state.trial?.interaction === "dictation") {
+        emit({ phase: "feedback", done_in_block: state.done_in_block + 1, feedback: dictationFeedback(c.notes) });
+      }
+      break;
+    case "replay":
+      if (state.trial?.interaction === "dictation" && state.phase === "answering") {
+        dictationPlays += 1;
+        emit({ trial: { ...state.trial, plays: dictationPlays } });
+      }
+      break;
+    case "play_score":
+      break;
     case "begin":
       if (state.phase === "block_intro") {
         trialNo = 0;
@@ -496,6 +607,7 @@ function runnerCommand(c: RunnerCommand) {
           can_listen: false,
           can_show_answer: true,
           can_play_answer: false,
+          dictation: null,
           auto_advance_ms: correct ? 900 : null,
           hidden: false,
         },

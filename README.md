@@ -7,6 +7,28 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
 - **UI:** React.
 - **MCP server:** built into the same executable, started with `--mcp`.
 
+## Exercises
+
+- **Absolute pitch:**
+  - Note naming in progressive stages, with out-of-set distractors, several octaves and timbres, and a deadline.
+  - Singing a named note.
+  - Passive pairing and key finding.
+  - A holdout assessment battery.
+- **Ear training:** intervals (melodic and harmonic), chords and inversions, scales and modes.
+- **Singing:**
+  - Pitch matching, sustained notes, interval singing, scales and warm-up patterns.
+  - A follow-along pitch lane that scrolls with the metronome.
+  - Backing options: click, drone, chords or the melody.
+  - Listen, sing along and retry after each attempt.
+- **Sight singing:** melodies read from staff notation.
+  - The key and first note are played, a bar is counted in, then you sing.
+  - Afterwards your pitch trace is drawn on the staff, with a mark under each note.
+  - Melodies are generated, or the coach writes them.
+- **Melodic dictation:** hear a melody and write it in the score editor, then check it note by note.
+  - 2–6 set the note length, `.` adds a dot, `0` enters a rest.
+  - A–G enter notes in the key, the arrow keys move a note, and you can also click on the staff.
+- **Tuner:** live note, cents and pitch history, with a reference note or drone.
+
 ## Install
 
 Each push builds a Windows installer in CI. Open the latest run of the **CI** workflow, download the `singing-trainer-windows` artifact, and run the NSIS `.exe`. It installs per user, with no admin rights needed. The installer is unsigned, so SmartScreen will ask for confirmation the first time.
@@ -57,7 +79,14 @@ npx tauri build                # installers in target/release/bundle
 cargo test --workspace
 ```
 
-To work on the UI in a browser without the desktop shell, run `npm run dev` and open `http://localhost:1420/`. A mock backend stands in for the app. `?scenario=pitch`, `?scenario=sung`, `?scenario=sung-feedback` and `?scenario=summary` jump to specific screens.
+To work on the UI in a browser without the desktop shell, run `npm run dev` and open `http://localhost:1420/`. A mock backend stands in for the app. Add `?scenario=` with one of these values to jump to a specific screen:
+
+- `pitch`
+- `sung` or `sung-feedback`
+- `sight` or `sight-feedback`
+- `dictation` or `dictation-feedback`
+- `summary`
+- `notation`, a gallery of generated melodies
 
 TypeScript types in `ui/src/bindings` are generated from the Rust types by `cargo test`. CI fails if they are out of date.
 

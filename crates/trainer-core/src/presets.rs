@@ -171,6 +171,18 @@ const FILES: &[(&str, &str, &str, &str)] = &[
         "Nothing is played first: start on the written pitch from memory (absolute pitch reading).",
         include_str!("../presets/sight_no_reference.json"),
     ),
+    (
+        "dictation_stepwise",
+        "Sight singing and dictation",
+        "Hear two bars of mostly stepwise melody and write them on the staff.",
+        include_str!("../presets/dictation_stepwise.json"),
+    ),
+    (
+        "dictation_leaps",
+        "Sight singing and dictation",
+        "Four bars with leaps up to a fifth and eighth notes, major and minor, five hearings.",
+        include_str!("../presets/dictation_leaps.json"),
+    ),
 ];
 
 pub fn builtin_presets() -> Vec<Preset> {

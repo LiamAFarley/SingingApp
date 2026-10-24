@@ -4,14 +4,17 @@ import type { BlockReport } from "../bindings/BlockReport";
 import type { LaneSpec } from "../bindings/LaneSpec";
 import type { RunnerState } from "../bindings/RunnerState";
 import type { Score } from "../bindings/Score";
+import type { ScoreNote } from "../bindings/ScoreNote";
 import type { TrialView } from "../bindings/TrialView";
 import { ChoiceGrid, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
 import { PitchLane } from "../components/PitchLane";
+import { offerKey, useKeyOwner } from "../keyboard";
 import { live, useAnimationFrame } from "../live";
 import { beatTicks, describeKey } from "../notation/layout";
 
 // VexFlow is large; load it with the first notated exercise.
 const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
+const ScoreEditor = lazy(() => import("../notation/ScoreEditor").then((m) => ({ default: m.ScoreEditor })));
 import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
 
 const FEEDBACK_TEXT: Record<string, string> = {
@@ -33,19 +36,28 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
       const target = e.target as HTMLElement;
       if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
       const k = e.key.toLowerCase();
       const fb = runner.feedback;
       if (confirmEnd) {
-        // While the end-session question is open only Enter (end) and Esc (keep going) count.
+        // Ending takes a click. Esc keeps going; any other key also dismisses the question and
+        // then works as usual (so notes typed into the editor are not lost).
+        setConfirmEnd(false);
+        if (k === "escape") {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          return;
+        }
+      }
+      // The score editor (dictation) gets first refusal, modifiers and repeats included.
+      if (offerKey(e)) {
         e.preventDefault();
         e.stopImmediatePropagation();
-        if (k === "enter") command({ kind: "abort" });
-        if (k === "escape" || k === "enter") setConfirmEnd(false);
         return;
       }
+      if (e.repeat) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (k === " " || k === "enter") {
         e.preventDefault();
         if (phase === "block_intro") command({ kind: "begin" });
@@ -127,7 +139,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
                   command({ kind: "abort" });
                 }}
               >
-                End session <span className="kbd">Enter</span>
+                End session
               </button>
             </>
           )}
@@ -222,6 +234,8 @@ function TrialStage({ runner, trial }: { runner: RunnerState; trial: TrialView }
       return <PairingStage trial={trial} />;
     case "sung":
       return <SungStage runner={runner} trial={trial} />;
+    case "dictation":
+      return <DictationStage runner={runner} trial={trial} />;
   }
 }
 
@@ -462,6 +476,83 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
           <SungControls fb={fb} />
         </>
       )}
+    </>
+  );
+}
+
+const MARK_COLORS: Record<string, string> = { correct: "#1a7f37", wrong: "#cf222e", extra: "#cf222e", missed: "#cf222e" };
+
+/** Melodic dictation: hear the melody, write it in the editor, check it. */
+function DictationStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const given = trial.score!;
+  const fb = runner.feedback;
+  const answering = runner.phase === "answering";
+  const [notes, setNotes] = useState<ScoreNote[]>([]);
+  const playsLeft = trial.max_plays > 0 ? Math.max(0, trial.max_plays - trial.plays) : null;
+  const replay = () => playsLeft !== 0 && command({ kind: "replay" });
+  const playKey = () => command({ kind: "reference" });
+  const playMine = () => command({ kind: "play_score", notes });
+  const check = () => command({ kind: "submit_score", notes });
+  useKeyOwner((e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    const k = e.key.toLowerCase();
+    if (k === "r") replay();
+    else if (k === "n" && trial.can_reference) playKey();
+    else if (k === "w") playMine();
+    else if (k === "enter") check();
+    else return false;
+    return true;
+  }, answering);
+
+  if (runner.phase === "feedback" && fb) {
+    const d = fb.dictation;
+    return (
+      <>
+        <div className="prompt">{trial.prompt}</div>
+        {d && (
+          <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 160 }} />}>
+            <div className="section" style={{ gap: 4 }}>
+              <div className="small muted">Your answer</div>
+              <Staff score={d.answer} maxHeight={240} noteColors={d.answer_marks.map((m) => (m ? MARK_COLORS[m] : null))} />
+              <div className="small muted">Melody</div>
+              <Staff score={d.target} maxHeight={240} noteColors={d.target_marks.map((m) => (m && m !== "correct" ? MARK_COLORS[m] : null))} />
+            </div>
+          </Suspense>
+        )}
+        <Result runner={runner} />
+        <SungControls fb={fb} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div>
+        <div className="prompt">{trial.prompt}</div>
+        <div className="prompt-sub">
+          {describeKey(given)} · {given.time} · {Math.round(given.tempo_bpm)} bpm
+          {playsLeft != null && ` · ${playsLeft} ${playsLeft === 1 ? "play" : "plays"} left`}
+        </div>
+      </div>
+      <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 200 }} />}>
+        <ScoreEditor key={`${runner.trial_index}-${trial.attempt}`} given={given} disabled={!answering} onChange={setNotes} />
+      </Suspense>
+      <div className="controls">
+        <button className="btn" onClick={replay} disabled={!answering || playsLeft === 0}>
+          Play melody <span className="kbd">R</span>
+        </button>
+        {trial.can_reference && (
+          <button className="btn" onClick={playKey} disabled={!answering}>
+            Play key <span className="kbd">N</span>
+          </button>
+        )}
+        <button className="btn" onClick={playMine} disabled={!answering}>
+          Play what I wrote <span className="kbd">W</span>
+        </button>
+        <button className="btn primary" onClick={check} disabled={!answering}>
+          Check <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Enter</span>
+        </button>
+      </div>
     </>
   );
 }

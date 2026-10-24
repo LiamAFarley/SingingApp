@@ -24,6 +24,11 @@ timeline_start_s: number | null,
  */
 response_start_s: number | null, response_end_s: number | null, attempt: number, assisted: boolean, 
 /**
- * Staff notation for sight singing (drawn instead of the pitch lane).
+ * Staff notation for sight singing (drawn instead of the pitch lane), or the editor's
+ * starting score for dictation.
  */
-score: Score | null, };
+score: Score | null, 
+/**
+ * Dictation: hearings so far and the limit (0 for none).
+ */
+plays: number, max_plays: number, };

@@ -9,8 +9,10 @@ use crate::metrics::{
 };
 use crate::pitch::PitchTrack;
 use crate::schema::{
-    ExerciseKind, GradingOverrides, IdentifyTrial, PitchRefMode, SingPitchTrial, SungTrial, Tuning,
+    DictationTrial, ExerciseKind, GradingOverrides, IdentifyTrial, PitchRefMode, SingPitchTrial,
+    SungTrial, Tuning,
 };
+use crate::score::{Pitch, ScoreNote};
 use crate::theory::{Note, PitchClass};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -589,6 +591,159 @@ pub fn grade_sung(
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Melodic dictation
+// ---------------------------------------------------------------------------------------------
+
+/// One note of the melody and what was written for it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct DictationNote {
+    pub target: Pitch,
+    /// Ticks from the start of bar 1.
+    pub start: u32,
+    pub dur: u32,
+    /// Index (among the written notes) of the note aligned with this one.
+    pub answer_index: Option<u32>,
+    pub written: Option<Pitch>,
+    pub pitch_ok: bool,
+    /// Written at the same position with the same length.
+    pub rhythm_ok: bool,
+    /// The right pitch with another spelling (D# for Eb).
+    pub respelled: bool,
+    pub correct: bool,
+}
+
+/// Grades a written melody against the played one. Notes are aligned (so one rhythm slip does
+/// not cost every later pitch); each melody note is right when its pitch matches and, with
+/// `grade_rhythm`, its position and length too. Written notes aligned to nothing are extra.
+pub fn grade_dictation(trial: &DictationTrial, answer: &[ScoreNote], plays: u32) -> TrialOutcome {
+    let target: Vec<(Pitch, u32, u32)> = trial
+        .score
+        .notes
+        .iter()
+        .filter_map(|n| n.pitch.map(|p| (p, n.start, n.dur)))
+        .collect();
+    let written: Vec<(Pitch, u32, u32)> = answer
+        .iter()
+        .filter_map(|n| n.pitch.map(|p| (p, n.start, n.dur)))
+        .collect();
+    let (n, m) = (target.len(), written.len());
+    let sim = |i: usize, j: usize| -> f32 {
+        let (tp, ts, td) = target[i];
+        let (wp, ws, wd) = written[j];
+        let pitch = if tp.midi() == wp.midi() { 2.0 } else if tp.step == wp.step { 0.5 } else { 0.0 };
+        let onset = if ts == ws { 1.0 } else { 0.0 };
+        let len = if td == wd { 0.5 } else { 0.0 };
+        pitch + onset + len - 1.2
+    };
+    const GAP: f32 = -0.6;
+    let mut dp = vec![vec![0.0f32; m + 1]; n + 1];
+    for i in 1..=n {
+        dp[i][0] = GAP * i as f32;
+    }
+    for j in 1..=m {
+        dp[0][j] = GAP * j as f32;
+    }
+    for i in 1..=n {
+        for j in 1..=m {
+            dp[i][j] = (dp[i - 1][j - 1] + sim(i - 1, j - 1))
+                .max(dp[i - 1][j] + GAP)
+                .max(dp[i][j - 1] + GAP);
+        }
+    }
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    let (mut i, mut j) = (n, m);
+    while i > 0 && j > 0 {
+        if (dp[i][j] - (dp[i - 1][j - 1] + sim(i - 1, j - 1))).abs() < 1e-4 {
+            pairs.push((i - 1, j - 1));
+            i -= 1;
+            j -= 1;
+        } else if (dp[i][j] - (dp[i - 1][j] + GAP)).abs() < 1e-4 {
+            i -= 1;
+        } else {
+            j -= 1;
+        }
+    }
+    pairs.reverse();
+
+    let mut notes: Vec<DictationNote> = target
+        .iter()
+        .map(|(p, s, d)| DictationNote {
+            target: *p,
+            start: *s,
+            dur: *d,
+            answer_index: None,
+            written: None,
+            pitch_ok: false,
+            rhythm_ok: false,
+            respelled: false,
+            correct: false,
+        })
+        .collect();
+    let mut answer_marks = vec!["extra"; m];
+    for (ti, wi) in &pairs {
+        let (tp, ts, td) = target[*ti];
+        let (wp, ws, wd) = written[*wi];
+        let note = &mut notes[*ti];
+        note.answer_index = Some(*wi as u32);
+        note.written = Some(wp);
+        note.pitch_ok = tp.midi() == wp.midi();
+        note.respelled = note.pitch_ok && (tp.step != wp.step || tp.alter != wp.alter);
+        note.rhythm_ok = ts == ws && td == wd;
+        note.correct = note.pitch_ok && (note.rhythm_ok || !trial.grade_rhythm);
+        answer_marks[*wi] = if note.correct { "correct" } else { "wrong" };
+    }
+    let right = notes.iter().filter(|x| x.correct).count();
+    let extra = answer_marks.iter().filter(|x| **x == "extra").count();
+    let pitch_right = notes.iter().filter(|x| x.pitch_ok).count();
+    let rhythm_right = notes.iter().filter(|x| x.rhythm_ok).count();
+    let respelled = notes.iter().filter(|x| x.respelled).count();
+    let denom = n.max(m).max(1) as f32;
+    let all = right == n && extra == 0;
+    let mut summary = if all {
+        format!("All {n} notes right.")
+    } else {
+        format!("{right} of {n} notes right")
+    };
+    if !all {
+        let mut parts = Vec::new();
+        if trial.grade_rhythm && pitch_right > right {
+            parts.push(format!("{} with the right pitch but a different rhythm", pitch_right - right));
+        }
+        if extra > 0 {
+            parts.push(format!("{extra} extra"));
+        }
+        if m == 0 {
+            parts.push("nothing written".into());
+        }
+        if !parts.is_empty() {
+            summary.push_str(&format!(" ({})", parts.join(", ")));
+        }
+        summary.push('.');
+    }
+    if respelled > 0 {
+        summary.push_str(&format!(
+            " {respelled} spelled differently from the score."
+        ));
+    }
+    TrialOutcome {
+        correct: Some(all),
+        score: Some(right as f32 / denom),
+        rt_ms: None,
+        response: json!({ "answer": answer, "plays": plays }),
+        metrics: json!({
+            "notes": notes,
+            "answer_marks": answer_marks,
+            "pitch_accuracy": pitch_right as f32 / n.max(1) as f32,
+            "rhythm_accuracy": rhythm_right as f32 / n.max(1) as f32,
+            "extra_notes": extra,
+            "respelled": respelled,
+            "plays": plays,
+        }),
+        summary,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -785,5 +940,77 @@ mod tests {
         let ie = o.metrics["interval_cents_error"].as_f64().unwrap();
         assert!((ie - -20.0).abs() < 3.0, "{ie}");
         assert_eq!(o.metrics["interval_correct"], json!(true));
+    }
+
+    fn dictation(notes: &[(&str, u32, u32)], grade_rhythm: bool) -> DictationTrial {
+        let m: crate::score::CompactMelody = serde_json::from_value(json!({
+            "key": "C major",
+            "notes": [{"note": "C4", "beats": 1}]
+        }))
+        .unwrap();
+        let mut score = crate::score::Score::from_compact(&m, 80.0).unwrap();
+        score.notes = notes
+            .iter()
+            .map(|(p, s, d)| ScoreNote { pitch: Some(p.parse().unwrap()), start: *s, dur: *d })
+            .collect();
+        score.bars = 2;
+        DictationTrial {
+            prompt: String::new(),
+            given: score.clone(),
+            playback: sung_trial(&[(60, 0.0, 1.0)], 80.0, ExerciseKind::MelodicDictation),
+            score,
+            max_plays: 0,
+            grade_rhythm,
+            stimulus: json!({}),
+        }
+    }
+
+    fn written(notes: &[(&str, u32, u32)]) -> Vec<ScoreNote> {
+        notes
+            .iter()
+            .map(|(p, s, d)| ScoreNote { pitch: Some(p.parse().unwrap()), start: *s, dur: *d })
+            .collect()
+    }
+
+    #[test]
+    fn dictation_exact_answer_is_all_right() {
+        let melody = [("C4", 0, 4), ("D4", 4, 4), ("E4", 8, 8), ("G4", 16, 16)];
+        let o = grade_dictation(&dictation(&melody, true), &written(&melody), 2);
+        assert_eq!(o.correct, Some(true));
+        assert_eq!(o.score, Some(1.0));
+        assert_eq!(o.summary, "All 4 notes right.");
+    }
+
+    #[test]
+    fn dictation_rhythm_slip_keeps_later_pitches_aligned() {
+        let melody = [("C4", 0, 4), ("D4", 4, 4), ("E4", 8, 8), ("G4", 16, 16)];
+        // D written as an eighth, so E and G are early, but every pitch is right.
+        let answer = [("C4", 0, 4), ("D4", 4, 2), ("E4", 6, 8), ("G4", 14, 16)];
+        let t = dictation(&melody, true);
+        let o = grade_dictation(&t, &written(&answer), 1);
+        assert_eq!(o.correct, Some(false));
+        let notes: Vec<DictationNote> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert!(notes.iter().all(|n| n.pitch_ok));
+        assert_eq!(notes.iter().filter(|n| n.correct).count(), 1);
+        assert!(o.summary.contains("right pitch but a different rhythm"), "{}", o.summary);
+        // Without rhythm grading the same answer is right.
+        let t2 = dictation(&melody, false);
+        assert_eq!(grade_dictation(&t2, &written(&answer), 1).correct, Some(true));
+    }
+
+    #[test]
+    fn dictation_wrong_extra_and_respelled_notes() {
+        let melody = [("C4", 0, 4), ("Eb4", 4, 4), ("F4", 8, 8)];
+        let answer = [("C4", 0, 4), ("D#4", 4, 4), ("G4", 8, 4), ("A4", 12, 4)];
+        let o = grade_dictation(&dictation(&melody, true), &written(&answer), 3);
+        let notes: Vec<DictationNote> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert!(notes[1].correct && notes[1].respelled);
+        assert!(!notes[2].correct);
+        assert_eq!(o.metrics["extra_notes"], 1);
+        assert_eq!(o.metrics["answer_marks"], json!(["correct", "correct", "wrong", "extra"]));
+        assert!(o.summary.contains("spelled differently"), "{}", o.summary);
+        let empty = grade_dictation(&dictation(&melody, true), &[], 1);
+        assert_eq!(empty.score, Some(0.0));
+        assert!(empty.summary.contains("nothing written"));
     }
 }

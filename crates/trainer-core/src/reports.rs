@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use ts_rs::TS;
 
 use crate::schema::{
-    ChordIdParams, ExerciseKind, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
+    ChordIdParams, DictationParams, ExerciseKind, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
     PitchPairingParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams,
     SustainParams, TonalCenterIdParams,
 };
@@ -414,6 +414,12 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Sight singing from staff notation (no piano roll, so durations are read, not seen). The score is shown, the key is established (cadence and/or first note, per `start`), one bar is counted in and the melody is sung with the click; graded note by note for pitch and timing. melody: {\"generate\": {keys, modes, meters, bars, rhythms, max_leap, step_rate, rest_rate, start_degrees, range, clef}} or {\"given\": [melodies you write]} where a melody is {key: \"Eb major\", time: \"4/4\", notes: [{note: \"Eb4\", beats: 1}, {rest: 0.5}, ...]} (spelling is kept). start: key_and_first_note (default), key_only, first_note, none (graded relative to the first sung note unless grading.mode is set). After each attempt the user can listen, sing along with the melody or retry.",
             schema_of::<SightSingParams>(),
             json!({"type": "sight_sing", "count": 6, "feedback": "after_trial", "params": {"melody": {"generate": {"keys": ["C", "G", "F"], "bars": 4, "rhythms": ["half", "quarter"], "max_leap": 2}}, "tempo_bpm": 72}}),
+        ),
+        entry(
+            ExerciseKind::MelodicDictation,
+            "Melodic dictation: the key is played (cadence), a bar is counted in and the melody plays; the user writes it on a staff in the score editor (durations, dots, rests, accidentals) and checks it. Graded note by note after aligning the written notes to the melody, so one rhythm slip does not cost later pitches; grade_rhythm=false grades pitches only. melody works as in sight_sing (generate or given). max_plays limits hearings (0 = no limit); give_first_note writes the first note in.",
+            schema_of::<DictationParams>(),
+            json!({"type": "melodic_dictation", "count": 6, "feedback": "after_trial", "params": {"melody": {"generate": {"keys": ["C", "F", "G"], "bars": 2, "rhythms": ["half", "quarter"], "max_leap": 2}}, "max_plays": 4}}),
         ),
     ]
 }

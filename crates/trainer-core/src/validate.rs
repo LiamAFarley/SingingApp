@@ -66,6 +66,8 @@ pub fn estimate_trial_seconds(t: &TrialSpec) -> f32 {
             span + t.gap_ms as f32 / 1000.0
         }
         TrialSpec::Sung(t) => t.total_ms() as f32 / 1000.0 + 2.5,
+        // About three hearings plus writing time.
+        TrialSpec::Dictation(t) => t.playback.total_ms() as f32 / 1000.0 * 3.0 + 12.0 * t.score.bars as f32,
     }
 }
 

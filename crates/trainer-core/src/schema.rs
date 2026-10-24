@@ -779,6 +779,52 @@ impl Default for SightSingParams {
     }
 }
 
+fn d_dictation_melody() -> MelodySource {
+    MelodySource::Generate(MelodyParams {
+        bars: 2,
+        max_leap: 2,
+        ..MelodyParams::default()
+    })
+}
+
+fn d_dictation_tempo() -> f32 {
+    80.0
+}
+
+/// Melodic dictation: after the key and a count-in the melody is played, and the user writes it
+/// on the staff in the score editor. Graded note by note for pitch and (optionally) rhythm.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DictationParams {
+    /// Defaults to generated two-bar melodies, mostly stepwise.
+    #[serde(default = "d_dictation_melody")]
+    pub melody: MelodySource,
+    #[serde(default = "d_dictation_tempo")]
+    pub tempo_bpm: f32,
+    /// Plays allowed, the first included; 0 for no limit.
+    #[serde(default)]
+    pub max_plays: u32,
+    /// Write the first note into the answer.
+    #[serde(default = "d_true")]
+    pub give_first_note: bool,
+    /// Play a cadence in the key first.
+    #[serde(default = "d_true")]
+    pub play_key: bool,
+    /// Click while the melody plays (the count-in bar always clicks).
+    #[serde(default = "d_true")]
+    pub click: bool,
+    /// Grade note positions and lengths as well as pitches.
+    #[serde(default = "d_true")]
+    pub grade_rhythm: bool,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+impl Default for DictationParams {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Blocks and sessions
 // ---------------------------------------------------------------------------------------------
@@ -799,6 +845,7 @@ pub enum Exercise {
     SingInterval(SingIntervalParams),
     Pattern(PatternParams),
     SightSing(SightSingParams),
+    MelodicDictation(DictationParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -816,10 +863,11 @@ pub enum ExerciseKind {
     SingInterval,
     Pattern,
     SightSing,
+    MelodicDictation,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 12] = [
+    pub const ALL: [ExerciseKind; 13] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -832,6 +880,7 @@ impl ExerciseKind {
         ExerciseKind::SingInterval,
         ExerciseKind::Pattern,
         ExerciseKind::SightSing,
+        ExerciseKind::MelodicDictation,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -848,6 +897,7 @@ impl ExerciseKind {
             ExerciseKind::SingInterval => "sing_interval",
             ExerciseKind::Pattern => "pattern",
             ExerciseKind::SightSing => "sight_sing",
+            ExerciseKind::MelodicDictation => "melodic_dictation",
         }
     }
 
@@ -869,6 +919,7 @@ impl ExerciseKind {
             ExerciseKind::SingInterval => "Interval singing",
             ExerciseKind::Pattern => "Sung patterns",
             ExerciseKind::SightSing => "Sight singing",
+            ExerciseKind::MelodicDictation => "Melodic dictation",
         }
     }
 
@@ -886,6 +937,7 @@ impl ExerciseKind {
             ExerciseKind::SingInterval => &["voice.interval"],
             ExerciseKind::Pattern => &["voice.pattern"],
             ExerciseKind::SightSing => &["voice.sight_singing"],
+            ExerciseKind::MelodicDictation => &["ear.dictation"],
         }
     }
 
@@ -917,6 +969,7 @@ impl Exercise {
             Exercise::SingInterval(_) => ExerciseKind::SingInterval,
             Exercise::Pattern(_) => ExerciseKind::Pattern,
             Exercise::SightSing(_) => ExerciseKind::SightSing,
+            Exercise::MelodicDictation(_) => ExerciseKind::MelodicDictation,
         }
     }
 
@@ -1174,6 +1227,24 @@ pub struct SungTrial {
     pub follow_cursor: bool,
 }
 
+/// Hear a melody and write it in the score editor.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct DictationTrial {
+    pub prompt: String,
+    /// The melody to write; not shown until the answer is checked.
+    pub score: Score,
+    /// What the editor starts with: the melody's key, meter, clef and bars, with the first note
+    /// (and any rest before it) when it is given.
+    pub given: Score,
+    /// Cadence, count-in and melody on a timeline (rendered like a sung trial with the guide on).
+    pub playback: SungTrial,
+    /// Plays allowed, the first included; 0 for no limit.
+    pub max_plays: u32,
+    pub grade_rhythm: bool,
+    #[ts(type = "Record<string, unknown>")]
+    pub stimulus: serde_json::Value,
+}
+
 /// A labelled stretch of a sung trial's timeline, in beats from its start.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct TimelineSection {
@@ -1203,6 +1274,7 @@ pub enum TrialSpec {
     SingPitch(SingPitchTrial),
     Pairing(PairingTrial),
     Sung(SungTrial),
+    Dictation(DictationTrial),
 }
 
 impl TrialSpec {
@@ -1212,6 +1284,7 @@ impl TrialSpec {
             TrialSpec::SingPitch(t) => &t.stimulus,
             TrialSpec::Pairing(t) => &t.stimulus,
             TrialSpec::Sung(t) => &t.stimulus,
+            TrialSpec::Dictation(t) => &t.stimulus,
         }
     }
 
@@ -1221,6 +1294,7 @@ impl TrialSpec {
             TrialSpec::SingPitch(t) => &t.prompt,
             TrialSpec::Pairing(t) => &t.label,
             TrialSpec::Sung(t) => &t.prompt,
+            TrialSpec::Dictation(t) => &t.prompt,
         }
     }
 }

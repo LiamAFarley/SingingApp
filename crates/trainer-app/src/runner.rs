@@ -13,11 +13,12 @@ use serde_json::json;
 use trainer_audio::{AudioEngine, Bus, SoundBuffer};
 use trainer_core::generate::{block_seed, default_mode, generate_block};
 use trainer_core::grade::{
-    GradingConfig, TrialOutcome, grade_choice, grade_sing_pitch, grade_sung,
+    GradingConfig, TrialOutcome, grade_choice, grade_dictation, grade_sing_pitch, grade_sung,
 };
 use trainer_core::pitch::{PitchTrack, TrackOptions, track};
 use trainer_core::reports::{session_report, session_summary};
 use trainer_core::schema::*;
+use trainer_core::score::{ScoreNote, note_events};
 use trainer_core::storage::{Db, SessionStatus, TrialRow, db_path, new_id, now};
 use trainer_core::theory::midi_to_hz;
 
@@ -307,6 +308,7 @@ impl<'a> SessionRun<'a> {
                         TrialSpec::Sung(t) => {
                             self.run_sung(&engine, t, &cfg, feedback, attempt, assisted)
                         }
+                        TrialSpec::Dictation(t) => self.run_dictation(&engine, t, attempt),
                     }?;
                     let Some((outcome, extras)) = res else {
                         break; // skipped
@@ -402,6 +404,8 @@ impl<'a> SessionRun<'a> {
             attempt,
             assisted: false,
             score: None,
+            plays: 0,
+            max_plays: 0,
         }
     }
 
@@ -743,6 +747,86 @@ impl<'a> SessionRun<'a> {
         )))
     }
 
+    // --- melodic dictation -------------------------------------------------------------------
+
+    fn run_dictation(
+        &mut self,
+        engine: &AudioEngine,
+        t: &DictationTrial,
+        attempt: u32,
+    ) -> R<Option<(TrialOutcome, Extras)>> {
+        let renderer = self.core.renderer();
+        let melody = Arc::new(dictation_audio(&renderer, &t.playback));
+        let key = (!t.playback.reference_beats.is_empty()).then(|| {
+            // Just the cadence: the same timeline without melody, click or count-in.
+            let mut k = t.playback.clone();
+            k.notes.clear();
+            k.guide = false;
+            k.backing = Backing::None;
+            k.count_in_beat = None;
+            k.total_beats = k.reference_beats.iter().map(|n| n.start_beat + n.beats).fold(0.0, f32::max) + 0.5;
+            Arc::new(renderer.render_sung_trial(&k).backing)
+        });
+        let start = engine.frame_after_ms(150.0);
+        engine.play(melody.clone(), start, 1.0, Bus::Prompt)?;
+        let mut plays = 1u32;
+        let mut view = self.base_view(ExerciseKind::MelodicDictation, Interaction::Dictation, &t.prompt, attempt);
+        view.score = Some(t.given.clone());
+        view.lane = Some(self.lane_for(&t.playback));
+        view.can_replay = true;
+        view.can_reference = key.is_some();
+        view.plays = plays;
+        view.max_plays = t.max_plays;
+        view.timeline_start_s = Some(secs(engine, start));
+        self.set(|st| {
+            st.phase = Phase::Answering;
+            st.trial = Some(view);
+        });
+        let began = Instant::now();
+        loop {
+            match self.wait(None)? {
+                Some(RunnerCommand::Replay) if t.max_plays == 0 || plays < t.max_plays => {
+                    engine.stop_bus(Bus::Prompt);
+                    engine.stop_bus(Bus::Guide);
+                    let at = engine.frame_after_ms(60.0);
+                    engine.play(melody.clone(), at, 1.0, Bus::Prompt)?;
+                    plays += 1;
+                    let s = secs(engine, at);
+                    self.set(|st| {
+                        if let Some(v) = st.trial.as_mut() {
+                            v.plays = plays;
+                            v.timeline_start_s = Some(s);
+                        }
+                    });
+                }
+                Some(RunnerCommand::Reference) => {
+                    if let Some(k) = &key {
+                        engine.stop_bus(Bus::Prompt);
+                        engine.play_now(k.clone(), 1.0, Bus::Prompt)?;
+                    }
+                }
+                Some(RunnerCommand::PlayScore { notes }) => {
+                    let ev = note_events(&notes, t.score.time, t.score.tempo_bpm, &t.playback.reference_timbre);
+                    engine.stop_bus(Bus::Guide);
+                    engine.play_now(Arc::new(renderer.render_events(&ev)), 1.0, Bus::Guide)?;
+                }
+                Some(RunnerCommand::SubmitScore { notes }) => {
+                    engine.stop_bus(Bus::Prompt);
+                    engine.stop_bus(Bus::Guide);
+                    let mut outcome = grade_dictation(t, &notes, plays);
+                    outcome.rt_ms = Some(began.elapsed().as_secs_f64() * 1000.0);
+                    return Ok(Some((outcome, Extras::default())));
+                }
+                Some(RunnerCommand::Skip) => {
+                    engine.stop_bus(Bus::Prompt);
+                    engine.stop_bus(Bus::Guide);
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+    }
+
     // --- storing and feedback ----------------------------------------------------------------
 
     #[allow(clippy::too_many_arguments)]
@@ -771,9 +855,12 @@ impl<'a> SessionRun<'a> {
             .last_labeled
             .map(|l| (started - l).num_milliseconds() as f64 / 1000.0);
         // A trial reveals a labelled tone when its result (with the right answer) is shown.
+        // Notation with a played reference (sight singing's first note, a dictation's answer)
+        // also pairs sound with note names.
         let labeled = extras.labeled_reference
             || (feedback.shows_trial_result()
-                && matches!(trial, TrialSpec::Identify(_) | TrialSpec::SingPitch(_)));
+                && matches!(trial, TrialSpec::Identify(_) | TrialSpec::SingPitch(_) | TrialSpec::Dictation(_)))
+            || matches!(trial, TrialSpec::Sung(t) if t.score.is_some() && !t.reference_beats.is_empty());
         let row = TrialRow {
             id: id.clone(),
             session_id: self.session_id.clone(),
@@ -859,10 +946,20 @@ impl<'a> SessionRun<'a> {
         } else {
             Vec::new()
         };
-        let (is_sung, is_identify) = (
+        let (is_sung, is_identify, is_dictation) = (
             matches!(trial, TrialSpec::Sung(_)),
             matches!(trial, TrialSpec::Identify(_)),
+            matches!(trial, TrialSpec::Dictation(_)),
         );
+        let written: Vec<ScoreNote> = outcome
+            .response
+            .get("answer")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        let dictation = match trial {
+            TrialSpec::Dictation(t) if show => Some(dictation_view(t, &written, &outcome.metrics)),
+            _ => None,
+        };
         let passive = matches!(trial, TrialSpec::Pairing(_));
         let auto_ms = if passive {
             Some(200)
@@ -889,6 +986,7 @@ impl<'a> SessionRun<'a> {
                 .get("answer")
                 .and_then(|a| a.as_str())
                 .map(String::from),
+            dictation,
             cents: outcome
                 .metrics
                 .get("cents_error")
@@ -896,11 +994,11 @@ impl<'a> SessionRun<'a> {
                 .map(|v| v as f32),
             notes: if show { notes } else { Vec::new() },
             trace,
-            can_retry: is_sung,
+            can_retry: is_sung || is_dictation,
             can_sing_along: is_sung,
-            can_listen: is_sung || (matches!(trial, TrialSpec::SingPitch(_)) && show),
+            can_listen: is_sung || is_dictation || (matches!(trial, TrialSpec::SingPitch(_)) && show),
             can_show_answer: is_identify && show,
-            can_play_answer: extras.capture.is_some(),
+            can_play_answer: extras.capture.is_some() || (is_dictation && !written.is_empty()),
             auto_advance_ms: auto_ms,
             hidden: !show,
         };
@@ -926,7 +1024,7 @@ impl<'a> SessionRun<'a> {
             match self.wait(timeout)? {
                 None => return Ok(After::Next),
                 Some(RunnerCommand::Next | RunnerCommand::Skip) => return Ok(After::Next),
-                Some(RunnerCommand::Retry) if is_sung => {
+                Some(RunnerCommand::Retry) if is_sung || is_dictation => {
                     return Ok(After::Retry { assisted: false });
                 }
                 Some(RunnerCommand::SingAlong) if is_sung => {
@@ -952,7 +1050,21 @@ impl<'a> SessionRun<'a> {
                                 )?;
                             }
                         }
+                        TrialSpec::Dictation(t) => {
+                            engine.stop_bus(Bus::Prompt);
+                            engine.stop_bus(Bus::Guide);
+                            engine.play_now(Arc::new(dictation_audio(&renderer, &t.playback)), 1.0, Bus::Prompt)?;
+                        }
                         _ => {}
+                    }
+                }
+                Some(RunnerCommand::PlayAnswer) if is_dictation => {
+                    interacted = true;
+                    if let TrialSpec::Dictation(t) = trial {
+                        let ev = note_events(&written, t.score.time, t.score.tempo_bpm, &t.playback.reference_timbre);
+                        engine.stop_bus(Bus::Prompt);
+                        engine.stop_bus(Bus::Guide);
+                        engine.play_now(Arc::new(renderer.render_events(&ev)), 1.0, Bus::Guide)?;
                     }
                 }
                 Some(RunnerCommand::PlayAnswer) => {
@@ -990,6 +1102,63 @@ impl<'a> SessionRun<'a> {
     }
 }
 
+/// A dictation's playback: cadence, count-in clicks and the melody in one buffer.
+fn dictation_audio(renderer: &trainer_audio::render::Renderer, playback: &SungTrial) -> SoundBuffer {
+    let audio = renderer.render_sung_trial(playback);
+    let mut mix = audio.backing;
+    mix.mix(&audio.guide, 0, 0.9);
+    mix.limit(0.95);
+    mix
+}
+
+/// The answer and the melody with a mark per note, from the stored grading metrics.
+fn dictation_view(t: &DictationTrial, written: &[ScoreNote], metrics: &serde_json::Value) -> DictationView {
+    let notes: Vec<trainer_core::grade::DictationNote> = metrics
+        .get("notes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let marks: Vec<String> = metrics
+        .get("answer_marks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let mut k = 0usize;
+    let target_marks = t
+        .score
+        .notes
+        .iter()
+        .map(|n| {
+            n.pitch.map(|_| {
+                let r = notes.get(k);
+                k += 1;
+                match r {
+                    Some(r) if r.correct => "correct".to_string(),
+                    Some(r) if r.answer_index.is_some() => "wrong".to_string(),
+                    _ => "missed".to_string(),
+                }
+            })
+        })
+        .collect();
+    let mut j = 0usize;
+    let answer_marks = written
+        .iter()
+        .map(|n| {
+            n.pitch.map(|_| {
+                let m = marks.get(j).cloned().unwrap_or_else(|| "extra".into());
+                j += 1;
+                m
+            })
+        })
+        .collect();
+    let mut answer = t.given.clone();
+    answer.notes = written.to_vec();
+    DictationView {
+        target: t.score.clone(),
+        answer,
+        target_marks,
+        answer_marks,
+    }
+}
+
 /// The guide melody without the lead-in before singing starts.
 fn trim_front(b: &SoundBuffer, frames: usize) -> SoundBuffer {
     let start = (frames * 2).min(b.data.len());
@@ -1018,4 +1187,42 @@ fn write_recording(dir: &std::path::Path, id: &str, samples: &[f32], sr: u32) ->
     }
     w.finalize()?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trainer_core::generate::GenContext;
+
+    fn dictation_trial() -> DictationTrial {
+        let block: BlockSpec = serde_json::from_value(serde_json::json!({
+            "type": "melodic_dictation", "count": 1, "params": {}
+        }))
+        .unwrap();
+        match generate_block(&block, 5, &GenContext::default()).unwrap().remove(0) {
+            TrialSpec::Dictation(t) => t,
+            _ => panic!("not dictation"),
+        }
+    }
+
+    #[test]
+    fn dictation_view_marks_every_note() {
+        let t = dictation_trial();
+        // A perfect answer: every note right.
+        let perfect = t.score.notes.clone();
+        let o = grade_dictation(&t, &perfect, 1);
+        let v = dictation_view(&t, &perfect, &o.metrics);
+        assert_eq!(v.target_marks.len(), t.score.notes.len());
+        assert!(v.target_marks.iter().flatten().all(|m| m == "correct"));
+        assert!(v.answer_marks.iter().flatten().all(|m| m == "correct"));
+        assert_eq!(v.answer.key, t.score.key);
+
+        // Only the given first note: the rest are missed.
+        let first: Vec<ScoreNote> = t.given.notes.clone();
+        let o = grade_dictation(&t, &first, 2);
+        let v = dictation_view(&t, &first, &o.metrics);
+        let missed = v.target_marks.iter().flatten().filter(|m| *m == "missed").count();
+        assert_eq!(missed, t.score.pitched().count() - 1);
+        assert_eq!(v.answer_marks.iter().flatten().count(), 1);
+    }
 }

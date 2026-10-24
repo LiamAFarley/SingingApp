@@ -1,0 +1,24 @@
+{
+  "title": "Dictation: four bars with leaps and eighths",
+  "blocks": [
+    {
+      "type": "melodic_dictation",
+      "title": "Four bars, up to a fifth",
+      "count": 6,
+      "feedback": "after_trial",
+      "params": {
+        "melody": {
+          "generate": {
+            "modes": ["major", "minor"],
+            "bars": 4,
+            "rhythms": ["half", "quarter", "dotted_quarter", "eighth"],
+            "max_leap": 4,
+            "step_rate": 0.65
+          }
+        },
+        "max_plays": 5,
+        "tempo_bpm": 84
+      }
+    }
+  ]
+}

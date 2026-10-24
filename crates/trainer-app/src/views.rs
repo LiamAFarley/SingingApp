@@ -6,7 +6,7 @@ use trainer_audio::{EngineInfo, EngineSettings, EngineStatus};
 use trainer_core::grade::NoteResult;
 use trainer_core::reports::{BlockReport, SessionReport};
 use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode};
-use trainer_core::score::Score;
+use trainer_core::score::{Score, ScoreNote};
 use trainer_core::storage::CalibrationRow;
 use ts_rs::TS;
 
@@ -41,6 +41,8 @@ pub enum Interaction {
     SingPitch,
     Pairing,
     Sung,
+    /// Write a heard melody in the score editor.
+    Dictation,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -120,8 +122,12 @@ pub struct TrialView {
     pub response_end_s: Option<f64>,
     pub attempt: u32,
     pub assisted: bool,
-    /// Staff notation for sight singing (drawn instead of the pitch lane).
+    /// Staff notation for sight singing (drawn instead of the pitch lane), or the editor's
+    /// starting score for dictation.
     pub score: Option<Score>,
+    /// Dictation: hearings so far and the limit (0 for none).
+    pub plays: u32,
+    pub max_plays: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -145,6 +151,21 @@ pub struct FeedbackView {
     pub auto_advance_ms: Option<u32>,
     /// Results are withheld by the block's feedback mode.
     pub hidden: bool,
+    /// Dictation: the written answer and the melody, with a mark per note.
+    pub dictation: Option<DictationView>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DictationView {
+    /// The melody that was played.
+    pub target: Score,
+    /// What was written.
+    pub answer: Score,
+    /// Per `target.notes` entry: `correct`, `wrong`, `missed`, or null for rests.
+    pub target_marks: Vec<Option<String>>,
+    /// Per `answer.notes` entry: `correct`, `wrong`, `extra`, or null for rests.
+    pub answer_marks: Vec<Option<String>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -212,8 +233,12 @@ pub enum RunnerCommand {
     Reference,
     ShowAnswer,
     Listen,
-    /// Play back the recording of the attempt.
+    /// Play back the recording of the attempt (or the written answer in dictation).
     PlayAnswer,
+    /// Dictation: check the written melody.
+    SubmitScore { notes: Vec<ScoreNote> },
+    /// Dictation: play the written notes.
+    PlayScore { notes: Vec<ScoreNote> },
     SingAlong,
     Retry,
     Skip,
