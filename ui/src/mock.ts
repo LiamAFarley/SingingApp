@@ -14,6 +14,7 @@ import type { SessionReport } from "./bindings/SessionReport";
 import type { SessionRow } from "./bindings/SessionRow";
 import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
+import type { Score } from "./bindings/Score";
 
 const clock = () => performance.now() / 1000;
 
@@ -134,6 +135,7 @@ function choiceTrial(): TrialView {
     response_end_s: null,
     attempt: 0,
     assisted: false,
+    score: null,
   };
 }
 
@@ -157,6 +159,7 @@ function singPitchTrial(): TrialView {
     response_end_s: start + 4,
     attempt: 0,
     assisted: false,
+    score: null,
   };
 }
 
@@ -179,6 +182,132 @@ function pairingTrial(): TrialView {
     response_end_s: null,
     attempt: 0,
     assisted: false,
+    score: null,
+  };
+}
+
+// --- sight singing ---------------------------------------------------------------------------
+
+const SIGHT_NOTES: [string | null, number, number][] = [
+  ["G4", 0, 4], ["A4", 4, 2], ["B4", 6, 2], ["C5", 8, 6], ["B4", 14, 2],
+  ["A4", 16, 8], [null, 24, 4], ["D4", 28, 4],
+  ["B4", 32, 4], ["C#5", 36, 2], ["D5", 38, 2], ["D5", 40, 12],
+  ["C5", 52, 2], ["A4", 54, 2], ["G4", 56, 8],
+];
+
+function sightScore(): Score {
+  return {
+    key: { tonic: "G", mode: "major", fifths: 1 },
+    time: "4/4",
+    clef: "treble",
+    tempo_bpm: 72,
+    bars: 4,
+    notes: SIGHT_NOTES.map(([pitch, start, dur]) => ({ pitch, start, dur })),
+    title: null,
+  };
+}
+
+const NOTE_MIDI: Record<string, number> = { G4: 67, A4: 69, B4: 71, C5: 72, "C#5": 73, D5: 74, D4: 62 };
+
+function sightLane(): LaneSpec {
+  const beat = 60 / 72;
+  const sing = 13 * beat;
+  const pitched = SIGHT_NOTES.filter((n) => n[0] != null);
+  return {
+    notes: pitched.map(([p, start, dur]) => ({ midi: NOTE_MIDI[p!], start_s: sing + (start / 4) * beat, dur_s: (dur / 4) * beat })),
+    reference: [],
+    beat_s: beat,
+    beats_per_bar: 4,
+    sing_start_s: sing,
+    total_s: sing + 17 * beat,
+    midi_low: 60,
+    midi_high: 76,
+    targets_hidden: true,
+    metronome: true,
+    sections: [
+      { label: "Establish key", start_s: 0, end_s: 5 * beat },
+      { label: "First note", start_s: 6 * beat, end_s: 8 * beat },
+      { label: "Count-in", start_s: 9 * beat, end_s: sing },
+      { label: "Sing", start_s: sing, end_s: sing + 16 * beat },
+    ],
+    cursor: false,
+  };
+}
+
+function sightTrial(phaseOffset: number): TrialView {
+  lane = sightLane();
+  laneStart = clock() + 0.2 - phaseOffset;
+  return {
+    kind: "sight_sing",
+    interaction: "sung",
+    prompt: "Sing the melody",
+    choices: [],
+    layout: "list",
+    deadline_ms: null,
+    can_replay: false,
+    can_reference: false,
+    lane,
+    show_live_pitch: false,
+    label: null,
+    label_at_s: null,
+    timeline_start_s: laneStart,
+    response_start_s: laneStart + lane.sing_start_s,
+    response_end_s: laneStart + lane.total_s,
+    attempt: 0,
+    assisted: false,
+    score: sightScore(),
+  };
+}
+
+function sightFeedback(): FeedbackView {
+  const l = sightLane();
+  const pitched = l.notes;
+  // Index 3 sung a semitone low, 5 a little sharp, 8 flat, 12 missed.
+  const notes: NoteResult[] = pitched.map((n, i) => {
+    const missed = i === 12;
+    const wrong = i === 3;
+    const cents = wrong ? -100 : i === 5 ? 31 : i === 8 ? -34 : [6, -9, 12, 4, -3][i % 5];
+    return {
+      target_midi: n.midi,
+      expected_onset_s: n.start_s,
+      matched: !missed,
+      sung_midi: missed ? null : n.midi + cents / 100,
+      cents_error: missed ? null : cents,
+      onset_error_ms: missed ? null : 25 + (i % 3) * 20,
+      correct: !missed && !wrong,
+      in_tune: !missed && !wrong && Math.abs(cents) <= 25,
+      on_time: !missed,
+      onset_s: missed ? null : n.start_s + 0.04,
+      offset_s: missed ? null : n.start_s + n.dur_s - 0.05,
+    };
+  });
+  const trace: [number, number | null][] = [];
+  for (let t = l.sing_start_s - 0.2; t < l.sing_start_s + 16 * l.beat_s; t += 0.01) {
+    const i = pitched.findIndex((n) => t >= n.start_s + 0.03 && t < n.start_s + n.dur_s - 0.04);
+    if (i < 0 || i === 12) {
+      trace.push([t, null]);
+      continue;
+    }
+    const n = pitched[i];
+    const local = t - n.start_s;
+    const scoop = local < 0.1 ? -0.4 * (1 - local / 0.1) : 0;
+    trace.push([t, n.midi + (notes[i].cents_error ?? 0) / 100 + scoop + 0.12 * Math.sin(2 * Math.PI * 5.5 * t)]);
+  }
+  return {
+    correct: false,
+    summary: "11 of 14 notes right, 1 missed",
+    correct_choice: null,
+    answered: null,
+    cents: null,
+    notes,
+    trace,
+    can_retry: true,
+    can_sing_along: true,
+    can_listen: true,
+    can_show_answer: false,
+    can_play_answer: true,
+    auto_advance_ms: null,
+    hidden: false,
   };
 }
 
@@ -198,6 +327,8 @@ function scaleLane(): LaneSpec {
     midi_high: tonic + 16,
     targets_hidden: false,
     metronome: true,
+    sections: [],
+    cursor: false,
   };
 }
 
@@ -222,6 +353,7 @@ function sungTrial(): TrialView {
     response_end_s: laneStart + lane.total_s,
     attempt: 0,
     assisted: false,
+    score: null,
   };
 }
 
@@ -275,6 +407,7 @@ function sungFeedback(): FeedbackView {
     can_sing_along: true,
     can_listen: true,
     can_show_answer: false,
+    can_play_answer: true,
     auto_advance_ms: null,
     hidden: false,
   };
@@ -324,6 +457,12 @@ function startScenario() {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });
   } else if (scenario === "pairing") {
     emit({ phase: "listening", session_id: "demo", title: "Absolute pitch: pairing", block_count: 1, block_title: "Hear and label", block_kind: "pitch_pairing", trial_index: 4, trial_count: 24, feedback_mode: "none", trial: pairingTrial() });
+  } else if (scenario === "sight" || scenario === "sight-feedback" || scenario === "sight-intro") {
+    kind = "sung";
+    const offset = scenario === "sight-intro" ? 1.5 : 60 / 72 * 10.5;
+    const trial = sightTrial(offset);
+    emit({ phase: "recording", session_id: "demo", title: "Sight singing: stepwise", block_count: 1, block_title: "Four bars, major keys", block_kind: "sight_sing", trial_index: 2, trial_count: 6, done_in_block: 2, correct_in_block: 1, feedback_mode: "after_trial", trial });
+    if (scenario === "sight-feedback") emit({ phase: "feedback", feedback: sightFeedback() });
   } else if (scenario === "summary") {
     emit({ phase: "session_summary", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, session_report: report });
   }
@@ -356,6 +495,7 @@ function runnerCommand(c: RunnerCommand) {
           can_sing_along: false,
           can_listen: false,
           can_show_answer: true,
+          can_play_answer: false,
           auto_advance_ms: correct ? 900 : null,
           hidden: false,
         },

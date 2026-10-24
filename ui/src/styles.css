@@ -843,3 +843,111 @@ pre.code {
   max-width: 976px;
   margin: 16px auto 0;
 }
+
+/* Staff notation -------------------------------------------------------- */
+
+.staff-wrap {
+  position: relative;
+  width: 100%;
+  background: var(--surface);
+}
+
+.staff-host svg {
+  display: block;
+}
+
+.staff-overlay {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
+
+.staff-trace path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+.marker path,
+.marker circle {
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.marker.correct path {
+  stroke: var(--correct);
+}
+
+.marker.wrong path {
+  stroke: var(--wrong);
+}
+
+.marker.marginal path {
+  stroke: var(--marginal);
+}
+
+.marker.missed circle {
+  stroke: var(--missed);
+  stroke-width: 1.5;
+}
+
+.staff-cursor {
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  opacity: 0.55;
+}
+
+.staff-caret {
+  stroke: var(--accent);
+  stroke-width: 1.4;
+}
+
+.staff-selection rect {
+  fill: rgba(45, 108, 223, 0.1);
+  stroke: var(--accent-line);
+  stroke-width: 0.8;
+}
+
+.staff-ghost ellipse {
+  fill: var(--accent);
+  opacity: 0.4;
+}
+
+.staff-ghost line {
+  stroke: var(--accent);
+  opacity: 0.4;
+}
+
+.steps {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 8px;
+}
+
+.step {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-faint);
+  background: var(--surface-muted);
+  text-align: center;
+}
+
+.step.active {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.step.done {
+  color: var(--text-muted);
+}

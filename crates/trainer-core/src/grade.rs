@@ -683,6 +683,10 @@ mod tests {
             drone_midi: None,
             lane_targets: LaneTargets::Shown,
             timed: true,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: json!({}),
         }
     }

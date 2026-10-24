@@ -1,0 +1,25 @@
+{
+  "title": "Sight singing: leaps and eighth notes",
+  "blocks": [
+    {
+      "type": "sight_sing",
+      "title": "Thirds to fifths, major and minor",
+      "count": 8,
+      "feedback": "after_trial",
+      "params": {
+        "melody": {
+          "generate": {
+            "modes": ["major", "minor"],
+            "meters": ["4/4", "3/4"],
+            "bars": 4,
+            "rhythms": ["half", "dotted_half", "quarter", "dotted_quarter", "eighth"],
+            "max_leap": 4,
+            "step_rate": 0.6,
+            "rest_rate": 0.05
+          }
+        },
+        "tempo_bpm": 76
+      }
+    }
+  ]
+}

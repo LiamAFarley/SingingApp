@@ -651,3 +651,27 @@ mod tests {
     }
 }
 
+
+#[cfg(test)]
+mod gallery {
+    use super::*;
+
+    /// Writes sample melodies for the UI's notation gallery (`?scenario=notation` in the browser mock).
+    #[test]
+    #[ignore]
+    fn write_gallery() {
+        let cases: Vec<(MelodyParams, NoteRange, u64)> = vec![
+            (MelodyParams { keys: vec!["D".into()], ..MelodyParams::default() }, NoteRange::new(43, 60), 3),
+            (MelodyParams { keys: vec!["Bb".into()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Half], ..MelodyParams::default() }, NoteRange::new(48, 67), 5),
+            (MelodyParams { keys: vec!["B".into()], modes: vec![KeyMode::Minor], meters: vec!["3/4".parse().unwrap()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::DottedHalf, NoteValue::DottedQuarter, NoteValue::Half], max_leap: 4, ..MelodyParams::default() }, NoteRange::new(57, 76), 8),
+            (MelodyParams { keys: vec!["Eb".into()], meters: vec!["6/8".parse().unwrap()], rhythms: vec![NoteValue::DottedQuarter, NoteValue::Quarter, NoteValue::Eighth, NoteValue::DottedHalf], bars: 4, ..MelodyParams::default() }, NoteRange::new(60, 79), 2),
+            (MelodyParams { keys: vec!["E".into()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Sixteenth, NoteValue::Half], bars: 8, rest_rate: 0.08, max_leap: 4, step_rate: 0.6, ..MelodyParams::default() }, NoteRange::new(50, 69), 11),
+        ];
+        let scores: Vec<Score> = cases
+            .into_iter()
+            .map(|(p, r, seed)| generate_melody(&p, r, 80.0, &mut Rng::new(seed)).unwrap())
+            .collect();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../ui/src/notation/gallery.json");
+        std::fs::write(path, serde_json::to_string_pretty(&scores).unwrap()).unwrap();
+    }
+}

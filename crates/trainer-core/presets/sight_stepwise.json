@@ -1,0 +1,15 @@
+{
+  "title": "Sight singing: stepwise",
+  "blocks": [
+    {
+      "type": "sight_sing",
+      "title": "Four bars, mostly steps",
+      "count": 8,
+      "feedback": "after_trial",
+      "params": {
+        "melody": { "generate": { "keys": ["C", "G", "F", "D"], "bars": 4, "rhythms": ["half", "quarter"], "max_leap": 2, "step_rate": 0.85 } },
+        "tempo_bpm": 72
+      }
+    }
+  ]
+}

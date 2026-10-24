@@ -1,0 +1,512 @@
+[
+  {
+    "key": {
+      "tonic": "D",
+      "mode": "major",
+      "fifths": 2
+    },
+    "time": "4/4",
+    "clef": "bass",
+    "tempo_bpm": 80.0,
+    "bars": 4,
+    "notes": [
+      {
+        "pitch": "A2",
+        "start": 0,
+        "dur": 4
+      },
+      {
+        "pitch": "B2",
+        "start": 4,
+        "dur": 4
+      },
+      {
+        "pitch": "A2",
+        "start": 8,
+        "dur": 4
+      },
+      {
+        "pitch": "G2",
+        "start": 12,
+        "dur": 4
+      },
+      {
+        "pitch": "A2",
+        "start": 16,
+        "dur": 8
+      },
+      {
+        "pitch": "B2",
+        "start": 24,
+        "dur": 8
+      },
+      {
+        "pitch": "B2",
+        "start": 32,
+        "dur": 4
+      },
+      {
+        "pitch": "F#3",
+        "start": 36,
+        "dur": 4
+      },
+      {
+        "pitch": "C#3",
+        "start": 40,
+        "dur": 8
+      },
+      {
+        "pitch": "C#3",
+        "start": 48,
+        "dur": 8
+      },
+      {
+        "pitch": "D3",
+        "start": 56,
+        "dur": 8
+      }
+    ]
+  },
+  {
+    "key": {
+      "tonic": "Bb",
+      "mode": "major",
+      "fifths": -2
+    },
+    "time": "4/4",
+    "clef": "treble8vb",
+    "tempo_bpm": 80.0,
+    "bars": 4,
+    "notes": [
+      {
+        "pitch": "F3",
+        "start": 0,
+        "dur": 8
+      },
+      {
+        "pitch": "G3",
+        "start": 8,
+        "dur": 2
+      },
+      {
+        "pitch": "F3",
+        "start": 10,
+        "dur": 2
+      },
+      {
+        "pitch": "Bb3",
+        "start": 12,
+        "dur": 2
+      },
+      {
+        "pitch": "A3",
+        "start": 14,
+        "dur": 2
+      },
+      {
+        "pitch": "Bb3",
+        "start": 16,
+        "dur": 2
+      },
+      {
+        "pitch": "A3",
+        "start": 18,
+        "dur": 2
+      },
+      {
+        "pitch": "G3",
+        "start": 20,
+        "dur": 2
+      },
+      {
+        "pitch": "F3",
+        "start": 22,
+        "dur": 2
+      },
+      {
+        "pitch": "G3",
+        "start": 24,
+        "dur": 4
+      },
+      {
+        "pitch": "D4",
+        "start": 28,
+        "dur": 4
+      },
+      {
+        "pitch": "C4",
+        "start": 32,
+        "dur": 8
+      },
+      {
+        "pitch": "A3",
+        "start": 40,
+        "dur": 4
+      },
+      {
+        "pitch": "Bb3",
+        "start": 44,
+        "dur": 4
+      },
+      {
+        "pitch": "C4",
+        "start": 48,
+        "dur": 8
+      },
+      {
+        "pitch": "Bb3",
+        "start": 56,
+        "dur": 8
+      }
+    ]
+  },
+  {
+    "key": {
+      "tonic": "B",
+      "mode": "minor",
+      "fifths": 2
+    },
+    "time": "3/4",
+    "clef": "treble8vb",
+    "tempo_bpm": 80.0,
+    "bars": 4,
+    "notes": [
+      {
+        "pitch": "D4",
+        "start": 0,
+        "dur": 12
+      },
+      {
+        "pitch": "C#4",
+        "start": 12,
+        "dur": 2
+      },
+      {
+        "pitch": "F#4",
+        "start": 14,
+        "dur": 2
+      },
+      {
+        "pitch": "E4",
+        "start": 16,
+        "dur": 4
+      },
+      {
+        "pitch": "F#4",
+        "start": 20,
+        "dur": 4
+      },
+      {
+        "pitch": "B3",
+        "start": 24,
+        "dur": 8
+      },
+      {
+        "pitch": "A3",
+        "start": 32,
+        "dur": 2
+      },
+      {
+        "pitch": "A3",
+        "start": 34,
+        "dur": 2
+      },
+      {
+        "pitch": "B3",
+        "start": 36,
+        "dur": 2
+      },
+      {
+        "pitch": "A#3",
+        "start": 38,
+        "dur": 2
+      },
+      {
+        "pitch": "B3",
+        "start": 40,
+        "dur": 8
+      }
+    ]
+  },
+  {
+    "key": {
+      "tonic": "Eb",
+      "mode": "major",
+      "fifths": -3
+    },
+    "time": "6/8",
+    "clef": "treble",
+    "tempo_bpm": 80.0,
+    "bars": 4,
+    "notes": [
+      {
+        "pitch": "Eb4",
+        "start": 0,
+        "dur": 2
+      },
+      {
+        "pitch": "Ab4",
+        "start": 2,
+        "dur": 2
+      },
+      {
+        "pitch": "F4",
+        "start": 4,
+        "dur": 2
+      },
+      {
+        "pitch": "Bb4",
+        "start": 6,
+        "dur": 4
+      },
+      {
+        "pitch": "Ab4",
+        "start": 10,
+        "dur": 2
+      },
+      {
+        "pitch": "G4",
+        "start": 12,
+        "dur": 6
+      },
+      {
+        "pitch": "Ab4",
+        "start": 18,
+        "dur": 4
+      },
+      {
+        "pitch": "G4",
+        "start": 22,
+        "dur": 2
+      },
+      {
+        "pitch": "F4",
+        "start": 24,
+        "dur": 6
+      },
+      {
+        "pitch": "G4",
+        "start": 30,
+        "dur": 4
+      },
+      {
+        "pitch": "F4",
+        "start": 34,
+        "dur": 2
+      },
+      {
+        "pitch": "Eb4",
+        "start": 36,
+        "dur": 12
+      }
+    ]
+  },
+  {
+    "key": {
+      "tonic": "E",
+      "mode": "major",
+      "fifths": 4
+    },
+    "time": "4/4",
+    "clef": "treble8vb",
+    "tempo_bpm": 80.0,
+    "bars": 8,
+    "notes": [
+      {
+        "pitch": "G#3",
+        "start": 0,
+        "dur": 2
+      },
+      {
+        "pitch": "F#3",
+        "start": 2,
+        "dur": 2
+      },
+      {
+        "pitch": "B3",
+        "start": 4,
+        "dur": 4
+      },
+      {
+        "pitch": "E4",
+        "start": 8,
+        "dur": 4
+      },
+      {
+        "pitch": "D#4",
+        "start": 12,
+        "dur": 2
+      },
+      {
+        "pitch": "D#4",
+        "start": 14,
+        "dur": 2
+      },
+      {
+        "pitch": "C#4",
+        "start": 16,
+        "dur": 8
+      },
+      {
+        "pitch": null,
+        "start": 24,
+        "dur": 1
+      },
+      {
+        "pitch": "D#4",
+        "start": 25,
+        "dur": 1
+      },
+      {
+        "pitch": "C#4",
+        "start": 26,
+        "dur": 1
+      },
+      {
+        "pitch": "B3",
+        "start": 27,
+        "dur": 1
+      },
+      {
+        "pitch": "C#4",
+        "start": 28,
+        "dur": 4
+      },
+      {
+        "pitch": "G#3",
+        "start": 32,
+        "dur": 4
+      },
+      {
+        "pitch": "A3",
+        "start": 36,
+        "dur": 4
+      },
+      {
+        "pitch": "G#3",
+        "start": 40,
+        "dur": 8
+      },
+      {
+        "pitch": "A3",
+        "start": 48,
+        "dur": 4
+      },
+      {
+        "pitch": "F#3",
+        "start": 52,
+        "dur": 4
+      },
+      {
+        "pitch": "C#4",
+        "start": 56,
+        "dur": 8
+      },
+      {
+        "pitch": "B3",
+        "start": 64,
+        "dur": 4
+      },
+      {
+        "pitch": "C#4",
+        "start": 68,
+        "dur": 4
+      },
+      {
+        "pitch": "B3",
+        "start": 72,
+        "dur": 4
+      },
+      {
+        "pitch": "E4",
+        "start": 76,
+        "dur": 1
+      },
+      {
+        "pitch": "D#4",
+        "start": 77,
+        "dur": 1
+      },
+      {
+        "pitch": "C#4",
+        "start": 78,
+        "dur": 2
+      },
+      {
+        "pitch": "E4",
+        "start": 80,
+        "dur": 4
+      },
+      {
+        "pitch": "A4",
+        "start": 84,
+        "dur": 2
+      },
+      {
+        "pitch": "G#4",
+        "start": 86,
+        "dur": 2
+      },
+      {
+        "pitch": "C#4",
+        "start": 88,
+        "dur": 4
+      },
+      {
+        "pitch": "F#4",
+        "start": 92,
+        "dur": 1
+      },
+      {
+        "pitch": "E4",
+        "start": 93,
+        "dur": 1
+      },
+      {
+        "pitch": "F#4",
+        "start": 94,
+        "dur": 2
+      },
+      {
+        "pitch": null,
+        "start": 96,
+        "dur": 8
+      },
+      {
+        "pitch": "G#4",
+        "start": 104,
+        "dur": 4
+      },
+      {
+        "pitch": null,
+        "start": 108,
+        "dur": 4
+      },
+      {
+        "pitch": "A4",
+        "start": 112,
+        "dur": 4
+      },
+      {
+        "pitch": "G#4",
+        "start": 116,
+        "dur": 2
+      },
+      {
+        "pitch": "A4",
+        "start": 118,
+        "dur": 1
+      },
+      {
+        "pitch": "F#4",
+        "start": 119,
+        "dur": 1
+      },
+      {
+        "pitch": "E4",
+        "start": 120,
+        "dur": 8
+      }
+    ]
+  }
+]

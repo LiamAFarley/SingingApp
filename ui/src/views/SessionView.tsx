@@ -1,11 +1,17 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { api, command } from "../api";
 import type { BlockReport } from "../bindings/BlockReport";
+import type { LaneSpec } from "../bindings/LaneSpec";
 import type { RunnerState } from "../bindings/RunnerState";
+import type { Score } from "../bindings/Score";
 import type { TrialView } from "../bindings/TrialView";
 import { ChoiceGrid, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
 import { PitchLane } from "../components/PitchLane";
 import { live, useAnimationFrame } from "../live";
+import { beatTicks, describeKey } from "../notation/layout";
+
+// VexFlow is large; load it with the first notated exercise.
+const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
 import { describeCents, fmtCents, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
 
 const FEEDBACK_TEXT: Record<string, string> = {
@@ -62,6 +68,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
         if (k === "l" && fb.can_listen) command({ kind: "listen" });
         if (k === "g" && fb.can_sing_along) command({ kind: "sing_along" });
         if (k === "t" && fb.can_retry) command({ kind: "retry" });
+        if (k === "p" && fb.can_play_answer) command({ kind: "play_answer" });
       }
       if (k === "s" && (phase === "recording" || phase === "listening")) command({ kind: "skip" });
     };
@@ -366,6 +373,7 @@ function PairingStage({ trial }: { trial: TrialView }) {
 }
 
 function SungStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  if (trial.score) return <SightStage runner={runner} trial={trial} score={trial.score} />;
   const lane = trial.lane!;
   const fb = runner.feedback;
   const graded = runner.phase === "feedback" && fb && !fb.hidden ? { trace: fb.trace, notes: fb.notes } : null;
@@ -381,27 +389,115 @@ function SungStage({ runner, trial }: { runner: RunnerState; trial: TrialView })
         <>
           <Result runner={runner} />
           {!fb.hidden && fb.notes.length > 0 && <NoteStrip notes={fb.notes} />}
-          <div className="controls">
-            {fb.can_listen && (
-              <button className="btn" onClick={() => command({ kind: "listen" })}>
-                Listen <span className="kbd">L</span>
-              </button>
-            )}
-            {fb.can_sing_along && (
-              <button className="btn" onClick={() => command({ kind: "sing_along" })}>
-                Sing along <span className="kbd">G</span>
-              </button>
-            )}
-            {fb.can_retry && (
-              <button className="btn" onClick={() => command({ kind: "retry" })}>
-                Retry <span className="kbd">T</span>
-              </button>
-            )}
-            <NextButton auto={fb.auto_advance_ms} />
-          </div>
+          <SungControls fb={fb} />
         </>
       )}
     </>
+  );
+}
+
+function SungControls({ fb }: { fb: NonNullable<RunnerState["feedback"]> }) {
+  return (
+    <div className="controls">
+      {fb.can_listen && (
+        <button className="btn" onClick={() => command({ kind: "listen" })}>
+          Listen <span className="kbd">L</span>
+        </button>
+      )}
+      {fb.can_play_answer && (
+        <button className="btn" onClick={() => command({ kind: "play_answer" })}>
+          Play my answer <span className="kbd">P</span>
+        </button>
+      )}
+      {fb.can_sing_along && (
+        <button className="btn" onClick={() => command({ kind: "sing_along" })}>
+          Sing along <span className="kbd">G</span>
+        </button>
+      )}
+      {fb.can_retry && (
+        <button className="btn" onClick={() => command({ kind: "retry" })}>
+          Retry <span className="kbd">T</span>
+        </button>
+      )}
+      <NextButton auto={fb.auto_advance_ms} />
+    </div>
+  );
+}
+
+/** Sight singing: the score on a staff, the steps before singing, the trace and marks after. */
+function SightStage({ runner, trial, score }: { runner: RunnerState; trial: TrialView; score: Score }) {
+  const lane = trial.lane!;
+  const fb = runner.feedback;
+  const recording = runner.phase === "recording";
+  useAnimationFrame(recording);
+  const start = trial.timeline_start_s ?? 0;
+  const t = live.now() - start;
+  const graded = runner.phase === "feedback" && fb && !fb.hidden ? fb : null;
+  const timing = { singStartS: lane.sing_start_s, beatS: lane.beat_s };
+  const ticksPerBeat = beatTicks(score);
+  const singing = recording && t >= lane.sing_start_s && t <= lane.total_s;
+  const cursorTick = singing && lane.cursor ? ((t - lane.sing_start_s) / lane.beat_s) * ticksPerBeat : null;
+  const liveTrace =
+    recording && trial.show_live_pitch
+      ? live.since(start + lane.sing_start_s - 0.3).map((p) => [p.t - start, p.midi] as [number, number | null])
+      : undefined;
+  return (
+    <>
+      <div>
+        <div className="prompt">{trial.prompt}</div>
+        <div className="prompt-sub">
+          {runner.phase === "grading"
+            ? "Analysing…"
+            : `${describeKey(score)} · ${score.time} · ${Math.round(score.tempo_bpm)} bpm${trial.assisted ? " · sing-along attempt" : ""}`}
+        </div>
+      </div>
+      <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 200 }} />}>
+        <Staff score={score} trace={graded ? graded.trace : liveTrace} timing={timing} results={graded ? graded.notes : null} cursorTick={cursorTick} />
+      </Suspense>
+      {recording && <Steps lane={lane} t={t} />}
+      {recording && lane.metronome && <BeatDots lane={lane} t={t} />}
+      {runner.phase === "feedback" && fb && (
+        <>
+          <Result runner={runner} />
+          <SungControls fb={fb} />
+        </>
+      )}
+    </>
+  );
+}
+
+/** EarMaster-style steps: establish key, first note, count-in, sing. */
+function Steps({ lane, t }: { lane: LaneSpec; t: number }) {
+  if (lane.sections.length === 0) return null;
+  const current = lane.sections.findIndex((s) => t >= s.start_s && t < s.end_s);
+  const before = t < (lane.sections[0]?.start_s ?? 0);
+  return (
+    <div className="steps">
+      {lane.sections.map((s, i) => {
+        const state = i === current ? "active" : !before && (current === -1 ? t >= s.end_s : i < current) ? "done" : "";
+        return (
+          <div key={s.label} className={`step ${state}`}>
+            {s.label}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BeatDots({ lane, t }: { lane: LaneSpec; t: number }) {
+  const beat = lane.beat_s > 0 && t >= 0 ? Math.floor(t / lane.beat_s + 1e-6) : -1;
+  const countIn = lane.sections.find((s) => s.label === "Count-in");
+  const origin = countIn ? Math.round(countIn.start_s / lane.beat_s) : 0;
+  const active = beat >= origin && t <= lane.total_s;
+  return (
+    <div className="readout">
+      <div className="beats" aria-hidden>
+        {Array.from({ length: lane.beats_per_bar }, (_, i) => (
+          <span key={i} className={active && (beat - origin) % lane.beats_per_bar === i ? "on" : ""} />
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -401,6 +401,7 @@ impl<'a> SessionRun<'a> {
             response_end_s: None,
             attempt,
             assisted: false,
+            score: None,
         }
     }
 
@@ -672,7 +673,17 @@ impl<'a> SessionRun<'a> {
             midi_low: lo - pad,
             midi_high: hi + pad,
             targets_hidden: t.lane_targets == LaneTargets::HiddenUntilDone,
-            metronome: t.backing.has_click(),
+            metronome: t.backing.has_click() || t.count_in_beat.is_some(),
+            sections: t
+                .sections
+                .iter()
+                .map(|s| LaneSection {
+                    label: s.label.clone(),
+                    start_s: s.start_beat * beat,
+                    end_s: s.end_beat * beat,
+                })
+                .collect(),
+            cursor: t.follow_cursor,
         }
     }
 
@@ -695,6 +706,7 @@ impl<'a> SessionRun<'a> {
         }
         let mut view = self.base_view(t.exercise, Interaction::Sung, &t.prompt, attempt);
         view.lane = Some(self.lane_for(t));
+        view.score = t.score.clone();
         view.show_live_pitch = feedback == FeedbackMode::Continuous || assisted;
         view.timeline_start_s = Some(secs(engine, start));
         view.response_start_s = Some(secs(engine, start) + t.sing_start_ms() / 1000.0);
@@ -888,6 +900,7 @@ impl<'a> SessionRun<'a> {
             can_sing_along: is_sung,
             can_listen: is_sung || (matches!(trial, TrialSpec::SingPitch(_)) && show),
             can_show_answer: is_identify && show,
+            can_play_answer: extras.capture.is_some(),
             auto_advance_ms: auto_ms,
             hidden: !show,
         };
@@ -940,6 +953,22 @@ impl<'a> SessionRun<'a> {
                             }
                         }
                         _ => {}
+                    }
+                }
+                Some(RunnerCommand::PlayAnswer) => {
+                    interacted = true;
+                    if let Some((samples, sr)) = &extras.capture {
+                        // From just before singing starts (sung trials), so the lead-in is skipped.
+                        let skip = match trial {
+                            TrialSpec::Sung(t) => ((t.sing_start_ms() - 300.0).max(0.0) / 1000.0 * *sr as f64) as usize,
+                            _ => 0,
+                        };
+                        let voice = &samples[skip.min(samples.len())..];
+                        let peak = voice.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+                        let gain = if peak > 0.0 { (0.7 / peak).min(8.0) } else { 1.0 };
+                        let mono: Vec<f32> = voice.iter().map(|s| s * gain).collect();
+                        engine.stop_bus(Bus::Guide);
+                        engine.play_now(Arc::new(SoundBuffer::from_mono(*sr, &mono)), 1.0, Bus::Guide)?;
                     }
                 }
                 Some(RunnerCommand::ShowAnswer | RunnerCommand::Replay) if is_identify => {

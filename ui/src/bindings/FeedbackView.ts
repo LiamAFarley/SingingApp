@@ -7,6 +7,10 @@ export type FeedbackView = { correct: boolean | null, summary: string, correct_c
  */
 trace: Array<[number, number | null]>, can_retry: boolean, can_sing_along: boolean, can_listen: boolean, can_show_answer: boolean, 
 /**
+ * The sung attempt can be played back.
+ */
+can_play_answer: boolean, 
+/**
  * Moves on by itself after this many ms unless the user interacts.
  */
 auto_advance_ms: number | null, 

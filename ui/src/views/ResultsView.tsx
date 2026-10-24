@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import type { NoteResult } from "../bindings/NoteResult";
+import type { Score } from "../bindings/Score";
 import type { SessionReport } from "../bindings/SessionReport";
 import type { SessionRow } from "../bindings/SessionRow";
 import type { TrialBrief } from "../bindings/TrialBrief";
 import { fmtCents, fmtDate, fmtDuration, fmtMs, KIND_TITLES, noteDisplay, pct } from "../music";
+
+const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
 
 export function ResultsView({ onRepeat }: { onRepeat: (sessionId: string) => void }) {
   const [sessions, setSessions] = useState<SessionRow[]>([]);
@@ -165,8 +169,11 @@ function TrialDetail({ trial }: { trial: TrialBrief }) {
     api("trialDetail", trial.id).then(setDetail).catch(() => setDetail(null));
   }, [trial.id]);
   const rows = ((detail?.trace_20hz as { rows?: [number, number | null][] } | undefined)?.rows ?? []) as [number, number | null][];
-  const spec = detail?.spec as { kind?: string; notes?: { midi: number; start_beat: number; beats: number }[]; tempo_bpm?: number; sing_start_beat?: number } | undefined;
+  const spec = detail?.spec as
+    | { kind?: string; notes?: { midi: number; start_beat: number; beats: number }[]; tempo_bpm?: number; sing_start_beat?: number; score?: Score }
+    | undefined;
   const metrics = (detail?.metrics ?? {}) as Record<string, unknown>;
+  const beatS = spec?.tempo_bpm ? 60 / spec.tempo_bpm : 1;
   return (
     <div className="drawer section">
       <div className="row" style={{ justifyContent: "space-between" }}>
@@ -177,10 +184,22 @@ function TrialDetail({ trial }: { trial: TrialBrief }) {
           </button>
         )}
       </div>
-      {rows.length > 0 && <TracePlot rows={rows} spec={spec} />}
+      {spec?.score ? (
+        <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 160 }} />}>
+          <Staff
+            score={spec.score}
+            maxHeight={360}
+            trace={rows}
+            timing={{ singStartS: (spec.sing_start_beat ?? 0) * beatS, beatS }}
+            results={(metrics.notes as NoteResult[] | undefined) ?? null}
+          />
+        </Suspense>
+      ) : (
+        rows.length > 0 && <TracePlot rows={rows} spec={spec} />
+      )}
       <dl className="kv">
         {Object.entries(metrics)
-          .filter(([, v]) => typeof v === "number" || typeof v === "string" || typeof v === "boolean")
+          .filter(([k, v]) => k !== "notes" && (typeof v === "number" || typeof v === "string" || typeof v === "boolean"))
           .slice(0, 16)
           .map(([k, v]) => (
             <div key={k} style={{ display: "contents" }}>

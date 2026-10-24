@@ -2,8 +2,10 @@
 
 use serde_json::json;
 
+use crate::melody::generate_melody;
 use crate::rng::{BalancedBag, Rng};
 use crate::schema::*;
+use crate::score::Score;
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::{PoolConfig, TimbreId, default_training_timbres, is_valid_timbre};
 
@@ -64,6 +66,7 @@ pub fn generate_block(
         Exercise::Sustain(p) => gen_sustain(p, n, &mut rng, ctx),
         Exercise::SingInterval(p) => gen_sing_interval(p, n, &mut rng, ctx),
         Exercise::Pattern(p) => gen_pattern(p, n, &mut rng, ctx),
+        Exercise::SightSing(p) => gen_sight_sing(p, n, &mut rng, ctx),
     }
 }
 
@@ -78,8 +81,11 @@ pub fn default_mode(trial: &TrialSpec) -> PitchRefMode {
             }
         }
         TrialSpec::Sung(t) => {
-            if t.exercise == ExerciseKind::Pattern && t.reference_beats.is_empty() && !t.guide {
+            let unprompted = t.reference_beats.is_empty() && !t.guide;
+            if t.exercise == ExerciseKind::Pattern && unprompted {
                 PitchRefMode::RelativeDriftTolerant
+            } else if t.exercise == ExerciseKind::SightSing && unprompted {
+                PitchRefMode::RelativeToFirst
             } else {
                 PitchRefMode::Absolute
             }
@@ -383,6 +389,22 @@ fn gen_pairing(
     Ok(out)
 }
 
+/// I–IV–V–I (or i–iv–V–i) in close position as (bass, upper voices), tonic between F3 and E4.
+fn cadence_chords(tonic: PitchClass, mode: KeyMode) -> [(i32, [i32; 3]); 4] {
+    let mut r = tonic.in_octave(3);
+    if r < 53 {
+        r += 12;
+    }
+    let third = if mode == KeyMode::Major { 4 } else { 3 };
+    let sixth = if mode == KeyMode::Major { 9 } else { 8 };
+    [
+        (r - 12, [r, r + third, r + 7]),
+        (r - 7, [r, r + 5, r + sixth]),
+        (r - 5, [r - 1, r + 2, r + 7]),
+        (r - 12, [r, r + third, r + 7]),
+    ]
+}
+
 /// I–IV–V–I (or i–iv–V–i) in close position with a bass line, tonic between F3 and E4.
 fn cadence_events(
     tonic: PitchClass,
@@ -391,18 +413,7 @@ fn cadence_events(
     timbre: &str,
     start_ms: f64,
 ) -> Vec<SoundEvent> {
-    let mut r = tonic.in_octave(3);
-    if r < 53 {
-        r += 12;
-    }
-    let third = if mode == KeyMode::Major { 4 } else { 3 };
-    let sixth = if mode == KeyMode::Major { 9 } else { 8 };
-    let chords: [(i32, [i32; 3]); 4] = [
-        (r - 12, [r, r + third, r + 7]),
-        (r - 7, [r, r + 5, r + sixth]),
-        (r - 5, [r - 1, r + 2, r + 7]),
-        (r - 12, [r, r + third, r + 7]),
-    ];
+    let chords = cadence_chords(tonic, mode);
     let beat = 60_000.0 / tempo_bpm as f64;
     let mut events = Vec::new();
     for (i, (bass, upper)) in chords.iter().enumerate() {
@@ -758,6 +769,10 @@ fn gen_pitch_match(
             drone_midi: None,
             lane_targets: LaneTargets::Shown,
             timed: false,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "timbre": timbre, "mode": p.mode }),
         }));
     }
@@ -793,6 +808,10 @@ fn gen_sustain(
             drone_midi: p.drone.then_some(midi),
             lane_targets: LaneTargets::Shown,
             timed: false,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "drone": p.drone, "hold_ms": p.hold_ms }),
         }));
     }
@@ -925,6 +944,10 @@ fn gen_sing_interval(
             drone_midi: (p.sung.backing == Backing::Drone).then_some(first),
             lane_targets: p.sung.lane_targets,
             timed: true,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: json!({
                 "interval": iv.id(),
                 "direction": dir,
@@ -1112,6 +1135,10 @@ fn gen_pattern(
             drone_midi: drone,
             lane_targets: p.sung.lane_targets,
             timed: true,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: json!({
                 "pattern": desc,
                 "tonic_midi": t,
@@ -1123,6 +1150,145 @@ fn gen_pattern(
         }));
     }
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sight singing
+// ---------------------------------------------------------------------------------------------
+
+/// The melody for trial `i`: generated, or the coach's melody `i mod n`.
+fn melody_for(
+    source: &MelodySource,
+    i: usize,
+    tempo_bpm: f32,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<Score, GenError> {
+    match source {
+        MelodySource::Generate(m) => {
+            generate_melody(m, ctx.comfortable, tempo_bpm, rng).map_err(|e| GenError(format!("melody: {e}")))
+        }
+        MelodySource::Given(list) => {
+            if list.is_empty() {
+                return err("melody.given must contain at least one melody");
+            }
+            let k = i % list.len();
+            Score::from_compact(&list[k], tempo_bpm).map_err(|e| GenError(format!("melody.given[{k}]: {e}")))
+        }
+    }
+}
+
+/// Stimulus fields shared by sight singing and dictation.
+fn score_stimulus(score: &Score) -> serde_json::Value {
+    let (lo, hi) = score.range().unwrap_or((0, 0));
+    let pitched: Vec<_> = score.pitched().map(|(_, p)| p).collect();
+    let largest_leap = pitched
+        .windows(2)
+        .map(|w| (w[1].diatonic() - w[0].diatonic()).abs())
+        .max()
+        .unwrap_or(0);
+    json!({
+        "key": score.key.to_string(),
+        "mode": score.key.mode,
+        "time": score.time,
+        "clef": score.clef,
+        "bars": score.bars,
+        "tempo_bpm": score.tempo_bpm,
+        "notes": pitched.len(),
+        "low": Note(lo).name(),
+        "high": Note(hi).name(),
+        "largest_leap_steps": largest_leap,
+        "melody": score.pitch_names(),
+    })
+}
+
+fn gen_sight_sing(
+    p: &SightSingParams,
+    n: usize,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<Vec<TrialSpec>, GenError> {
+    check_timbres(std::slice::from_ref(&p.timbre))?;
+    if !(30.0..=220.0).contains(&p.tempo_bpm) {
+        return err("tempo_bpm must be 30–220");
+    }
+    if p.backing.has_melody() {
+        return err("backing `melody` would sing the answer; use `click`, `chords`, `drone` or `none` (Sing along is offered after each attempt)");
+    }
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let score = melody_for(&p.melody, i, p.tempo_bpm, rng, ctx)?;
+        out.push(TrialSpec::Sung(sight_trial(score, p)));
+    }
+    Ok(out)
+}
+
+/// Lays out the cadence, first note, count-in and singing for a notated melody.
+fn sight_trial(score: Score, p: &SightSingParams) -> SungTrial {
+    let bpb = score.time.beats.max(1);
+    let tonic = PitchClass::new(score.key.tonic_pc());
+    let targets = score.targets();
+    let mut reference = Vec::new();
+    let mut sections = Vec::new();
+    let mut t = 0.0f32;
+    if p.start.plays_key() {
+        for (k, (bass, upper)) in cadence_chords(tonic, score.key.mode).iter().enumerate() {
+            let beats = if k == 3 { 2.0 } else { 0.95 };
+            reference.push(TargetNote { midi: *bass, start_beat: t + k as f32, beats });
+            for m in upper {
+                reference.push(TargetNote { midi: *m, start_beat: t + k as f32, beats });
+            }
+        }
+        sections.push(TimelineSection { label: "Establish key".into(), start_beat: 0.0, end_beat: 5.0 });
+        t = 6.0;
+    }
+    if p.start.plays_first_note() {
+        if let Some(first) = targets.first() {
+            reference.push(TargetNote { midi: first.midi, start_beat: t, beats: 2.0 });
+            sections.push(TimelineSection { label: "First note".into(), start_beat: t, end_beat: t + 2.0 });
+            t += 3.0;
+        }
+    }
+    let count_in = t.ceil();
+    let sing_start = count_in + (p.count_in_bars * bpb) as f32;
+    if p.count_in_bars > 0 {
+        sections.push(TimelineSection { label: "Count-in".into(), start_beat: count_in, end_beat: sing_start });
+    }
+    let length = score.total_beats();
+    sections.push(TimelineSection { label: "Sing".into(), start_beat: sing_start, end_beat: sing_start + length });
+    let drone = (p.backing == Backing::Drone).then(|| {
+        let lo = score.range().map(|r| r.0).unwrap_or(48);
+        let mut d = tonic.in_octave(2);
+        while d + 12 <= lo - 5 {
+            d += 12;
+        }
+        d
+    });
+    let mut stimulus = score_stimulus(&score);
+    stimulus["start"] = json!(p.start);
+    stimulus["backing"] = json!(p.backing);
+    SungTrial {
+        exercise: ExerciseKind::SightSing,
+        prompt: score.title.clone().unwrap_or_else(|| "Sing the melody".into()),
+        notes: targets,
+        tempo_bpm: score.tempo_bpm.clamp(30.0, 220.0),
+        beats_per_bar: bpb,
+        sing_start_beat: sing_start,
+        total_beats: sing_start + length + 1.0,
+        reference_beats: reference,
+        reference_timbre: p.timbre.clone(),
+        backing: p.backing,
+        backing_volume: p.backing_volume,
+        guide: false,
+        drone_midi: drone,
+        lane_targets: LaneTargets::HiddenUntilDone,
+        timed: true,
+        score: Some(score),
+        count_in_beat: Some(count_in),
+        sections,
+        follow_cursor: p.follow_cursor,
+        stimulus,
+    }
 }
 
 #[cfg(test)]
@@ -1271,5 +1437,42 @@ mod tests {
                 assert!(!t.events.is_empty());
             }
         }
+    }
+
+    #[test]
+    fn sight_singing_trials_lay_out_key_first_note_and_count_in() {
+        let b = block(r#"{"type": "sight_sing", "count": 5, "seed": 7, "params": {"tempo_bpm": 90}}"#);
+        let trials = generate_block(&b, 7, &GenContext::default()).unwrap();
+        assert_eq!(trials.len(), 5);
+        for t in &trials {
+            let TrialSpec::Sung(t) = t else { panic!("not sung") };
+            let score = t.score.as_ref().expect("score");
+            assert_eq!(t.exercise, ExerciseKind::SightSing);
+            assert_eq!(t.notes.len(), score.pitched().count());
+            // Cadence (4 chords of 4 notes) plus the first note.
+            assert_eq!(t.reference_beats.len(), 17);
+            assert_eq!(t.reference_beats.last().unwrap().midi, t.notes[0].midi);
+            assert_eq!(t.count_in_beat, Some(9.0));
+            assert_eq!(t.sing_start_beat, 9.0 + score.time.beats as f32);
+            let labels: Vec<&str> = t.sections.iter().map(|s| s.label.as_str()).collect();
+            assert_eq!(labels, ["Establish key", "First note", "Count-in", "Sing"]);
+            assert_eq!(default_mode(&TrialSpec::Sung(t.clone())), PitchRefMode::Absolute);
+        }
+    }
+
+    #[test]
+    fn sight_singing_uses_coach_melodies_and_relative_grading_without_a_start() {
+        let b = block(r#"{"type": "sight_sing", "count": 3, "params": {"start": "none", "melody": {"given": [
+            {"key": "F major", "time": "3/4", "notes": [{"note": "C4", "beats": 1}, {"note": "F4", "beats": 2}, {"note": "E4", "beats": 1}, {"note": "F4", "beats": 2}]}
+        ]}}}"#);
+        let trials = generate_block(&b, 1, &GenContext::default()).unwrap();
+        let TrialSpec::Sung(t) = &trials[2] else { panic!() };
+        assert!(t.reference_beats.is_empty());
+        assert_eq!(t.count_in_beat, Some(0.0));
+        assert_eq!(t.sing_start_beat, 3.0);
+        assert_eq!(t.notes.iter().map(|n| n.midi).collect::<Vec<_>>(), [60, 65, 64, 65]);
+        assert_eq!(default_mode(&trials[2]), PitchRefMode::RelativeToFirst);
+        let bad = block(r#"{"type": "sight_sing", "count": 1, "params": {"backing": "melody"}}"#);
+        assert!(generate_block(&bad, 1, &GenContext::default()).is_err());
     }
 }

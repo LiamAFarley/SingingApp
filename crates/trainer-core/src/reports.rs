@@ -9,7 +9,7 @@ use ts_rs::TS;
 
 use crate::schema::{
     ChordIdParams, ExerciseKind, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
-    PitchPairingParams, ScaleIdParams, SessionSpec, SingIntervalParams, SingPitchParams,
+    PitchPairingParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams,
     SustainParams, TonalCenterIdParams,
 };
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
@@ -408,6 +408,12 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "A sung pattern (scale, arpeggio, scale degrees or exact notes) on a metronome timeline, transposed per trial. reference: echo (hear first), guided (sing along), first_note, none. backing: none, click, drone, chords, melody, melody_and_chords. Graded note by note with alignment; relative_drift_tolerant grading is used when nothing is played.",
             schema_of::<PatternParams>(),
             json!({"type": "pattern", "count": 6, "feedback": "continuous", "params": {"pattern": {"degrees": {"degrees": [1, 3, 5, 3, 1]}}, "keys": "ascending", "tempo_bpm": 90, "reference": "echo", "backing": "click"}}),
+        ),
+        entry(
+            ExerciseKind::SightSing,
+            "Sight singing from staff notation (no piano roll, so durations are read, not seen). The score is shown, the key is established (cadence and/or first note, per `start`), one bar is counted in and the melody is sung with the click; graded note by note for pitch and timing. melody: {\"generate\": {keys, modes, meters, bars, rhythms, max_leap, step_rate, rest_rate, start_degrees, range, clef}} or {\"given\": [melodies you write]} where a melody is {key: \"Eb major\", time: \"4/4\", notes: [{note: \"Eb4\", beats: 1}, {rest: 0.5}, ...]} (spelling is kept). start: key_and_first_note (default), key_only, first_note, none (graded relative to the first sung note unless grading.mode is set). After each attempt the user can listen, sing along with the melody or retry.",
+            schema_of::<SightSingParams>(),
+            json!({"type": "sight_sing", "count": 6, "feedback": "after_trial", "params": {"melody": {"generate": {"keys": ["C", "G", "F"], "bars": 4, "rhythms": ["half", "quarter"], "max_leap": 2}}, "tempo_bpm": 72}}),
         ),
     ]
 }

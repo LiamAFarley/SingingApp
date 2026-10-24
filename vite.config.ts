@@ -7,5 +7,6 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: { port: 1420, strictPort: true },
-  build: { outDir: "../dist/ui", emptyOutDir: true, target: "es2022" },
+  // The notation chunk (VexFlow with its music font) is large but loaded only when needed.
+  build: { outDir: "../dist/ui", emptyOutDir: true, target: "es2022", chunkSizeWarningLimit: 800 },
 });

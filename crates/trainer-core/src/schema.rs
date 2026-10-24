@@ -5,6 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::melody::MelodyParams;
+use crate::score::{CompactMelody, Score};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::TimbreId;
 
@@ -699,6 +701,84 @@ pub struct PatternParams {
     pub sung: SungOptions,
 }
 
+/// What is played before a sight-singing attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SightStart {
+    /// A cadence establishes the key, then the first note sounds.
+    #[default]
+    KeyAndFirstNote,
+    /// Only the cadence: find the first note from the key.
+    KeyOnly,
+    /// Only the first note.
+    FirstNote,
+    /// Nothing: absolute-pitch sight singing (or relative grading from the first sung note).
+    None,
+}
+
+impl SightStart {
+    pub fn plays_key(self) -> bool {
+        matches!(self, SightStart::KeyAndFirstNote | SightStart::KeyOnly)
+    }
+
+    pub fn plays_first_note(self) -> bool {
+        matches!(self, SightStart::KeyAndFirstNote | SightStart::FirstNote)
+    }
+}
+
+/// Where sight-singing and dictation melodies come from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MelodySource {
+    /// A new generated melody for every trial.
+    Generate(MelodyParams),
+    /// Melodies written by the coach; trial i uses melody i modulo their number.
+    Given(Vec<CompactMelody>),
+}
+
+impl Default for MelodySource {
+    fn default() -> Self {
+        MelodySource::Generate(MelodyParams::default())
+    }
+}
+
+fn d_sight_tempo() -> f32 {
+    72.0
+}
+
+/// Sight singing from staff notation: the score is shown, the key is established, a bar is
+/// counted in and the melody is sung in time, then graded note by note.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SightSingParams {
+    #[serde(default)]
+    pub melody: MelodySource,
+    /// Beats per minute in the time signature's unit (a coach melody's own tempo wins).
+    #[serde(default = "d_sight_tempo")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub start: SightStart,
+    #[serde(default = "d_one")]
+    pub count_in_bars: u32,
+    /// What plays while singing: `click` (default), `none`, `drone` or `chords`. The count-in
+    /// always clicks.
+    #[serde(default)]
+    pub backing: Backing,
+    #[serde(default = "d_backing_volume")]
+    pub backing_volume: f32,
+    /// Timbre of the cadence, first note and the melody when listening back.
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+    /// Move a cursor over the score while singing.
+    #[serde(default)]
+    pub follow_cursor: bool,
+}
+
+impl Default for SightSingParams {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Blocks and sessions
 // ---------------------------------------------------------------------------------------------
@@ -718,6 +798,7 @@ pub enum Exercise {
     Sustain(SustainParams),
     SingInterval(SingIntervalParams),
     Pattern(PatternParams),
+    SightSing(SightSingParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -734,10 +815,11 @@ pub enum ExerciseKind {
     Sustain,
     SingInterval,
     Pattern,
+    SightSing,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 11] = [
+    pub const ALL: [ExerciseKind; 12] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -749,6 +831,7 @@ impl ExerciseKind {
         ExerciseKind::Sustain,
         ExerciseKind::SingInterval,
         ExerciseKind::Pattern,
+        ExerciseKind::SightSing,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -764,6 +847,7 @@ impl ExerciseKind {
             ExerciseKind::Sustain => "sustain",
             ExerciseKind::SingInterval => "sing_interval",
             ExerciseKind::Pattern => "pattern",
+            ExerciseKind::SightSing => "sight_sing",
         }
     }
 
@@ -784,6 +868,7 @@ impl ExerciseKind {
             ExerciseKind::Sustain => "Sustained note",
             ExerciseKind::SingInterval => "Interval singing",
             ExerciseKind::Pattern => "Sung patterns",
+            ExerciseKind::SightSing => "Sight singing",
         }
     }
 
@@ -800,6 +885,7 @@ impl ExerciseKind {
             ExerciseKind::Sustain => &["voice.sustain"],
             ExerciseKind::SingInterval => &["voice.interval"],
             ExerciseKind::Pattern => &["voice.pattern"],
+            ExerciseKind::SightSing => &["voice.sight_singing"],
         }
     }
 
@@ -811,6 +897,7 @@ impl ExerciseKind {
                 | ExerciseKind::Sustain
                 | ExerciseKind::SingInterval
                 | ExerciseKind::Pattern
+                | ExerciseKind::SightSing
         )
     }
 }
@@ -829,6 +916,7 @@ impl Exercise {
             Exercise::Sustain(_) => ExerciseKind::Sustain,
             Exercise::SingInterval(_) => ExerciseKind::SingInterval,
             Exercise::Pattern(_) => ExerciseKind::Pattern,
+            Exercise::SightSing(_) => ExerciseKind::SightSing,
         }
     }
 
@@ -1072,6 +1160,26 @@ pub struct SungTrial {
     pub timed: bool,
     #[ts(type = "Record<string, unknown>")]
     pub stimulus: serde_json::Value,
+    /// The notated melody for sight singing; drawn as a staff instead of the pitch lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<Score>,
+    /// Beat at which a count-in starts that always clicks, whatever the backing. Without it the
+    /// click (if the backing has one) runs from the start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub count_in_beat: Option<f32>,
+    /// Labelled parts of the timeline (establish key, first note, count-in, sing).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<TimelineSection>,
+    #[serde(default)]
+    pub follow_cursor: bool,
+}
+
+/// A labelled stretch of a sung trial's timeline, in beats from its start.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct TimelineSection {
+    pub label: String,
+    pub start_beat: f32,
+    pub end_beat: f32,
 }
 
 impl SungTrial {

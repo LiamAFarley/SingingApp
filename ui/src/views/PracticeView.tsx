@@ -6,7 +6,7 @@ import type { RunnerState } from "../bindings/RunnerState";
 import type { SessionRow } from "../bindings/SessionRow";
 import { fmtDate } from "../music";
 
-const CATEGORIES = ["Absolute pitch", "Ear training", "Singing", "Saved"];
+const CATEGORIES = ["Absolute pitch", "Ear training", "Singing", "Sight singing and dictation", "Saved"];
 const STAGE_ID = /^ap_progressive_(\d+)$/;
 const STAGE_KEY = "practice.apStage";
 

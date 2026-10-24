@@ -6,6 +6,7 @@ use trainer_audio::{EngineInfo, EngineSettings, EngineStatus};
 use trainer_core::grade::NoteResult;
 use trainer_core::reports::{BlockReport, SessionReport};
 use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode};
+use trainer_core::score::Score;
 use trainer_core::storage::CalibrationRow;
 use ts_rs::TS;
 
@@ -80,6 +81,19 @@ pub struct LaneSpec {
     pub targets_hidden: bool,
     /// Whether beats are clicked (draw the beat grid and count-in).
     pub metronome: bool,
+    /// Labelled parts of the timeline (establish key, first note, count-in, sing).
+    pub sections: Vec<LaneSection>,
+    /// Move a cursor over the score while singing (sight singing).
+    pub cursor: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneSection {
+    pub label: String,
+    /// Seconds from the start of the trial timeline.
+    pub start_s: f32,
+    pub end_s: f32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -106,6 +120,8 @@ pub struct TrialView {
     pub response_end_s: Option<f64>,
     pub attempt: u32,
     pub assisted: bool,
+    /// Staff notation for sight singing (drawn instead of the pitch lane).
+    pub score: Option<Score>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -123,6 +139,8 @@ pub struct FeedbackView {
     pub can_sing_along: bool,
     pub can_listen: bool,
     pub can_show_answer: bool,
+    /// The sung attempt can be played back.
+    pub can_play_answer: bool,
     /// Moves on by itself after this many ms unless the user interacts.
     pub auto_advance_ms: Option<u32>,
     /// Results are withheld by the block's feedback mode.
@@ -194,6 +212,8 @@ pub enum RunnerCommand {
     Reference,
     ShowAnswer,
     Listen,
+    /// Play back the recording of the attempt.
+    PlayAnswer,
     SingAlong,
     Retry,
     Skip,

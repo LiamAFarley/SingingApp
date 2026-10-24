@@ -1,0 +1,18 @@
+{
+  "title": "Sight singing without a starting note",
+  "blocks": [
+    {
+      "type": "sight_sing",
+      "title": "Read the pitch from the page",
+      "instructions": "Nothing is played first: start on the written pitch from memory. Graded absolute.",
+      "count": 6,
+      "feedback": "after_trial",
+      "grading": { "mode": "absolute" },
+      "params": {
+        "start": "none",
+        "melody": { "generate": { "keys": ["C", "G", "F"], "bars": 2, "rhythms": ["half", "quarter"], "max_leap": 2, "step_rate": 0.85 } },
+        "tempo_bpm": 66
+      }
+    }
+  ]
+}

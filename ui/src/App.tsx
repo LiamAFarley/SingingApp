@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { api, useBackendEvent } from "./api";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { api, isTauri, useBackendEvent } from "./api";
 import type { AudioView } from "./bindings/AudioView";
 import type { RunnerState } from "./bindings/RunnerState";
 import { live } from "./live";
@@ -11,6 +11,10 @@ import { SettingsPage } from "./views/SettingsPage";
 import { TunerView } from "./views/TunerView";
 
 type View = "practice" | "session" | "tuner" | "results" | "audio" | "settings";
+
+// Browser-only renderer check page; never part of the desktop app.
+const NotationGallery = lazy(() => import("./views/NotationGallery").then((m) => ({ default: m.NotationGallery })));
+const galleryMode = !isTauri && typeof location !== "undefined" && new URLSearchParams(location.search).get("scenario") === "notation";
 
 const NAV: [View, string][] = [
   ["practice", "Practice"],
@@ -80,6 +84,11 @@ export function App() {
         {running && audio?.info && <div className="status-line">{audio.info.output_device}</div>}
       </nav>
       <main className="main">
+        {galleryMode && (
+          <Suspense fallback={null}>
+            <NotationGallery />
+          </Suspense>
+        )}
         {notice && (
           <div className="notice error app-notice">
             <span>{notice}</span>
@@ -92,7 +101,7 @@ export function App() {
         {view === "session" && !active && (
           <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} />
         )}
-        {view === "practice" && (
+        {view === "practice" && !galleryMode && (
           <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} />
         )}
         {view === "tuner" && <TunerView a4={a4} />}

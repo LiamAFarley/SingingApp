@@ -4,6 +4,7 @@ import type { ChoiceLayout } from "./ChoiceLayout";
 import type { ExerciseKind } from "./ExerciseKind";
 import type { Interaction } from "./Interaction";
 import type { LaneSpec } from "./LaneSpec";
+import type { Score } from "./Score";
 
 export type TrialView = { kind: ExerciseKind, interaction: Interaction, prompt: string, choices: Array<Choice>, layout: ChoiceLayout, deadline_ms: number | null, can_replay: boolean, can_reference: boolean, lane: LaneSpec | null, 
 /**
@@ -21,4 +22,8 @@ timeline_start_s: number | null,
 /**
  * Master-clock times (s) of the response window.
  */
-response_start_s: number | null, response_end_s: number | null, attempt: number, assisted: boolean, };
+response_start_s: number | null, response_end_s: number | null, attempt: number, assisted: boolean, 
+/**
+ * Staff notation for sight singing (drawn instead of the pitch lane).
+ */
+score: Score | null, };

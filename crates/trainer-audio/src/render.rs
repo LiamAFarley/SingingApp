@@ -413,13 +413,19 @@ impl Renderer {
         backing
             .data
             .truncate((total_frames + self.frames(400.0)) * 2);
-        if t.backing.has_click() {
-            let bpb = t.beats_per_bar.max(1) as i32;
-            let n_beats = t.total_beats.floor() as i32;
-            for b in 0..n_beats {
-                let c = self.click(b % bpb == 0);
-                backing.mix(&c, self.frames(at(b as f32)), 1.0);
+        // Clicks: the count-in always (when the trial has one), the rest when the backing has a click.
+        let bpb = t.beats_per_bar.max(1) as i32;
+        let n_beats = t.total_beats.floor() as i32;
+        let (from, count_in_end) = match t.count_in_beat {
+            Some(c) => (c.round() as i32, t.sing_start_beat.round() as i32),
+            None => (0, 0),
+        };
+        for b in from..n_beats {
+            if b >= count_in_end && !t.backing.has_click() {
+                break;
             }
+            let c = self.click((b - from) % bpb == 0);
+            backing.mix(&c, self.frames(at(b as f32)), 1.0);
         }
         let guide_events: Vec<SoundEvent> = t
             .notes
@@ -470,8 +476,20 @@ pub fn harmonize(t: &SungTrial) -> Vec<(f32, f32, Vec<i32>)> {
     if t.notes.is_empty() {
         return Vec::new();
     }
-    let tonic = t.notes[0].midi;
-    let minor = t.notes.iter().any(|n| (n.midi - tonic).rem_euclid(12) == 3);
+    // The key: the score's when there is one, otherwise the pattern's first note.
+    let (tonic, minor) = match &t.score {
+        Some(s) => {
+            let first = t.notes[0].midi;
+            (
+                first - (first - s.key.tonic_pc()).rem_euclid(12),
+                s.key.mode == trainer_core::schema::KeyMode::Minor,
+            )
+        }
+        None => {
+            let tonic = t.notes[0].midi;
+            (tonic, t.notes.iter().any(|n| (n.midi - tonic).rem_euclid(12) == 3))
+        }
+    };
     let scale = if minor {
         ScaleKind::HarmonicMinor
     } else {
@@ -707,6 +725,10 @@ mod tests {
             drone_midi: None,
             lane_targets: LaneTargets::Shown,
             timed: true,
+            score: None,
+            count_in_beat: None,
+            sections: Vec::new(),
+            follow_cursor: false,
             stimulus: serde_json::json!({}),
         };
         let a = r.render_sung_trial(&t);
