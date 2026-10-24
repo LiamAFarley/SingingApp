@@ -1,0 +1,28 @@
+[package]
+name = "trainer-audio"
+description = "Real-time audio engine (cpal, ASIO on Windows), stimulus rendering and live pitch analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = ["asio"]
+# ASIO host on Windows (needs LLVM/Clang; cpal fetches the ASIO SDK). No effect elsewhere.
+asio = ["cpal/asio"]
+
+[dependencies]
+trainer-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ts-rs.workspace = true
+cpal.workspace = true
+rtrb.workspace = true
+rustysynth.workspace = true
+hound.workspace = true
+crossbeam-channel.workspace = true
+parking_lot.workspace = true
+tracing.workspace = true
