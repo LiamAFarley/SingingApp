@@ -12,6 +12,10 @@ trace: Array<[number, number | null]>, can_retry: boolean, can_sing_along: boole
  */
 can_play_answer: boolean, 
 /**
+ * Answers can be clicked to hear them.
+ */
+can_hear_choices: boolean, 
+/**
  * Moves on by itself after this many ms unless the user interacts.
  */
 auto_advance_ms: number | null, 

@@ -49,7 +49,7 @@ pub enum Interaction {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ChoiceLayout {
-    /// Twelve pitch classes laid out like a piano octave (plus "Other").
+    /// Twelve pitch classes laid out like a piano octave.
     PitchClasses,
     /// Notes with octaves across a keyboard range.
     Notes,
@@ -153,6 +153,8 @@ pub struct FeedbackView {
     pub can_show_answer: bool,
     /// The sung attempt can be played back.
     pub can_play_answer: bool,
+    /// Answers can be clicked to hear them.
+    pub can_hear_choices: bool,
     /// Moves on by itself after this many ms unless the user interacts.
     pub auto_advance_ms: Option<u32>,
     /// Results are withheld by the block's feedback mode.
@@ -245,6 +247,8 @@ pub enum RunnerCommand {
     SubmitScore { notes: Vec<ScoreNote> },
     /// Dictation: play the written notes.
     PlayScore { notes: Vec<ScoreNote> },
+    /// After answering: play what an answer sounds like.
+    PlayChoice { choice: String },
     SingAlong,
     Retry,
     Skip,

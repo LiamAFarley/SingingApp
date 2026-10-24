@@ -443,9 +443,7 @@ impl<'a> SessionRun<'a> {
             ExerciseKind::IncidentalPairing => ChoiceLayout::Colors,
             ExerciseKind::ScaleDegreeId => ChoiceLayout::Degrees,
             ExerciseKind::PitchId | ExerciseKind::TonalCenterId
-                if t.choices.iter().all(|c| {
-                    c.id.parse::<trainer_core::theory::PitchClass>().is_ok() || c.id == "other"
-                }) =>
+                if t.choices.iter().all(|c| c.id.parse::<trainer_core::theory::PitchClass>().is_ok()) =>
             {
                 ChoiceLayout::PitchClasses
             }
@@ -957,6 +955,7 @@ impl<'a> SessionRun<'a> {
                 || matches!(trial, TrialSpec::Identify(t) if show && t.after_answer.is_some()),
             can_show_answer: is_identify && show,
             can_play_answer: extras.capture.is_some() || (is_dictation && !written.is_empty()),
+            can_hear_choices: matches!(trial, TrialSpec::Identify(t) if show && !t.choice_sounds.is_empty()),
             auto_advance_ms: auto_ms,
             hidden: !show,
         };
@@ -1058,6 +1057,15 @@ impl<'a> SessionRun<'a> {
                         engine.play_now(Arc::new(SoundBuffer::from_mono(*sr, &mono)), 1.0, Bus::Guide)?;
                     }
                 }
+                Some(RunnerCommand::PlayChoice { choice }) if show => {
+                    interacted = true;
+                    if let Some(events) = trial_choice_sound(trial, &choice) {
+                        engine.stop_bus(Bus::Prompt);
+                        engine.play_now(Arc::new(renderer.render_events(events)), 1.0, Bus::Prompt)?;
+                        // A named sound: it counts as exposure to a labelled reference.
+                        self.last_labeled = Some(now());
+                    }
+                }
                 Some(RunnerCommand::ShowAnswer | RunnerCommand::Replay) if is_identify => {
                     interacted = true;
                     if let TrialSpec::Identify(t) = trial {
@@ -1074,6 +1082,13 @@ impl<'a> SessionRun<'a> {
                 Some(_) => interacted = true,
             }
         }
+    }
+}
+
+fn trial_choice_sound<'t>(trial: &'t TrialSpec, choice: &str) -> Option<&'t [SoundEvent]> {
+    match trial {
+        TrialSpec::Identify(t) => t.choice_sound(choice),
+        _ => None,
     }
 }
 

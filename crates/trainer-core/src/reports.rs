@@ -350,9 +350,9 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
     vec![
         entry(
             ExerciseKind::PitchId,
-            "A single tone, no reference; name it. Absolute pitch identification. Use classes + out_of_set_rate for progressive category training, octaves/timbres/pool for transfer tests, deadline_ms for speed. Keep a mask between trials when feedback reveals answers.",
+            "A single tone, no reference; name it. Absolute pitch identification. `classes` is all twelve or a subset for progressive category training (only those notes are played and offered as answers); octaves/timbres/pool for transfer tests, deadline_ms for speed. After answering, the user can click any answer to hear it. Keep a mask between trials when feedback reveals answers.",
             schema_of::<PitchIdParams>(),
-            json!({"type": "pitch_id", "count": 40, "feedback": "after_trial", "params": {"classes": ["C", "E", "G#"], "out_of_set_rate": 0.15, "timbres": ["gm:0", "gm:48"], "mask": "random_tones"}}),
+            json!({"type": "pitch_id", "count": 40, "feedback": "after_trial", "params": {"classes": ["C", "E", "G#"], "timbres": ["gm:0", "gm:48"], "mask": "random_tones"}}),
         ),
         entry(
             ExerciseKind::SingPitch,

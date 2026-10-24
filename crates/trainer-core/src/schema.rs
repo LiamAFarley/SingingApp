@@ -335,11 +335,9 @@ pub enum PitchAnswer {
 /// Name a single tone with no reference (absolute pitch identification).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PitchIdParams {
+    /// The notes played and offered as answers: all twelve, or a subset for category training.
     #[serde(default)]
     pub classes: ClassSet,
-    /// Fraction of trials that use a pitch class outside `classes`; the right answer is then "other".
-    #[serde(default)]
-    pub out_of_set_rate: f32,
     #[serde(default = "d_octaves")]
     pub octaves: Vec<i32>,
     /// Empty uses the default training (or holdout) timbres.
@@ -1684,6 +1682,23 @@ pub struct IdentifyTrial {
     /// Played as soon as the result is shown, e.g. a scale degree walking to the tonic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_answer: Option<Vec<SoundEvent>>,
+    /// What each answer sounds like in this trial's register and timbre, played when it is
+    /// clicked after answering. Made with the trial and not stored.
+    #[serde(skip)]
+    pub choice_sounds: Vec<ChoiceSound>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChoiceSound {
+    pub id: String,
+    pub events: Vec<SoundEvent>,
+}
+
+impl IdentifyTrial {
+    /// The sound of answer `id`, if the trial has one.
+    pub fn choice_sound(&self, id: &str) -> Option<&[SoundEvent]> {
+        self.choice_sounds.iter().find(|c| c.id == id).map(|c| c.events.as_slice())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
@@ -1867,7 +1882,7 @@ mod tests {
           "protocol": "ap_progressive",
           "blocks": [
             {"type": "pitch_id", "count": 60, "seed": 1842,
-             "params": {"classes": ["C", "E", "G#"], "out_of_set_rate": 0.15, "timbres": ["gm:0", "synth:triangle"]}},
+             "params": {"classes": ["C", "E", "G#"], "timbres": ["gm:0", "synth:triangle"]}},
             {"type": "sing_pitch", "count": 12, "grading": {"mode": "pitch_class", "category_tol_cents": 50}},
             {"type": "pattern", "count": 4, "params": {"pattern": {"scale": {"kind": "major", "shape": "up_down"}}, "tempo_bpm": 90, "backing": "melody"}}
           ]

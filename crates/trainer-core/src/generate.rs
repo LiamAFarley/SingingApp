@@ -174,23 +174,22 @@ fn gain_db(range: Option<[f32; 2]>, rng: &mut Rng) -> f32 {
     }
 }
 
-fn pc_choices(classes: &[PitchClass], with_other: bool) -> Vec<Choice> {
+fn pc_choices(classes: &[PitchClass]) -> Vec<Choice> {
     let mut sorted = classes.to_vec();
     sorted.sort();
-    let mut v: Vec<Choice> = sorted
+    sorted
         .iter()
         .map(|p| Choice {
             id: p.name().to_string(),
             label: p.display_name().to_string(),
         })
-        .collect();
-    if with_other {
-        v.push(Choice {
-            id: "other".into(),
-            label: "Other".into(),
-        });
-    }
-    v
+        .collect()
+}
+
+/// The note of class `pc` nearest to `midi` (the lower one on a tie).
+fn nearest_of_class(pc: PitchClass, midi: i32) -> i32 {
+    let below = midi - (midi - pc.index() as i32).rem_euclid(12);
+    if midi - below > 6 { below + 12 } else { below }
 }
 
 fn ev(midi: i32, start_ms: f64, dur_ms: f64, timbre: &str, gain: f32) -> SoundEvent {
@@ -242,52 +241,54 @@ fn gen_pitch_id(
     if classes.is_empty() {
         return err("classes must not be empty");
     }
-    let others: Vec<PitchClass> = PitchClass::ALL
-        .iter()
-        .copied()
-        .filter(|c| !classes.contains(c))
-        .collect();
-    let use_other = p.out_of_set_rate > 0.0 && !others.is_empty();
     let combos = pool_combos(&p.timbres, &p.octaves, p.pool, ctx)?;
     let mut bag = BalancedBag::new(classes.clone());
-    let mut other_bag = BalancedBag::new(others.clone());
     let mut combo_bag = BalancedBag::new((0..combos.len()).collect::<Vec<_>>());
+    let lo = *p.octaves.iter().min().unwrap();
+    let hi = *p.octaves.iter().max().unwrap();
+    let all_notes = PitchClass::new(0).in_octave(lo)..=PitchClass::new(11).in_octave(hi);
     let choices = match p.answer {
-        PitchAnswer::PitchClass => pc_choices(&classes, use_other),
-        PitchAnswer::NoteWithOctave => {
-            let lo = *p.octaves.iter().min().unwrap();
-            let hi = *p.octaves.iter().max().unwrap();
-            (PitchClass::new(0).in_octave(lo)..=PitchClass::new(11).in_octave(hi))
-                .map(|m| Choice {
-                    id: Note(m).name(),
-                    label: Note(m).display_name(),
-                })
-                .collect()
-        }
+        PitchAnswer::PitchClass => pc_choices(&classes),
+        PitchAnswer::NoteWithOctave => all_notes
+            .clone()
+            .map(|m| Choice {
+                id: Note(m).name(),
+                label: Note(m).display_name(),
+            })
+            .collect(),
     };
     let mut last_midi = None;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        let out_of_set = use_other && rng.chance(p.out_of_set_rate as f64);
-        let mut pc = if out_of_set {
-            other_bag.draw(rng).unwrap()
-        } else {
-            bag.draw(rng).unwrap()
-        };
+        let mut pc = bag.draw(rng).unwrap();
         let (timbre, octave) = combos[combo_bag.draw(rng).unwrap()].clone();
         let mut midi = pc.in_octave(octave);
-        if Some(midi) == last_midi && classes.len() > 1 && !out_of_set {
+        if Some(midi) == last_midi && classes.len() > 1 {
             pc = bag.draw(rng).unwrap();
             midi = pc.in_octave(octave);
         }
         last_midi = Some(midi);
         let gain = gain_db(p.loudness_db, rng);
-        let correct = if out_of_set {
-            "other".to_string()
-        } else {
-            match p.answer {
-                PitchAnswer::PitchClass => pc.name().to_string(),
-                PitchAnswer::NoteWithOctave => Note(midi).name(),
+        let correct = match p.answer {
+            PitchAnswer::PitchClass => pc.name().to_string(),
+            PitchAnswer::NoteWithOctave => Note(midi).name(),
+        };
+        let tone = |m: i32| SoundEvent {
+            midi: m,
+            start_ms: 0.0,
+            dur_ms: p.duration_ms as f64,
+            timbre: timbre.clone(),
+            gain_db: gain,
+            detune_cents: p.detune_cents,
+        };
+        // Each answer as it would have sounded: the nearest note of that name, same timbre.
+        let choice_sounds = match p.answer {
+            PitchAnswer::PitchClass => classes
+                .iter()
+                .map(|c| ChoiceSound { id: c.name().to_string(), events: vec![tone(nearest_of_class(*c, midi))] })
+                .collect(),
+            PitchAnswer::NoteWithOctave => {
+                all_notes.clone().map(|m| ChoiceSound { id: Note(m).name(), events: vec![tone(m)] }).collect()
             }
         };
         let holdout = ctx.pools.is_holdout(&timbre, octave);
@@ -300,14 +301,7 @@ fn gen_pitch_id(
                 PitchAnswer::PitchClass => "Name the note".into(),
                 PitchAnswer::NoteWithOctave => "Name the note and octave".into(),
             },
-            events: vec![SoundEvent {
-                midi,
-                start_ms: 0.0,
-                dur_ms: p.duration_ms as f64,
-                timbre: timbre.clone(),
-                gain_db: gain,
-                detune_cents: p.detune_cents,
-            }],
+            events: vec![tone(midi)],
             mask_before: p.mask,
             choices: choices.clone(),
             correct,
@@ -319,11 +313,11 @@ fn gen_pitch_id(
                 "midi": midi,
                 "timbre": timbre,
                 "holdout": holdout,
-                "out_of_set": out_of_set,
                 "gain_db": gain,
                 "mask": p.mask,
                 "class_set_size": classes.len(),
             }),
+            choice_sounds,
         }));
     }
     Ok(out)
@@ -435,7 +429,8 @@ fn gen_anchor_song(
         return err("shifts must be non-zero and at most 6 semitones");
     }
     let mut bag = BalancedBag::new((0..anchors.len()).collect::<Vec<_>>());
-    let mut shift_bag = BalancedBag::new(if p.shifts.is_empty() { d_shifts() } else { p.shifts.clone() });
+    let shifts = if p.shifts.is_empty() { d_shifts() } else { p.shifts.clone() };
+    let mut shift_bag = BalancedBag::new(shifts.clone());
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         let a = anchors[bag.draw(rng).unwrap()];
@@ -469,10 +464,14 @@ fn gen_anchor_song(
                     .map_err(|e| GenError(format!("anchor “{}”: {e}", a.title)))?;
                 let original = rng.chance(p.original_rate.clamp(0.0, 1.0) as f64);
                 let shift = if original { 0 } else { shift_bag.draw(rng).unwrap() };
-                let mut events = note_events(&score.notes, score.time, score.tempo_bpm, &p.timbre);
-                for e in &mut events {
-                    e.midi += shift;
-                }
+                let opening = note_events(&score.notes, score.time, score.tempo_bpm, &p.timbre);
+                let moved = |by: i32| -> Vec<SoundEvent> {
+                    opening.iter().cloned().map(|mut e| {
+                        e.midi += by;
+                        e
+                    }).collect()
+                };
+                let events = moved(shift);
                 out.push(TrialSpec::Identify(IdentifyTrial {
                     answer_after_ms: None,
                     after_answer: None,
@@ -495,6 +494,10 @@ fn gen_anchor_song(
                         "original": original,
                         "mode": p.mode,
                     }),
+                    choice_sounds: vec![
+                        ChoiceSound { id: "original".into(), events: moved(0) },
+                        ChoiceSound { id: "shifted".into(), events: moved(if original { shifts[0] } else { shift }) },
+                    ],
                 }));
             }
         }
@@ -553,6 +556,7 @@ fn gen_incidental(
             correct: color(shown).0.into(),
             deadline_ms: Some(3000),
             reference: None,
+            choice_sounds: Vec::new(),
             stimulus: json!({
                 "color": color(shown).0,
                 "pitch_class": tone.name(),
@@ -639,7 +643,7 @@ fn gen_tonal_center(
             },
             events,
             mask_before: p.mask,
-            choices: pc_choices(&PitchClass::ALL, false),
+            choices: pc_choices(&PitchClass::ALL),
             correct: tonic.name().to_string(),
             deadline_ms: None,
             reference: None,
@@ -649,6 +653,11 @@ fn gen_tonal_center(
                 "reference": p.reference,
                 "timbre": timbre,
             }),
+            // Each key's cadence, in the same mode and sound.
+            choice_sounds: PitchClass::ALL
+                .iter()
+                .map(|pc| ChoiceSound { id: pc.name().into(), events: cadence_events(*pc, mode, p.tempo_bpm, &timbre, 0.0) })
+                .collect(),
         }));
     }
     Ok(out)
@@ -668,17 +677,16 @@ fn gen_interval_id(
     }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 72));
     let mut bag = BalancedBag::new(p.intervals.clone());
-    let choices: Vec<Choice> = {
-        let mut iv = p.intervals.clone();
-        iv.sort();
-        iv.dedup();
-        iv.iter()
-            .map(|i| Choice {
-                id: i.id().into(),
-                label: i.long_name().into(),
-            })
-            .collect()
-    };
+    let mut choice_ivs = p.intervals.clone();
+    choice_ivs.sort();
+    choice_ivs.dedup();
+    let choices: Vec<Choice> = choice_ivs
+        .iter()
+        .map(|i| Choice {
+            id: i.id().into(),
+            label: i.long_name().into(),
+        })
+        .collect();
     let note = p.note_ms.max(200) as f64;
     let keys = if p.in_key {
         key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?
@@ -756,6 +764,15 @@ fn gen_interval_id(
             deadline_ms: None,
             reference: None,
             stimulus,
+            // Every interval from the note heard first.
+            choice_sounds: choice_ivs
+                .iter()
+                .map(|c| {
+                    let s = c.semitones();
+                    let (l, h) = if dir == IntervalDirection::Descending { (high - s, high) } else { (low, low + s) };
+                    ChoiceSound { id: c.id().into(), events: interval_events(l, h, dir, note, 0.0, &timbre) }
+                })
+                .collect(),
         }));
     }
     Ok(out)
@@ -937,6 +954,17 @@ fn gen_scale_degree(p: &ScaleDegreeParams, n: usize, rng: &mut Rng) -> Result<Ve
             DegreeLabels::Numbers => DEGREE_NUMBERS[s as usize],
             DegreeLabels::Solfege => DEGREE_SOLFEGE[s as usize],
         };
+        // Each degree in this key and octave, walking to the tonic.
+        let degree_sound = |s: i32| -> Vec<SoundEvent> {
+            let m = r + s + 12 * octave;
+            let route = route_to_tonic(m, tonic.index() as i32, mode, p.resolution);
+            let mut e = vec![ev(m, 0.0, beat * 1.5, &timbre, -6.0)];
+            for (k, x) in route.iter().enumerate().skip(1) {
+                let dur = if k + 1 == route.len() { step * 2.5 } else { step * 0.95 };
+                e.push(ev(*x, beat * 1.5 + (k - 1) as f64 * step, dur, &timbre, -6.0));
+            }
+            e
+        };
         out.push(TrialSpec::Identify(IdentifyTrial {
             exercise: ExerciseKind::ScaleDegreeId,
             prompt: format!("Which degree? ({} key)", if mode == KeyMode::Major { "major" } else { "minor" }),
@@ -963,6 +991,10 @@ fn gen_scale_degree(p: &ScaleDegreeParams, n: usize, rng: &mut Rng) -> Result<Ve
             cue: None,
             answer_after_ms: Some(t0),
             after_answer: (p.resolution != Resolution::None).then(|| walk(0, 0.0)),
+            choice_sounds: degrees
+                .iter()
+                .map(|s| ChoiceSound { id: DEGREE_IDS[*s as usize].into(), events: degree_sound(*s) })
+                .collect(),
         }));
     }
     Ok(out)
@@ -1006,6 +1038,7 @@ fn gen_interval_comparison(
         let span = if dir == IntervalDirection::Harmonic { note * 1.6 } else { note * 2.0 };
         let mut events = interval_events(r1, r1 + first, dir, note, 0.0, &timbre);
         events.extend(interval_events(r2, r2 + second, dir, note, span + 600.0, &timbre));
+        let events_both = events.clone();
         let name = |s: i32| Interval::from_semitones(s).map(|i| i.id()).unwrap_or("?");
         let correct = if first == second {
             "same"
@@ -1033,6 +1066,11 @@ fn gen_interval_comparison(
             cue: None,
             answer_after_ms: Some(span + 600.0),
             after_answer: None,
+            choice_sounds: vec![
+                ChoiceSound { id: "first".into(), events: interval_events(r1, r1 + first, dir, note, 0.0, &timbre) },
+                ChoiceSound { id: "second".into(), events: interval_events(r2, r2 + second, dir, note, 0.0, &timbre) },
+                ChoiceSound { id: "same".into(), events: events_both.clone() },
+            ],
         }));
     }
     Ok(out)
@@ -1088,29 +1126,25 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             .collect();
         let inv = *rng.choose(&valid).unwrap_or(&0);
         let root = pick_note(range, &mut last, rng);
-        let notes = q.voicing(root, inv as usize);
         let timbre = pick_timbre(&p.timbres, rng)?;
-        let step = 380.0;
-        let mut events = Vec::new();
-        match p.style {
-            ChordStyle::Block => {
-                for &m in &notes {
-                    events.push(ev(m, 0.0, dur, &timbre, -9.0));
+        let events = chord_events(&q.voicing(root, inv as usize), p.style, dur, &timbre);
+        // Every answer on the same root (in the inversion heard when inversions are not asked).
+        let mut choice_sounds: Vec<ChoiceSound> = Vec::new();
+        for cq in &p.qualities {
+            let size = cq.intervals().len();
+            if p.answer_inversion {
+                for &ci in inversions.iter().filter(|i| (**i as usize) < size) {
+                    choice_sounds.push(ChoiceSound {
+                        id: format!("{}/{}", cq.id(), ci),
+                        events: chord_events(&cq.voicing(root, ci as usize), p.style, dur, &timbre),
+                    });
                 }
-            }
-            ChordStyle::Arpeggio => {
-                for (i, &m) in notes.iter().enumerate() {
-                    events.push(ev(m, i as f64 * step, dur, &timbre, -9.0));
-                }
-            }
-            ChordStyle::BlockThenArpeggio => {
-                for &m in &notes {
-                    events.push(ev(m, 0.0, dur * 0.8, &timbre, -9.0));
-                }
-                let t0 = dur * 0.8 + 250.0;
-                for (i, &m) in notes.iter().enumerate() {
-                    events.push(ev(m, t0 + i as f64 * step, step * 1.1, &timbre, -9.0));
-                }
+            } else if !choice_sounds.iter().any(|c| c.id == cq.id()) {
+                let ci = if (inv as usize) < size { inv as usize } else { 0 };
+                choice_sounds.push(ChoiceSound {
+                    id: cq.id().into(),
+                    events: chord_events(&cq.voicing(root, ci), p.style, dur, &timbre),
+                });
             }
         }
         let correct = if p.answer_inversion {
@@ -1141,9 +1175,56 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
                 "timbre": timbre,
                 "style": p.style,
             }),
+            choice_sounds,
         }));
     }
     Ok(out)
+}
+
+/// A chord's notes played together, one after another, or both.
+fn chord_events(notes: &[i32], style: ChordStyle, dur: f64, timbre: &str) -> Vec<SoundEvent> {
+    let step = 380.0;
+    let mut events = Vec::new();
+    match style {
+        ChordStyle::Block => {
+            for &m in notes {
+                events.push(ev(m, 0.0, dur, timbre, -9.0));
+            }
+        }
+        ChordStyle::Arpeggio => {
+            for (i, &m) in notes.iter().enumerate() {
+                events.push(ev(m, i as f64 * step, dur, timbre, -9.0));
+            }
+        }
+        ChordStyle::BlockThenArpeggio => {
+            for &m in notes {
+                events.push(ev(m, 0.0, dur * 0.8, timbre, -9.0));
+            }
+            let t0 = dur * 0.8 + 250.0;
+            for (i, &m) in notes.iter().enumerate() {
+                events.push(ev(m, t0 + i as f64 * step, step * 1.1, timbre, -9.0));
+            }
+        }
+    }
+    events
+}
+
+/// A scale from `root` in the given direction, one note per `step` ms.
+fn scale_events(kind: ScaleKind, root: i32, direction: ScaleDirection, step: f64, timbre: &str) -> Vec<SoundEvent> {
+    let up = kind.octave_notes(root);
+    let notes: Vec<i32> = match direction {
+        ScaleDirection::Ascending => up.clone(),
+        ScaleDirection::Descending => up.iter().rev().copied().collect(),
+        ScaleDirection::UpDown => up.iter().copied().chain(up.iter().rev().skip(1).copied()).collect(),
+    };
+    notes
+        .iter()
+        .enumerate()
+        .map(|(i, &m)| {
+            let dur = if i + 1 == notes.len() { step * 2.0 } else { step * 0.95 };
+            ev(m, i as f64 * step, dur, timbre, -6.0)
+        })
+        .collect()
 }
 
 fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialSpec>, GenError> {
@@ -1152,51 +1233,27 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
     }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 62));
     let mut bag = BalancedBag::new(p.scales.clone());
-    let choices: Vec<Choice> = {
-        let mut seen: Vec<ScaleKind> = Vec::new();
-        for s in &p.scales {
-            if !seen.contains(s) {
-                seen.push(*s);
-            }
+    let mut kinds: Vec<ScaleKind> = Vec::new();
+    for s in &p.scales {
+        if !kinds.contains(s) {
+            kinds.push(*s);
         }
-        seen.iter()
-            .map(|s| Choice {
-                id: s.id().into(),
-                label: s.long_name().into(),
-            })
-            .collect()
-    };
+    }
+    let choices: Vec<Choice> = kinds
+        .iter()
+        .map(|s| Choice {
+            id: s.id().into(),
+            label: s.long_name().into(),
+        })
+        .collect();
     let step = 60_000.0 / p.tempo_bpm.clamp(40.0, 400.0) as f64;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
     for _ in 0..n {
         let kind: ScaleKind = bag.draw(rng).unwrap();
         let root = pick_note(range, &mut last, rng);
-        let up = kind.octave_notes(root);
-        let notes: Vec<i32> = match p.direction {
-            ScaleDirection::Ascending => up.clone(),
-            ScaleDirection::Descending => up.iter().rev().copied().collect(),
-            ScaleDirection::UpDown => up
-                .iter()
-                .copied()
-                .chain(up.iter().rev().skip(1).copied())
-                .collect(),
-        };
         let timbre = pick_timbre(&p.timbres, rng)?;
-        let events: Vec<SoundEvent> = notes
-            .iter()
-            .enumerate()
-            .map(|(i, &m)| {
-                let last_note = i + 1 == notes.len();
-                ev(
-                    m,
-                    i as f64 * step,
-                    if last_note { step * 2.0 } else { step * 0.95 },
-                    &timbre,
-                    -6.0,
-                )
-            })
-            .collect();
+        let events = scale_events(kind, root, p.direction, step, &timbre);
         out.push(TrialSpec::Identify(IdentifyTrial {
             answer_after_ms: None,
             after_answer: None,
@@ -1210,6 +1267,11 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             deadline_ms: None,
             reference: None,
             stimulus: json!({ "scale": kind.id(), "root_midi": root, "direction": p.direction, "timbre": timbre }),
+            // Every scale from the same root.
+            choice_sounds: kinds
+                .iter()
+                .map(|k| ChoiceSound { id: k.id().into(), events: scale_events(*k, root, p.direction, step, &timbre) })
+                .collect(),
         }));
     }
     Ok(out)
@@ -2211,13 +2273,48 @@ mod tests {
     }
 
     #[test]
+    fn every_answer_can_be_heard_after_answering() {
+        let ctx = GenContext::default();
+        let pitches = |events: &[SoundEvent]| {
+            let mut v: Vec<i32> = events.iter().map(|e| e.midi).collect();
+            v.sort();
+            v
+        };
+        for (json, same_as_played) in [
+            (r#"{"type": "pitch_id", "count": 6, "params": {"answer": "note_with_octave", "octaves": [3, 4]}}"#, true),
+            (r#"{"type": "interval_id", "count": 6, "params": {"directions": ["ascending", "descending", "harmonic"]}}"#, true),
+            (r#"{"type": "interval_id", "count": 6, "params": {"in_key": true}}"#, false),
+            (r#"{"type": "chord_id", "count": 6, "params": {"inversions": [0, 1, 2], "answer_inversion": true}}"#, true),
+            (r#"{"type": "chord_id", "count": 6, "params": {"inversions": [0, 1]}}"#, true),
+            (r#"{"type": "scale_id", "count": 6}"#, true),
+            (r#"{"type": "tonal_center_id", "count": 6}"#, true),
+            (r#"{"type": "scale_degree_id", "count": 6}"#, false),
+            (r#"{"type": "interval_comparison", "count": 6}"#, true),
+        ] {
+            for t in generate_block(&block(json), 3, &ctx).unwrap() {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                for c in &t.choices {
+                    assert!(t.choice_sound(&c.id).is_some_and(|e| !e.is_empty()), "{json}: no sound for {}", c.id);
+                }
+                // The right answer sounds like what was played.
+                if same_as_played && t.exercise != ExerciseKind::IntervalComparison {
+                    assert_eq!(pitches(t.choice_sound(&t.correct).unwrap()), pitches(&t.events), "{json}");
+                }
+            }
+        }
+        // The colour task has nothing to hear.
+        let colours = block(r#"{"type": "incidental_pairing", "count": 2, "params": {"classes": ["C", "G"]}}"#);
+        let TrialSpec::Identify(t) = generate_block(&colours, 1, &ctx).unwrap().remove(0) else { panic!() };
+        assert!(t.choice_sounds.is_empty());
+    }
+
+    #[test]
     fn pitch_id_respects_pools_and_classes() {
         let ctx = GenContext::default();
         let b = block(
-            r#"{"type": "pitch_id", "count": 120, "params": {"classes": ["C", "E", "G#"], "out_of_set_rate": 0.2, "octaves": [2, 3, 4, 5, 6]}}"#,
+            r#"{"type": "pitch_id", "count": 120, "params": {"classes": ["C", "E", "G#"], "octaves": [2, 3, 4, 5, 6]}}"#,
         );
         let trials = generate_block(&b, 5, &ctx).unwrap();
-        let mut others = 0;
         for t in &trials {
             let TrialSpec::Identify(t) = t else { panic!() };
             let oct = t.stimulus["octave"].as_i64().unwrap() as i32;
@@ -2229,15 +2326,21 @@ mod tests {
                 !ctx.pools
                     .is_holdout_timbre(t.stimulus["timbre"].as_str().unwrap())
             );
-            assert_eq!(t.choices.len(), 4);
-            if t.correct == "other" {
-                others += 1;
-                assert!(!["C", "E", "G#"].contains(&t.stimulus["pitch_class"].as_str().unwrap()));
-            } else {
-                assert!(["C", "E", "G#"].contains(&t.correct.as_str()));
+            // Only the stage's notes are played and offered: no "other".
+            let ids: Vec<&str> = t.choices.iter().map(|c| c.id.as_str()).collect();
+            assert_eq!(ids, ["C", "E", "G#"]);
+            assert!(ids.contains(&t.correct.as_str()));
+            assert_eq!(t.correct, t.stimulus["pitch_class"]);
+            // Each answer can be heard near the note played, in the same timbre.
+            let played = &t.events[0];
+            for id in &ids {
+                let e = &t.choice_sound(id).unwrap()[0];
+                assert_eq!(PitchClass::of_midi(e.midi).name(), *id);
+                assert!((e.midi - played.midi).abs() <= 6);
+                assert_eq!(e.timbre, played.timbre);
             }
+            assert_eq!(t.choice_sound(&t.correct).unwrap()[0].midi, played.midi);
         }
-        assert!((10..=45).contains(&others), "{others}");
 
         let h = block(r#"{"type": "pitch_id", "count": 40, "params": {"pool": "holdout"}}"#);
         for t in generate_block(&h, 5, &ctx).unwrap() {

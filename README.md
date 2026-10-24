@@ -10,7 +10,8 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
 ## Exercises
 
 - **Absolute pitch:**
-  - Note naming in progressive stages, with out-of-set distractors, several octaves and timbres, and a deadline.
+  - Note naming in progressive stages: each stage plays and offers only its own notes, until all twelve. Several octaves and timbres, and a deadline.
+  - After answering any identification question, click an answer to hear it: the other notes, intervals, chords, scales, keys or degrees, in the same register and sound.
   - Singing a named note.
   - Passive pairing and key finding.
   - A holdout assessment battery.

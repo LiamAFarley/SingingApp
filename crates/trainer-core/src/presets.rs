@@ -27,8 +27,8 @@ pub const AP_PROGRESSIVE_ORDER: [&str; 12] = [
 ];
 pub const AP_PROGRESSIVE_STAGES: u32 = 10;
 
-/// Stage `n` (1–10) trains the first `n + 2` classes of [`AP_PROGRESSIVE_ORDER`], with
-/// out-of-set distractors and a response deadline that tightens from 4 s to 2.2 s.
+/// Stage `n` (1–10) trains the first `n + 2` classes of [`AP_PROGRESSIVE_ORDER`]: only those notes
+/// are played and offered, with a response deadline that tightens from 4 s to 2.2 s.
 pub fn ap_progressive_stage(n: u32) -> SessionSpec {
     let n = n.clamp(1, AP_PROGRESSIVE_STAGES);
     let classes: Vec<PitchClass> = AP_PROGRESSIVE_ORDER[..(n as usize + 2)]
@@ -45,7 +45,6 @@ pub fn ap_progressive_stage(n: u32) -> SessionSpec {
         classes: set.clone(),
         ..PitchIdParams::default()
     };
-    id.out_of_set_rate = if all { 0.0 } else { 0.15 };
     id.deadline_ms = Some(4000 - (n - 1) * 200);
     let mut id_block = BlockSpec::new(Exercise::PitchId(id), 60);
     id_block.title = Some("Name the note".into());
@@ -425,7 +424,6 @@ mod tests {
             (Exercise::PitchId(a), Exercise::PitchId(b)) => {
                 assert_eq!(a.classes.classes().len(), 3);
                 assert!(b.classes.is_all());
-                assert_eq!(b.out_of_set_rate, 0.0);
                 assert_eq!(a.deadline_ms, Some(4000));
                 assert_eq!(b.deadline_ms, Some(2200));
             }

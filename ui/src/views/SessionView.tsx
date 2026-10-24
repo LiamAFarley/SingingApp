@@ -251,22 +251,38 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
   useEffect(() => setPicked(null), [runner.trial_index, trial.attempt]);
   const phase = runner.phase;
   const fb = runner.feedback;
-  const enabled = phase === "answering";
+  const answering = phase === "answering";
+  // After answering, every answer can be clicked to hear what it sounds like.
+  const hear = phase === "feedback" && !!fb?.can_hear_choices;
+  const enabled = answering || hear;
   const pick = (id: string) => {
-    if (!enabled) return;
-    setPicked(id);
-    command({ kind: "answer", choice: id });
+    if (answering) {
+      setPicked(id);
+      command({ kind: "answer", choice: id });
+    } else if (hear) {
+      command({ kind: "play_choice", choice: id });
+    }
   };
   const states = keyStates(runner, picked);
   const sub =
-    phase === "preparing" || phase === "listening" ? "Listen…" : phase === "answering" ? (trial.deadline_ms ? <Deadline trial={trial} /> : "Your answer") : "";
+    phase === "preparing" || phase === "listening"
+      ? "Listen…"
+      : answering
+        ? trial.deadline_ms
+          ? <Deadline trial={trial} />
+          : "Your answer"
+        : hear
+          ? "Click any answer to hear it"
+          : "";
   return (
     <>
       <div>
         <div className="prompt">{trial.prompt}</div>
         <div className="prompt-sub">{sub}</div>
       </div>
-      {trial.layout === "pitch_classes" && <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "pitch_classes" && (
+        <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} keyboard={answering} />
+      )}
       {trial.layout === "notes" && <NotesPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "list" && <ChoiceGrid choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "colors" && <ColorTask trial={trial} enabled={enabled} states={states} onPick={pick} />}

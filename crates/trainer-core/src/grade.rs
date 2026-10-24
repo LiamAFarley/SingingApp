@@ -764,6 +764,7 @@ mod tests {
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            choice_sounds: Vec::new(),
             exercise: ExerciseKind::PitchId,
             prompt: "Name the note".into(),
             events: vec![],

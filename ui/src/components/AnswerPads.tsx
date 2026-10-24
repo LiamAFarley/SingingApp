@@ -16,7 +16,6 @@ const KEY_FOR_PC: Record<string, string> = {
   A: "h",
   "A#": "u",
   B: "j",
-  other: "o",
 };
 
 const WHITE = ["C", "D", "E", "F", "G", "A", "B"];
@@ -44,7 +43,6 @@ interface PadProps {
 export function PianoPad({ choices, enabled, states, onPick, octave, compact, keyboard = true }: PadProps) {
   const idFor = (pc: string) => (octave == null ? pc : `${pc}${octave}`);
   const byId = new Map(choices.map((c) => [c.id, c]));
-  const other = byId.get("other");
 
   useEffect(() => {
     if (!keyboard || !enabled) return;
@@ -53,7 +51,7 @@ export function PianoPad({ choices, enabled, states, onPick, octave, compact, ke
       const k = e.key.toLowerCase();
       for (const [pc, key] of Object.entries(KEY_FOR_PC)) {
         if (key === k) {
-          const id = pc === "other" ? "other" : idFor(pc);
+          const id = idFor(pc);
           if (byId.has(id)) {
             e.preventDefault();
             onPick(id);
@@ -92,16 +90,6 @@ export function PianoPad({ choices, enabled, states, onPick, octave, compact, ke
         {BLACK.map(([pc, col]) => key(pc, 1, col, true))}
         {WHITE.map((pc, i) => key(pc, 2, i * 2 + 1, false))}
       </div>
-      {other && (
-        <button
-          className={`key wide ${states.other && states.other !== "idle" ? states.other : ""}`}
-          disabled={!enabled}
-          onClick={() => onPick("other")}
-        >
-          <span>Other</span>
-          {keyboard && <span className="hint">O</span>}
-        </button>
-      )}
     </div>
   );
 }

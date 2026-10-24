@@ -338,6 +338,7 @@ function sightFeedback(): FeedbackView {
     can_listen: true,
     can_show_answer: false,
     can_play_answer: true,
+    can_hear_choices: false,
     auto_advance_ms: null,
     hidden: false,
     dictation: null,
@@ -413,6 +414,7 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
     can_listen: true,
     can_show_answer: false,
     can_play_answer: answer.length > 0,
+    can_hear_choices: false,
     auto_advance_ms: null,
     hidden: false,
     dictation: { target, answer: { ...target, notes: answer }, target_marks, answer_marks },
@@ -630,6 +632,7 @@ function sungFeedback(): FeedbackView {
     can_listen: true,
     can_show_answer: false,
     can_play_answer: true,
+    can_hear_choices: false,
     auto_advance_ms: null,
     hidden: false,
     dictation: null,
@@ -721,6 +724,7 @@ function startScenario() {
           can_listen: true,
           can_show_answer: true,
           can_play_answer: false,
+          can_hear_choices: true,
           auto_advance_ms: null,
           hidden: false,
           dictation: null,
@@ -748,6 +752,7 @@ function runnerCommand(c: RunnerCommand) {
       }
       break;
     case "play_score":
+    case "play_choice":
       break;
     case "begin":
       if (state.phase === "block_intro") {
@@ -775,6 +780,7 @@ function runnerCommand(c: RunnerCommand) {
           can_listen: false,
           can_show_answer: true,
           can_play_answer: false,
+          can_hear_choices: true,
           dictation: null,
           auto_advance_ms: correct ? 900 : null,
           hidden: false,

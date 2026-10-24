@@ -369,7 +369,6 @@ Every sung exercise with more than one note (pitch matching sequences, patterns,
       "feedback": "after_trial",
       "params": {
         "classes": ["C", "E", "G#"],
-        "out_of_set_rate": 0.15,
         "octaves": [3, 4, 5],
         "timbres": ["gm:0", "gm:48", "synth:triangle"],
         "pool": "training",
@@ -453,7 +452,7 @@ Pitch-class identification · note labelling with octave · AP production · cro
 
 | Type | What happens | Key params |
 |---|---|---|
-| `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). Optional "not in set" answer for out-of-set distractors. | classes, out_of_set_rate, octaves, timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
+| `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). A subset plays and offers only its own notes; there is no "other" answer. After answering, any answer can be clicked to hear it. | classes, octaves, timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
 | `sing_pitch` | Named prompt ("Sing E♭"), no reference → user sings; graded by pitch class, octave reported. | classes, prompt (on-screen text; speech arrives with hands-free mode, §17), response_ms, delay_ms, pre_mask, distractor (tones or music before the prompt), reveal_target_after |
 | `pitch_pairing` | Passive: tone → pause → on-screen label (spoken labels arrive with hands-free mode, §17). No response. Logged as exposure, never counted as AP evidence. | classes, timbres, octaves, gap_ms, rate |
 | `incidental_pairing` | Secondary visual task (e.g. press the colour shown) in which each colour is consistently accompanied by one pitch class. Logged as exposure; transfer is measured only with ordinary `pitch_id`. | class-to-colour map, timbres, octaves |
@@ -478,7 +477,7 @@ The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, m
 ### Presets shipped with the app
 
 - `ap_assessment` — the battery above.
-- `ap_progressive/stage_NN` — starts with three classes spread across the octave (e.g. C, E, G♯) plus out-of-set distractors; each stage adds one class; deadlines tighten from 4 s to 2 s. Suggested criterion: ≥ 90 % over two sessions. Stats tools report the criterion; the LLM (or the user) moves to the next stage.
+- `ap_progressive/stage_NN` — starts with three classes spread across the octave (e.g. C, E, G♯), the only notes played and offered; each stage adds one class; deadlines tighten from 4 s to 2 s. Suggested criterion: ≥ 90 % over two sessions. Stats tools report the criterion; the LLM (or the user) moves to the next stage.
 - `ap_daily` — short mixed identification and production block.
 
 Presets and "repeat last session" work without the LLM.
