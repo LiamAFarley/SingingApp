@@ -15,6 +15,7 @@ import type { SessionRow } from "./bindings/SessionRow";
 import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { Anchor } from "./bindings/Anchor";
+import type { LibraryEntry } from "./bindings/LibraryEntry";
 import type { Score } from "./bindings/Score";
 import type { ScoreNote } from "./bindings/ScoreNote";
 
@@ -796,6 +797,26 @@ let settings: AppSettings = {
   onboarding_done: true,
 };
 
+// --- melody library ----------------------------------------------------------------------------
+
+function libraryEntry(id: string, title: string, collection: string | null, key: string, time: string, bars: number, low: string, high: string, parts: string[] = ["Part 1"], tags: string[] = []): LibraryEntry {
+  const file = id.includes("#") ? `${id.split("#")[0]}.json` : `${id}.${collection ? "json" : "mid"}`;
+  return { id, title, collection, tags, key, time, tempo_bpm: 72, bars, parts, low, high, file };
+}
+
+let libraryPieces: LibraryEntry[] = [
+  libraryEntry("Ottman/Chapter 3/1", "No. 1", "Ottman/Chapter 3", "G major", "4/4", 4, "D4", "D5"),
+  libraryEntry("Ottman/Chapter 3/2", "No. 2", "Ottman/Chapter 3", "F major", "3/4", 8, "C4", "C5"),
+  libraryEntry("Ottman/Chapter 3/10", "No. 10", "Ottman/Chapter 3", "D minor", "6/8", 8, "A3", "D5", ["Part 1"], ["minor"]),
+  libraryEntry("Duets/canon#1", "Canon in two parts", "Duets", "C major", "4/4", 8, "C4", "G5", ["Upper", "Lower"], ["two-part"]),
+  libraryEntry("Folk tune", "Folk tune", null, "A minor", "3/4", 16, "E4", "E5"),
+];
+
+async function libraryScores(id: string): Promise<Score[]> {
+  const piece = libraryPieces.find((p) => p.id === id);
+  return piece && piece.parts.length > 1 ? [sightScore(), dictationScore(DICTATION_TARGET)] : [sightScore()];
+}
+
 export function mockBackend(): Backend {
   setTimeout(startScenario, 50);
   return {
@@ -855,6 +876,25 @@ export function mockBackend(): Backend {
       anchors = anchors.filter((x) => x.id !== id);
       return anchors.length < before;
     },
+    libraryView: async () => ({
+      folder: "C:\\Users\\you\\AppData\\Roaming\\SingingTrainer\\library",
+      pieces: libraryPieces,
+      errors: [{ file: "Ottman/Chapter 3/11.json", pieces: 0, error: "notes: bar 3 has 5 beats; a bar of 4/4 has 4", read_at: new Date().toISOString() }],
+    }),
+    libraryScores,
+    libraryImport: async (files, collection) => {
+      for (const f of files) {
+        const id = `${collection ? `${collection}/` : ""}${f.name.replace(/\.[^.]+$/, "")}`;
+        libraryPieces = [...libraryPieces, libraryEntry(id, f.name.replace(/\.[^.]+$/, ""), collection, "C major", "4/4", 4, "C4", "C5")];
+      }
+      return files.map((f) => ({ name: f.name, file: f.name, error: null }));
+    },
+    libraryRemoveFile: async (file) => {
+      libraryPieces = libraryPieces.filter((p) => p.file !== file);
+    },
+    libraryOpenFolder: async () => {},
+    libraryPlay: async () => 4000,
+    stopPreview: async () => {},
     subscribeLive: async (onBatch) => {
       let t0 = clock();
       setInterval(() => {

@@ -4,6 +4,7 @@
 
 pub mod generate;
 pub mod grade;
+pub mod library;
 pub mod melody;
 pub mod metrics;
 pub mod pitch;

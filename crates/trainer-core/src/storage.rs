@@ -1,6 +1,7 @@
 //! SQLite storage shared by the app and the MCP server. Trials are append-only; everything else
 //! the agent reads is computed from them.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -12,6 +13,7 @@ use ts_rs::TS;
 
 use crate::pitch::{PitchFrame, PitchTrack};
 use crate::generate::GenContext;
+use crate::library::{self, LibraryPiece};
 use crate::schema::{Anchor, NoteRange, SessionSpec};
 use crate::theory::Note;
 
@@ -154,8 +156,27 @@ CREATE TABLE anchors (
 );
 "#;
 
+/// The melody library index. The library folder is the source; `library_files` remembers what
+/// each file looked like when it was read, so unchanged files are not read again.
+const MIGRATION_3: &str = r#"
+CREATE TABLE library_files (
+  file TEXT PRIMARY KEY,
+  stamp TEXT NOT NULL,
+  pieces INTEGER NOT NULL,
+  error TEXT,
+  read_at TEXT NOT NULL
+);
+CREATE TABLE library_pieces (
+  id TEXT PRIMARY KEY,
+  file TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  piece_json TEXT NOT NULL
+);
+CREATE INDEX library_pieces_file ON library_pieces(file);
+"#;
+
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(MIGRATION_1), M::up(MIGRATION_2)])
+    Migrations::new(vec![M::up(MIGRATION_1), M::up(MIGRATION_2), M::up(MIGRATION_3)])
 }
 
 pub fn now() -> DateTime<Utc> {
@@ -371,6 +392,33 @@ pub struct TrialFilter {
     /// Include interrupted trials (default false).
     #[serde(default)]
     pub include_interrupted: bool,
+}
+
+/// A file of the library folder as last read.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct LibraryFile {
+    /// Path relative to the library folder, with `/`.
+    pub file: String,
+    pub pieces: u32,
+    /// Why the file could not be read.
+    pub error: Option<String>,
+    pub read_at: String,
+}
+
+/// What a library sync changed.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, TS)]
+pub struct LibrarySync {
+    /// Files read (new or changed).
+    pub read: Vec<String>,
+    pub removed: Vec<String>,
+    /// Files that could not be read, with the reason.
+    pub errors: Vec<(String, String)>,
+}
+
+impl LibrarySync {
+    pub fn changed(&self) -> bool {
+        !(self.read.is_empty() && self.removed.is_empty() && self.errors.is_empty())
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
@@ -1043,13 +1091,138 @@ impl Db {
         Ok(self.conn.execute("DELETE FROM anchors WHERE id = ?1", params![id])? > 0)
     }
 
-    /// Everything trial generation needs from the database: range, stimulus pools, anchors.
+    /// Everything trial generation needs from the database: range, stimulus pools, anchors and
+    /// the melody library.
     pub fn gen_context(&self) -> Result<GenContext> {
         Ok(GenContext {
             comfortable: self.range_profile()?.comfortable(),
             pools: self.get_setting("stimulus_pools")?.unwrap_or_default(),
             anchors: self.anchors()?,
+            library: self.library()?,
         })
+    }
+
+    // --- melody library -------------------------------------------------------------------------
+
+    /// Every library piece, in natural order of id.
+    pub fn library(&self) -> Result<Vec<LibraryPiece>> {
+        let mut stmt = self.conn.prepare("SELECT piece_json FROM library_pieces")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut out: Vec<LibraryPiece> = Vec::new();
+        for row in rows {
+            if let Ok(p) = serde_json::from_str(&row?) {
+                out.push(p);
+            }
+        }
+        out.sort_by(|a, b| library::natural_cmp(&a.id, &b.id));
+        Ok(out)
+    }
+
+    pub fn library_piece(&self, id: &str) -> Result<Option<LibraryPiece>> {
+        let json: Option<String> = self
+            .conn
+            .query_row("SELECT piece_json FROM library_pieces WHERE id = ?1", params![id], |r| r.get(0))
+            .optional()?;
+        Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+    }
+
+    /// Every file of the library folder that was read, with its number of pieces or its error.
+    pub fn library_files(&self) -> Result<Vec<LibraryFile>> {
+        let mut stmt = self.conn.prepare("SELECT file, pieces, error, read_at FROM library_files")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(LibraryFile {
+                file: r.get(0)?,
+                pieces: r.get::<_, i64>(1)?.max(0) as u32,
+                error: r.get(2)?,
+                read_at: r.get(3)?,
+            })
+        })?;
+        let mut out = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        out.sort_by(|a, b| library::natural_cmp(&a.file, &b.file));
+        Ok(out)
+    }
+
+    /// Brings the index up to date with the library folder: reads new and changed files, drops
+    /// the pieces of deleted ones, and retries files that failed when anything else changed (an
+    /// id clash may have gone).
+    pub fn sync_library(&self, dir: &Path) -> Result<LibrarySync> {
+        let on_disk = library::scan(dir);
+        let mut known: HashMap<String, (String, bool)> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare("SELECT file, stamp, error IS NOT NULL FROM library_files")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get::<_, bool>(2)?))))?;
+            for row in rows {
+                let (file, v) = row?;
+                known.insert(file, v);
+            }
+        }
+        let mut sync = LibrarySync::default();
+        for file in known.keys() {
+            if !on_disk.iter().any(|(f, _)| f == file) {
+                self.conn.execute("DELETE FROM library_pieces WHERE file = ?1", params![file])?;
+                self.conn.execute("DELETE FROM library_files WHERE file = ?1", params![file])?;
+                sync.removed.push(file.clone());
+            }
+        }
+        let changed: Vec<&(String, String)> =
+            on_disk.iter().filter(|(f, stamp)| known.get(f).is_none_or(|(s, _)| s != stamp)).collect();
+        let retry = !changed.is_empty() || !sync.removed.is_empty();
+        for (file, stamp) in &on_disk {
+            let failed = known.get(file).is_some_and(|(_, failed)| *failed);
+            if changed.iter().any(|(f, _)| f == file) || (retry && failed) {
+                self.read_library_file(dir, file, stamp, &mut sync)?;
+            }
+        }
+        Ok(sync)
+    }
+
+    fn read_library_file(&self, dir: &Path, file: &str, stamp: &str, sync: &mut LibrarySync) -> Result<()> {
+        let result = std::fs::read(dir.join(file))
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| library::read_file(file, &bytes))
+            .and_then(|pieces| {
+                for p in &pieces {
+                    let other: Option<String> = self
+                        .conn
+                        .query_row(
+                            "SELECT file FROM library_pieces WHERE id = ?1 AND file != ?2",
+                            params![p.id, file],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(|e| e.to_string())?;
+                    if let Some(other) = other {
+                        return Err(format!("the id `{}` is already used in {other}", p.id));
+                    }
+                }
+                Ok(pieces)
+            });
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("DELETE FROM library_pieces WHERE file = ?1", params![file])?;
+        if let Ok(pieces) = &result {
+            for (k, p) in pieces.iter().enumerate() {
+                tx.execute(
+                    "INSERT OR REPLACE INTO library_pieces(id, file, position, piece_json) VALUES (?1, ?2, ?3, ?4)",
+                    params![p.id, file, k as i64, serde_json::to_string(p)?],
+                )?;
+            }
+        }
+        tx.execute(
+            "INSERT OR REPLACE INTO library_files(file, stamp, pieces, error, read_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                file,
+                stamp,
+                result.as_ref().map(|p| p.len() as i64).unwrap_or(0),
+                result.as_ref().err(),
+                now().to_rfc3339()
+            ],
+        )?;
+        tx.commit()?;
+        match result {
+            Ok(_) => sync.read.push(file.to_string()),
+            Err(e) => sync.errors.push((file.to_string(), e)),
+        }
+        Ok(())
     }
 
     pub fn coach_notes(&self, tag: Option<&str>, limit: u32) -> Result<Vec<CoachNote>> {
@@ -1378,6 +1551,39 @@ mod tests {
         b.queue_session(&spec(), "llm", None).unwrap();
         assert_ne!(a.data_version().unwrap(), v0);
         assert_eq!(a.queued_sessions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn library_follows_the_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join("library");
+        let db = Db::open_in_memory().unwrap();
+        assert!(!db.sync_library(&lib).unwrap().changed());
+
+        library::write_file(&lib, "Book/one.json", br#"{"key": "C", "notes": "C4:2 E4:2 | G4:4"}"#).unwrap();
+        library::write_file(&lib, "two.json", br#"[{"key": "G", "notes": "G4:4"}, {"key": "F", "notes": "F4:4"}]"#).unwrap();
+        let sync = db.sync_library(&lib).unwrap();
+        assert_eq!(sync.read.len(), 2);
+        let ids: Vec<String> = db.library().unwrap().into_iter().map(|p| p.id).collect();
+        assert_eq!(ids, ["Book/one", "two#1", "two#2"]);
+        assert_eq!(db.gen_context().unwrap().library.len(), 3);
+        // Nothing changed: nothing is read again.
+        assert!(!db.sync_library(&lib).unwrap().changed());
+
+        // A clashing id is reported and retried once the other file is gone.
+        library::write_file(&lib, "clash.json", br#"{"id": "Book/one", "key": "D", "notes": "D4:4"}"#).unwrap();
+        let sync = db.sync_library(&lib).unwrap();
+        assert!(sync.errors[0].1.contains("already used in Book/one.json"), "{:?}", sync.errors);
+        assert!(db.library_files().unwrap().iter().any(|f| f.file == "clash.json" && f.error.is_some()));
+        library::remove_file(&lib, "Book/one.json").unwrap();
+        let sync = db.sync_library(&lib).unwrap();
+        assert_eq!(sync.removed, ["Book/one.json"]);
+        assert!(sync.errors.is_empty());
+        assert_eq!(db.library_piece("Book/one").unwrap().unwrap().key, "D major");
+
+        // Hidden temporary files are ignored.
+        std::fs::write(lib.join(".x.json.tmp"), "{").unwrap();
+        assert!(!db.sync_library(&lib).unwrap().changed());
     }
 
     #[test]

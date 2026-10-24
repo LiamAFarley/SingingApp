@@ -9,11 +9,14 @@ use tauri::ipc::Channel;
 use trainer_audio::calibrate::{CalibrationResult, analyze_clicks};
 use trainer_audio::device::{HostInfo, list_hosts};
 use trainer_audio::{Bus, EngineInfo, SoundBuffer};
+use trainer_core::library::{self, LibraryPiece};
 use trainer_core::presets::{builtin_presets, find_builtin};
 use trainer_core::reports::{self, SessionReport};
 use trainer_core::schema::{SessionSpec, SoundEvent};
+use trainer_core::score::{Score, note_events};
 use trainer_core::stats::{StatsQuery, StatsRow};
 use trainer_core::storage::{CalibrationRow, RangeProfile, SessionRow, SessionStatus, new_id, now};
+use trainer_core::theory::Note;
 use trainer_core::validate::validate_session;
 
 use crate::AppState;
@@ -133,6 +136,142 @@ pub fn play_note(
         detune_cents: 0.0,
     }]);
     state.core.play_now(buf).map_err(anyhow_err)
+}
+
+// --- melody library ---------------------------------------------------------------------------
+
+fn library_entry(p: &LibraryPiece) -> LibraryEntry {
+    let scores = p.scores().unwrap_or_default();
+    let range = scores.iter().filter_map(|s| s.range()).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
+    LibraryEntry {
+        id: p.id.clone(),
+        title: p.title.clone(),
+        collection: p.collection.clone(),
+        tags: p.tags.clone(),
+        key: p.key.clone(),
+        time: p.time.to_string(),
+        tempo_bpm: p.tempo_bpm,
+        bars: scores.first().map(|s| s.bars).unwrap_or(0),
+        parts: p
+            .parts
+            .iter()
+            .enumerate()
+            .map(|(k, part)| part.name.clone().unwrap_or_else(|| format!("Part {}", k + 1)))
+            .collect(),
+        low: range.map(|r| Note(r.0).name()),
+        high: range.map(|r| Note(r.1).name()),
+        file: p.file.clone(),
+    }
+}
+
+#[tauri::command]
+pub fn library_view(state: State<'_, AppState>) -> Res<LibraryView> {
+    let dir = state.core.library_dir();
+    let db = state.core.db.lock();
+    db.sync_library(&dir).map_err(anyhow_err)?;
+    Ok(LibraryView {
+        folder: dir.display().to_string(),
+        pieces: db.library().map_err(anyhow_err)?.iter().map(library_entry).collect(),
+        errors: db
+            .library_files()
+            .map_err(anyhow_err)?
+            .into_iter()
+            .filter(|f| f.error.is_some())
+            .collect(),
+    })
+}
+
+/// Every part of a piece as a score, for the preview.
+#[tauri::command]
+pub fn library_scores(state: State<'_, AppState>, id: String) -> Res<Vec<Score>> {
+    let piece = state.core.db.lock().library_piece(&id).map_err(anyhow_err)?;
+    piece.ok_or_else(|| format!("no piece {id}"))?.scores()
+}
+
+/// Copies chosen files into the library folder (into `collection`) after checking that they
+/// read, then reads the folder.
+#[tauri::command]
+pub fn library_import(
+    state: State<'_, AppState>,
+    files: Vec<ImportFile>,
+    collection: Option<String>,
+) -> Res<Vec<ImportResult>> {
+    let dir = state.core.library_dir();
+    let mut out: Vec<ImportResult> = files
+        .into_iter()
+        .map(|f| {
+            let written = library::file_path(collection.as_deref(), &f.name).and_then(|rel| {
+                library::read_file(&rel, &f.data)?;
+                library::write_file(&dir, &rel, &f.data)?;
+                Ok(rel)
+            });
+            match written {
+                Ok(rel) => ImportResult { name: f.name, file: Some(rel), error: None },
+                Err(e) => ImportResult { name: f.name, file: None, error: Some(e) },
+            }
+        })
+        .collect();
+    let sync = state.core.db.lock().sync_library(&dir).map_err(anyhow_err)?;
+    for r in &mut out {
+        if let Some((_, e)) = sync.errors.iter().find(|(f, _)| Some(f) == r.file.as_ref()) {
+            r.error = Some(e.clone());
+        }
+    }
+    state.core.emit("library-changed", ());
+    Ok(out)
+}
+
+#[tauri::command]
+pub fn library_remove_file(state: State<'_, AppState>, file: String) -> Res<()> {
+    let dir = state.core.library_dir();
+    library::remove_file(&dir, &file)?;
+    state.core.db.lock().sync_library(&dir).map_err(anyhow_err)?;
+    state.core.emit("library-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn library_open_folder(state: State<'_, AppState>) -> Res<()> {
+    let dir = state.core.library_dir();
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let opener = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(opener).arg(&dir).spawn().map_err(err)?;
+    Ok(())
+}
+
+/// Plays a piece (or one part of it) and returns its length in milliseconds.
+#[tauri::command]
+pub fn library_play(state: State<'_, AppState>, id: String, part: Option<usize>) -> Res<f64> {
+    let piece = state.core.db.lock().library_piece(&id).map_err(anyhow_err)?;
+    let scores = piece.ok_or_else(|| format!("no piece {id}"))?.scores()?;
+    let events: Vec<SoundEvent> = scores
+        .iter()
+        .enumerate()
+        .filter(|(k, _)| part.is_none_or(|p| p == *k))
+        .flat_map(|(_, s)| note_events(&s.notes, s.time, s.tempo_bpm, "gm:0"))
+        .collect();
+    let length = events.iter().map(|e| e.start_ms + e.dur_ms).fold(0.0, f64::max);
+    let engine = state.core.ensure_engine().map_err(anyhow_err)?;
+    if let Some(prev) = state.core.preview.lock().take() {
+        engine.stop(prev);
+    }
+    let buf = state.core.renderer().render_events(&events);
+    let (id, _) = engine.play_now(Arc::new(buf), 1.0, Bus::Prompt).map_err(anyhow_err)?;
+    *state.core.preview.lock() = Some(id);
+    Ok(length)
+}
+
+#[tauri::command]
+pub fn stop_preview(state: State<'_, AppState>) {
+    if let (Some(engine), Some(id)) = (state.core.engine(), state.core.preview.lock().take()) {
+        engine.stop(id);
+    }
 }
 
 /// Starts (or replaces) a sustained drone, or stops it with `midi: null`.

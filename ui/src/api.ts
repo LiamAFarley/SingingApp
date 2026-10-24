@@ -6,11 +6,15 @@ import type { AudioView } from "./bindings/AudioView";
 import type { CalibrationResult } from "./bindings/CalibrationResult";
 import type { EngineInfo } from "./bindings/EngineInfo";
 import type { HostInfo } from "./bindings/HostInfo";
+import type { ImportFile } from "./bindings/ImportFile";
+import type { ImportResult } from "./bindings/ImportResult";
+import type { LibraryView } from "./bindings/LibraryView";
 import type { LiveBatch } from "./bindings/LiveBatch";
 import type { PresetView } from "./bindings/PresetView";
 import type { RangeProfile } from "./bindings/RangeProfile";
 import type { RunnerCommand } from "./bindings/RunnerCommand";
 import type { RunnerState } from "./bindings/RunnerState";
+import type { Score } from "./bindings/Score";
 import type { SessionReport } from "./bindings/SessionReport";
 import type { SessionRow } from "./bindings/SessionRow";
 import type { StartRequest } from "./bindings/StartRequest";
@@ -45,6 +49,13 @@ export interface Backend {
   listAnchors(): Promise<Anchor[]>;
   saveAnchor(anchor: Anchor): Promise<Anchor>;
   removeAnchor(id: string): Promise<boolean>;
+  libraryView(): Promise<LibraryView>;
+  libraryScores(id: string): Promise<Score[]>;
+  libraryImport(files: ImportFile[], collection: string | null): Promise<ImportResult[]>;
+  libraryRemoveFile(file: string): Promise<void>;
+  libraryOpenFolder(): Promise<void>;
+  libraryPlay(id: string, part: number | null): Promise<number>;
+  stopPreview(): Promise<void>;
   subscribeLive(onBatch: (b: LiveBatch) => void): Promise<void>;
   listen<T>(event: string, cb: (payload: T) => void): Promise<() => void>;
 }
@@ -83,6 +94,13 @@ async function tauriBackend(): Promise<Backend> {
     listAnchors: () => call("list_anchors"),
     saveAnchor: (anchor) => call("save_anchor", { anchor }),
     removeAnchor: (id) => call("remove_anchor", { id }),
+    libraryView: () => call("library_view"),
+    libraryScores: (id) => call("library_scores", { id }),
+    libraryImport: (files, collection) => call("library_import", { files, collection }),
+    libraryRemoveFile: (file) => call("library_remove_file", { file }),
+    libraryOpenFolder: () => call("library_open_folder"),
+    libraryPlay: (id, part) => call("library_play", { id, part }),
+    stopPreview: () => call("stop_preview"),
     subscribeLive: async (onBatch) => {
       const channel = new core.Channel<LiveBatch>();
       channel.onmessage = onBatch;

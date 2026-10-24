@@ -11,6 +11,7 @@ use rmcp::{ErrorData, ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use trainer_core::generate::GenContext;
+use trainer_core::library;
 use trainer_core::presets::{builtin_presets, find_builtin};
 use trainer_core::reports;
 use trainer_core::stats::{StatsQuery, confusion, get_stats};
@@ -37,8 +38,10 @@ calling something learned, and retest after gaps for retention.\n\
 - pitch_pairing, incidental_pairing and other exposure are not evidence of absolute pitch.\n\
 - Graded courses are built-in presets: ap_progressive_01–10 and degrees_01–08 (scale degrees in the style of Functional Ear \
 Trainer). Suggest the next stage after at least 90% over two sessions.\n\
-- Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated or written by you \
-({\"given\": [{key, time, notes: [{note, beats}]}]}). Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
+- Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
+({\"given\": [{key, time, notes: [{note, beats}]}]}), or taken from the melody library ({\"library\": {collection | ids | tags}}). \
+Transcribe the user's books into the library with add_library_pieces (or MIDI files with import_library_files) and reuse them. \
+Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \
 -> no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence \
 of healthy technique.\n\
@@ -144,6 +147,52 @@ pub struct RemoveAnchorRequest {
     pub id: String,
 }
 
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct ListLibraryRequest {
+    /// Only this collection (a folder of the library) and its sub-collections.
+    #[serde(default)]
+    pub collection: Option<String>,
+    /// Only pieces with this tag.
+    #[serde(default)]
+    pub tag: Option<String>,
+    /// Only pieces whose id or title contains this text.
+    #[serde(default)]
+    pub query: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LibraryPieceRequest {
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddLibraryPiecesRequest {
+    /// Pieces in the library JSON format (see the tool description).
+    pub pieces: Vec<Value>,
+    /// Folder of the library to write to, e.g. "Ottman/Chapter 3". It is the pieces' collection.
+    #[serde(default)]
+    pub collection: Option<String>,
+    /// File name (".json" is added); defaults to the first piece's title. Writing the same file
+    /// again replaces it.
+    #[serde(default)]
+    pub file_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ImportLibraryFilesRequest {
+    /// Absolute paths of .json, .mid or .midi files.
+    pub paths: Vec<String>,
+    /// Folder of the library to copy them to.
+    #[serde(default)]
+    pub collection: Option<String>,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct LibraryFileRequest {
+    /// Path inside the library folder, as list_library shows it.
+    pub file: String,
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CoachNoteRequest {
     pub text: String,
@@ -177,7 +226,26 @@ impl TrainerServer {
     }
 
     fn gen_context(&self) -> Result<GenContext, String> {
-        self.with_db(|db| db.gen_context())
+        self.with_db(|db| {
+            db.sync_library(&self.library_dir())?;
+            db.gen_context()
+        })
+    }
+
+    fn library_dir(&self) -> PathBuf {
+        library::folder(&self.data_dir)
+    }
+
+    /// Reads the library folder again and reports what a newly written file produced.
+    fn sync_file(&self, file: &str) -> Result<Value, String> {
+        let sync = self.with_db(|db| db.sync_library(&self.library_dir()))?;
+        if let Some((_, e)) = sync.errors.iter().find(|(f, _)| f == file) {
+            return Err(format!("{file}: {e}"));
+        }
+        let ids = self.with_db(|db| {
+            Ok(db.library()?.into_iter().filter(|p| p.file == file).map(|p| p.id).collect::<Vec<_>>())
+        })?;
+        Ok(json!({ "file": file, "ids": ids }))
     }
 }
 
@@ -516,6 +584,147 @@ impl TrainerServer {
     }
 
     #[tool(
+        description = "The melody library: pieces read from JSON and MIDI files in the library folder (a subfolder is a collection). Returns the folder, one summary per piece (id, title, collection, key, time, bars, parts, range) and files that could not be read. Use pieces in sight_sing and melodic_dictation with params.melody = {\"library\": {\"collection\": …} | {\"ids\": […]} | {\"tags\": […]}, \"shuffle\"?, \"part\"?}."
+    )]
+    async fn list_library(
+        &self,
+        Parameters(req): Parameters<ListLibraryRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let dir = self.library_dir();
+        let r = self.with_db(|db| {
+            db.sync_library(&dir)?;
+            let q = req.query.as_deref().map(str::to_lowercase);
+            let pieces: Vec<Value> = db
+                .library()?
+                .iter()
+                .filter(|p| req.collection.as_deref().is_none_or(|c| library::in_collection(p, c)))
+                .filter(|p| req.tag.as_deref().is_none_or(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t))))
+                .filter(|p| {
+                    q.as_deref().is_none_or(|q| p.id.to_lowercase().contains(q) || p.title.to_lowercase().contains(q))
+                })
+                .map(|p| p.summary())
+                .collect();
+            let errors: Vec<Value> = db
+                .library_files()?
+                .into_iter()
+                .filter_map(|f| f.error.map(|e| json!({ "file": f.file, "error": e })))
+                .collect();
+            Ok(json!({ "folder": dir, "pieces": pieces, "files_with_errors": errors }))
+        });
+        match r {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(description = "One library piece in full, in the library JSON format (notes as {note, beats} | {rest}).")]
+    async fn get_library_piece(
+        &self,
+        Parameters(req): Parameters<LibraryPieceRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let dir = self.library_dir();
+        match self.with_db(|db| {
+            db.sync_library(&dir)?;
+            db.library_piece(&req.id)
+        }) {
+            Ok(Some(p)) => text(&p),
+            Ok(None) => tool_error(format!("no piece `{}`; see list_library", req.id)),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Add pieces to the melody library, e.g. melodies transcribed from the user's books. They are written as one JSON file in the library folder (under collection), which the app reads. \
+A piece: {title, key (\"Eb major\", \"F# minor\"), time (\"3/4\", default 4/4), tempo_bpm?, pickup? (beats before the first barline), tags?, id?, notes} for one part, or parts: [{name, clef?, notes}, …] (top part first) instead of notes. \
+notes is text, \"Eb4:1 F4:.5 G4 | Ab4:2~ | Ab4:1 R:1\": pitch:beats in the time signature's unit, a duration carries over to the next note, R is a rest, ~ ties to the next note, and every | is a barline that is checked (a short first bar is a pickup). A list [{\"note\": \"Eb4\", \"beats\": 1}, {\"rest\": 1}] also works. \
+Pieces without an id get collection/file (or …#n). Writing the same file_name again replaces the file. Nothing is written if a piece is invalid."
+    )]
+    async fn add_library_pieces(
+        &self,
+        Parameters(req): Parameters<AddLibraryPiecesRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        if req.pieces.is_empty() {
+            return tool_error("pieces is empty");
+        }
+        let name = req
+            .file_name
+            .clone()
+            .or_else(|| req.pieces[0].get("title").and_then(Value::as_str).map(str::to_string))
+            .or_else(|| req.pieces[0].get("id").and_then(Value::as_str).map(str::to_string))
+            .unwrap_or_else(|| "pieces".into());
+        let name = if name.to_lowercase().ends_with(".json") { name } else { format!("{name}.json") };
+        let rel = match library::file_path(req.collection.as_deref(), &name) {
+            Ok(r) => r,
+            Err(e) => return tool_error(e),
+        };
+        let doc = library::to_json(None, &req.pieces);
+        let pieces = match library::read_file(&rel, doc.as_bytes()) {
+            Ok(p) => p,
+            Err(e) => return tool_error(e),
+        };
+        let clash = self.with_db(|db| {
+            for p in &pieces {
+                if let Some(other) = db.library_piece(&p.id)? {
+                    if other.file != rel {
+                        return Ok(Some(format!("the id `{}` is already used in {}", p.id, other.file)));
+                    }
+                }
+            }
+            Ok(None)
+        });
+        match clash {
+            Ok(Some(e)) | Err(e) => return tool_error(e),
+            Ok(None) => {}
+        }
+        if let Err(e) = library::write_file(&self.library_dir(), &rel, doc.as_bytes()) {
+            return tool_error(e);
+        }
+        match self.sync_file(&rel) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Copy JSON or MIDI files into the library folder (under collection) and read them. MIDI: one part per track, top part first; chords keep their top note; times are rounded to sixteenths; the key comes from the key signature or is estimated."
+    )]
+    async fn import_library_files(
+        &self,
+        Parameters(req): Parameters<ImportLibraryFilesRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let mut results = Vec::new();
+        for path in &req.paths {
+            let p = std::path::Path::new(path);
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            let r = library::file_path(req.collection.as_deref(), name).and_then(|rel| {
+                let bytes = std::fs::read(p).map_err(|e| format!("reading {path}: {e}"))?;
+                library::read_file(&rel, &bytes)?;
+                library::write_file(&self.library_dir(), &rel, &bytes)?;
+                self.sync_file(&rel)
+            });
+            results.push(match r {
+                Ok(v) => json!({ "path": path, "imported": v }),
+                Err(e) => json!({ "path": path, "error": e }),
+            });
+        }
+        text(&results)
+    }
+
+    #[tool(description = "Delete a file from the library folder, with all its pieces.")]
+    async fn remove_library_file(
+        &self,
+        Parameters(req): Parameters<LibraryFileRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let dir = self.library_dir();
+        let r = library::remove_file(&dir, &req.file)
+            .and_then(|()| self.with_db(|db| db.sync_library(&dir)).map(|_| ()));
+        match r {
+            Ok(()) => text(&json!({ "removed": req.file })),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
         description = "Persist a coaching note (plan, observation, next steps). Kept with the training data, so it survives across conversations and agents."
     )]
     async fn save_coach_note(
@@ -688,6 +897,36 @@ mod tests {
         assert_eq!(list.as_array().unwrap().len(), 1);
         let (_, a) = call(&client, "queue_session", json!({"session": anchors_session, "dry_run": true})).await;
         assert_eq!(a["validation"]["ok"], json!(true), "{a}");
+
+        // The melody library: pieces written as files, listed, used by a session, removed.
+        let lib_session = json!({"title": "Book", "blocks": [{"type": "sight_sing", "count": 2,
+            "params": {"melody": {"library": {"collection": "Book"}}}}]});
+        let (_, v) = call(&client, "queue_session", json!({"session": lib_session, "dry_run": true})).await;
+        assert_eq!(v["validation"]["ok"], json!(false));
+        let (err, added) = call(&client, "add_library_pieces", json!({"collection": "Book", "file_name": "ch1",
+            "pieces": [{"title": "No. 1", "key": "D major", "time": "3/4", "notes": "A4:1 | D5:2 C#5:1 | D5:3"}]})).await;
+        assert!(!err, "{added}");
+        assert_eq!(added["ids"], json!(["Book/ch1"]));
+        let (err, bad) = call(&client, "add_library_pieces", json!({"pieces": [{"key": "C", "notes": "C4:4 | D4:3 E4:2 | C4:4"}]})).await;
+        assert!(err && bad.as_str().unwrap().contains("bar 2 has 5 beats"), "{bad}");
+        let midi_dir = tempfile::tempdir()?;
+        let json_path = midi_dir.path().join("extra.json");
+        std::fs::write(&json_path, r#"{"key": "G", "notes": "G4:4"}"#)?;
+        let (_, imported) = call(&client, "import_library_files",
+            json!({"paths": [json_path.to_string_lossy()], "collection": "Book/More"})).await;
+        assert_eq!(imported[0]["imported"]["ids"], json!(["Book/More/extra"]), "{imported}");
+        let (_, list) = call(&client, "list_library", json!({"collection": "book"})).await;
+        assert_eq!(list["pieces"].as_array().unwrap().len(), 2, "{list}");
+        assert_eq!(list["pieces"][0]["bars"], json!(3));
+        let (_, v) = call(&client, "queue_session", json!({"session": lib_session, "dry_run": true})).await;
+        assert_eq!(v["validation"]["ok"], json!(true), "{v}");
+        let (err, piece) = call(&client, "get_library_piece", json!({"id": "Book/ch1"})).await;
+        assert!(!err);
+        assert_eq!(piece["key"], json!("D major"));
+        let (err, _) = call(&client, "remove_library_file", json!({"file": "Book/More/extra.json"})).await;
+        assert!(!err);
+        let (_, list) = call(&client, "list_library", json!({})).await;
+        assert_eq!(list["pieces"].as_array().unwrap().len(), 1);
 
         let (_, sessions) = call(&client, "list_sessions", json!({"status": "queued"})).await;
         assert_eq!(sessions.as_array().unwrap().len(), 1);

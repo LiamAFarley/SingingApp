@@ -39,6 +39,7 @@ pub fn run() {
             });
             live::spawn_live_forwarder(core.clone());
             live::spawn_queue_watcher(core.clone());
+            live::spawn_library_watcher(core.clone());
             // Load instruments and open the audio device without blocking the window.
             std::thread::spawn(move || {
                 core.load_soundfonts();
@@ -64,6 +65,13 @@ pub fn run() {
             commands::start_audio,
             commands::stop_audio,
             commands::play_note,
+            commands::library_view,
+            commands::library_scores,
+            commands::library_import,
+            commands::library_remove_file,
+            commands::library_open_folder,
+            commands::library_play,
+            commands::stop_preview,
             commands::set_drone,
             commands::subscribe_live,
             commands::calibrate,

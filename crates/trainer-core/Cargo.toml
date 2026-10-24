@@ -20,6 +20,7 @@ rusqlite.workspace = true
 rusqlite_migration.workspace = true
 dirs.workspace = true
 rustfft.workspace = true
+midly.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

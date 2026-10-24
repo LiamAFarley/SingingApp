@@ -203,6 +203,28 @@ impl KeySig {
         })
     }
 
+    /// The key with this many sharps (positive) or flats (negative), as in a MIDI key signature.
+    pub fn from_fifths(fifths: i32, mode: KeyMode) -> Result<Self, String> {
+        let table = match mode {
+            KeyMode::Major => &MAJOR_TONICS,
+            KeyMode::Minor => &MINOR_TONICS,
+        };
+        let tonic = table
+            .get((fifths + 7) as usize)
+            .filter(|_| (-7..=7).contains(&fifths))
+            .ok_or_else(|| format!("{fifths} is not a key signature"))?;
+        KeySig::new(tonic, mode)
+    }
+
+    /// The key on this tonic pitch class with the fewest accidentals (sharps on a tie).
+    pub fn for_tonic_pc(pc: i32, mode: KeyMode) -> Self {
+        (0..=7)
+            .flat_map(|n| [n, -n])
+            .filter_map(|f| KeySig::from_fifths(f, mode).ok())
+            .find(|k| k.tonic_pc() == pc.rem_euclid(12))
+            .expect("every pitch class has a key within seven fifths")
+    }
+
     /// Parses `Eb major`, `F# minor`, `c minor`, `Bb` (major) or `F#m`.
     pub fn parse(s: &str) -> Result<Self, String> {
         let t = s.trim();

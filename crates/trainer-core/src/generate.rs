@@ -2,10 +2,11 @@
 
 use serde_json::json;
 
-use crate::melody::generate_melody;
+use crate::library::{self, LibraryPiece};
+use crate::melody::{MelodyParams, generate_melody};
 use crate::rng::{BalancedBag, Rng};
 use crate::schema::*;
-use crate::score::{Score, ScoreNote, note_events};
+use crate::score::{CompactMelody, Score, ScoreNote, note_events};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::{PoolConfig, TimbreId, default_training_timbres, is_valid_timbre};
 
@@ -16,6 +17,8 @@ pub struct GenContext {
     pub pools: PoolConfig,
     /// Saved anchor songs (for `anchor_song`).
     pub anchors: Vec<Anchor>,
+    /// The melody library, in natural order of id.
+    pub library: Vec<LibraryPiece>,
 }
 
 impl Default for GenContext {
@@ -24,6 +27,7 @@ impl Default for GenContext {
             comfortable: NoteRange::new(48, 67),
             pools: PoolConfig::default(),
             anchors: Vec::new(),
+            library: Vec::new(),
         }
     }
 }
@@ -1651,24 +1655,72 @@ fn gen_pattern(
 // Sight singing
 // ---------------------------------------------------------------------------------------------
 
-/// The melody for trial `i`: generated, or the coach's melody `i mod n`.
-fn melody_for(
-    source: &MelodySource,
-    i: usize,
-    tempo_bpm: f32,
-    rng: &mut Rng,
-    ctx: &GenContext,
-) -> Result<Score, GenError> {
-    match source {
-        MelodySource::Generate(m) => {
-            generate_melody(m, ctx.comfortable, tempo_bpm, rng).map_err(|e| GenError(format!("melody: {e}")))
-        }
-        MelodySource::Given(list) => {
-            if list.is_empty() {
-                return err("melody.given must contain at least one melody");
+/// The melodies of a block: generated one by one, or a list (the coach's or the library's) used
+/// in turn.
+enum Melodies<'a> {
+    Generate(&'a MelodyParams),
+    /// Melodies with the library piece each came from.
+    List(Vec<(CompactMelody, Option<String>)>),
+}
+
+impl<'a> Melodies<'a> {
+    fn new(source: &'a MelodySource, ctx: &GenContext, rng: &mut Rng) -> Result<Self, GenError> {
+        Ok(match source {
+            MelodySource::Generate(m) => Melodies::Generate(m),
+            MelodySource::Given(list) => {
+                if list.is_empty() {
+                    return err("melody.given must contain at least one melody");
+                }
+                Melodies::List(list.iter().map(|m| (m.clone(), None)).collect())
             }
-            let k = i % list.len();
-            Score::from_compact(&list[k], tempo_bpm).map_err(|e| GenError(format!("melody.given[{k}]: {e}")))
+            MelodySource::Library(sel) => {
+                let pieces = library::select(&ctx.library, sel, 1)
+                    .map_err(|e| GenError(format!("melody.library: {e}")))?;
+                let mut list: Vec<(CompactMelody, Option<String>)> = pieces
+                    .iter()
+                    .map(|p| {
+                        let mut m = p.melody(sel.part);
+                        if sel.fit_range {
+                            library::fit_octaves(&mut m, ctx.comfortable);
+                        }
+                        if !sel.piece_tempo {
+                            m.tempo_bpm = None;
+                        }
+                        (m, Some(p.id.clone()))
+                    })
+                    .collect();
+                if sel.shuffle {
+                    rng.shuffle(&mut list);
+                }
+                Melodies::List(list)
+            }
+        })
+    }
+
+    /// The melody for trial `i`, and the library piece it came from.
+    fn score(
+        &self,
+        i: usize,
+        tempo_bpm: f32,
+        rng: &mut Rng,
+        ctx: &GenContext,
+    ) -> Result<(Score, Option<String>), GenError> {
+        match self {
+            Melodies::Generate(m) => generate_melody(m, ctx.comfortable, tempo_bpm, rng)
+                .map(|s| (s, None))
+                .map_err(|e| GenError(format!("melody: {e}"))),
+            Melodies::List(list) => {
+                let k = i % list.len();
+                let (m, piece) = &list[k];
+                Score::from_compact(m, tempo_bpm)
+                    .map(|s| (s, piece.clone()))
+                    .map_err(|e| {
+                        GenError(match piece {
+                            Some(id) => format!("library piece `{id}`: {e}"),
+                            None => format!("melody.given[{k}]: {e}"),
+                        })
+                    })
+            }
         }
     }
 }
@@ -1710,10 +1762,15 @@ fn gen_sight_sing(
     if p.backing.has_melody() {
         return err("backing `melody` would sing the answer; use `click`, `chords`, `drone` or `none` (Sing along is offered after each attempt)");
     }
+    let melodies = Melodies::new(&p.melody, ctx, rng)?;
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let score = melody_for(&p.melody, i, p.tempo_bpm, rng, ctx)?;
-        out.push(TrialSpec::Sung(sight_trial(score, p)));
+        let (score, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+        let mut t = sight_trial(score, p);
+        if let Some(id) = piece {
+            t.stimulus["piece"] = json!(id);
+        }
+        out.push(TrialSpec::Sung(t));
     }
     Ok(out)
 }
@@ -1835,9 +1892,10 @@ fn gen_dictation(
     if !(30.0..=220.0).contains(&p.tempo_bpm) {
         return err("tempo_bpm must be 30–220");
     }
+    let melodies = Melodies::new(&p.melody, ctx, rng)?;
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let score = melody_for(&p.melody, i, p.tempo_bpm, rng, ctx)?;
+        let (score, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
         // The editor starts with the first note (and any rest before it) when it is given.
         let mut given = score.clone();
         given.title = None;
@@ -1872,6 +1930,9 @@ fn gen_dictation(
         let mut stimulus = score_stimulus(&score);
         stimulus["first_note_given"] = json!(p.give_first_note);
         stimulus["grade_rhythm"] = json!(p.grade_rhythm);
+        if let Some(id) = piece {
+            stimulus["piece"] = json!(id);
+        }
         out.push(TrialSpec::Dictation(DictationTrial {
             prompt: "Write the melody".into(),
             score,
@@ -2090,6 +2151,46 @@ mod tests {
         let TrialSpec::Dictation(t) = &generate_block(&b, 1, &GenContext::default()).unwrap()[0] else { panic!() };
         assert!(t.given.notes.is_empty());
         assert!(t.playback.reference_beats.is_empty());
+    }
+
+    fn library_context() -> GenContext {
+        let mut library = Vec::new();
+        for (file, text) in [
+            ("Book/ex1.json", r#"{"key": "G major", "tempo_bpm": 66, "notes": "D5:2 B4:2 | G4:4"}"#),
+            ("Book/ex2.json", r#"{"key": "F major", "notes": "F4 G4 A4 F4 | C5:4"}"#),
+            ("Duets/d1.json", r#"{"key": "C", "parts": [{"notes": "E4:2 F4:2 | E4:4"}, {"notes": "C4:2 D4:2 | C4:4"}]}"#),
+        ] {
+            library.extend(library::read_file(file, text.as_bytes()).unwrap());
+        }
+        GenContext { comfortable: NoteRange::new(43, 64), library, ..GenContext::default() }
+    }
+
+    #[test]
+    fn library_melodies_fit_the_range_and_name_their_piece() {
+        let ctx = library_context();
+        let b = block(r#"{"type": "sight_sing", "count": 3, "params": {"melody": {"library": {"collection": "book"}}}}"#);
+        let trials = generate_block(&b, 1, &ctx).unwrap();
+        let pieces: Vec<&str> = trials
+            .iter()
+            .map(|t| match t {
+                TrialSpec::Sung(t) => t.stimulus["piece"].as_str().unwrap(),
+                _ => panic!(),
+            })
+            .collect();
+        assert_eq!(pieces, ["Book/ex1", "Book/ex2", "Book/ex1"]);
+        let TrialSpec::Sung(t) = &trials[0] else { panic!() };
+        // D5–G4 moved down an octave into G2–E4; the piece's own tempo is kept.
+        assert_eq!(t.notes.iter().map(|n| n.midi).collect::<Vec<_>>(), [62, 59, 55]);
+        assert_eq!(t.tempo_bpm, 66.0);
+
+        let b = block(r#"{"type": "melodic_dictation", "count": 1, "params": {"melody": {"library": {"ids": ["Duets/d1"], "part": 1, "fit_range": false}}}}"#);
+        let TrialSpec::Dictation(t) = &generate_block(&b, 1, &ctx).unwrap()[0] else { panic!() };
+        assert_eq!(t.score.pitch_names(), "C4 D4 C4");
+        assert_eq!(t.stimulus["piece"], "Duets/d1");
+
+        let b = block(r#"{"type": "sight_sing", "count": 1, "params": {"melody": {"library": {"tags": ["nothing"]}}}}"#);
+        let e = generate_block(&b, 1, &ctx).unwrap_err();
+        assert!(e.to_string().contains("no library pieces tagged nothing"), "{e}");
     }
 
     fn anchor(title: &str, first: &str, melody: bool) -> Anchor {

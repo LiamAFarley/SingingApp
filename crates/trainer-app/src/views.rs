@@ -362,6 +362,52 @@ pub struct PresetView {
     pub block_titles: Vec<String>,
 }
 
+/// The melody library, for the Library page.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LibraryView {
+    pub folder: String,
+    pub pieces: Vec<LibraryEntry>,
+    /// Files that could not be read.
+    pub errors: Vec<trainer_core::storage::LibraryFile>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LibraryEntry {
+    pub id: String,
+    pub title: String,
+    pub collection: Option<String>,
+    pub tags: Vec<String>,
+    pub key: String,
+    pub time: String,
+    pub tempo_bpm: Option<f32>,
+    pub bars: u32,
+    /// Part names, top part first.
+    pub parts: Vec<String>,
+    /// Lowest and highest notes, e.g. `D4`.
+    pub low: Option<String>,
+    pub high: Option<String>,
+    pub file: String,
+}
+
+/// A file chosen in the import dialog.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ImportFile {
+    pub name: String,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ImportResult {
+    pub name: String,
+    /// Where it was written in the library folder.
+    pub file: Option<String>,
+    pub error: Option<String>,
+}
+
 #[cfg(test)]
 mod export_more {
     use ts_rs::TS;

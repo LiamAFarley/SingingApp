@@ -858,6 +858,41 @@ pub enum MelodySource {
     Generate(MelodyParams),
     /// Melodies written by the coach; trial i uses melody i modulo their number.
     Given(Vec<CompactMelody>),
+    /// Pieces from the melody library (JSON and MIDI files in the library folder), in turn.
+    Library(LibrarySelect),
+}
+
+/// Which library pieces an exercise uses: by id, or every piece in a collection or with a tag.
+/// With nothing set, the whole library.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LibrarySelect {
+    /// Piece ids (see list_library), used in this order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ids: Vec<String>,
+    /// A collection (a folder of the library); its sub-collections are included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
+    /// Pieces with any of these tags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    /// Shuffle instead of library order (natural order of ids).
+    #[serde(default)]
+    pub shuffle: bool,
+    /// The part of multi-part pieces to sing or write (0 = top).
+    #[serde(default)]
+    pub part: usize,
+    /// Move each melody by whole octaves to fit the comfortable range (the key stays).
+    #[serde(default = "d_true")]
+    pub fit_range: bool,
+    /// Use a piece's own tempo when it has one; otherwise the exercise's tempo_bpm.
+    #[serde(default = "d_true")]
+    pub piece_tempo: bool,
+}
+
+impl Default for LibrarySelect {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
 }
 
 impl Default for MelodySource {

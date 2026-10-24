@@ -31,6 +31,8 @@ pub struct Core {
     renderer: RwLock<Arc<Renderer>>,
     pub live_channel: Mutex<Option<Channel<LiveBatch>>>,
     pub drone: Mutex<Option<u64>>,
+    /// A library piece playing on the Library page.
+    pub preview: Mutex<Option<u64>>,
     pub app: OnceLock<AppHandle>,
 }
 
@@ -54,8 +56,10 @@ impl Core {
             renderer: RwLock::new(Arc::new(Renderer::new(48_000, SoundFonts::default()))),
             live_channel: Mutex::new(None),
             drone: Mutex::new(None),
+            preview: Mutex::new(None),
             app: OnceLock::new(),
         });
+        let _ = std::fs::create_dir_all(core.library_dir());
         Ok(core)
     }
 
@@ -157,8 +161,17 @@ impl Core {
         self.engine.read().clone()
     }
 
+    /// The generation context, after reading any library files that changed.
     pub fn gen_context(&self) -> GenContext {
-        self.db.lock().gen_context().unwrap_or_default()
+        let db = self.db.lock();
+        if let Err(e) = db.sync_library(&self.library_dir()) {
+            tracing::warn!("library sync failed: {e:#}");
+        }
+        db.gen_context().unwrap_or_default()
+    }
+
+    pub fn library_dir(&self) -> PathBuf {
+        trainer_core::library::folder(&self.data_dir)
     }
 
     /// Live tracker range from the singer's range profile.

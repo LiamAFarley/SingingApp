@@ -100,3 +100,25 @@ pub fn spawn_queue_watcher(core: Arc<Core>) {
         })
         .expect("spawn queue watcher");
 }
+
+/// Reads the library folder every two seconds and emits `library-changed` when a file was added,
+/// changed or deleted.
+pub fn spawn_library_watcher(core: Arc<Core>) {
+    std::thread::Builder::new()
+        .name("library-watcher".into())
+        .spawn(move || {
+            let Ok(db) = Db::open(&db_path(&core.data_dir)) else {
+                return;
+            };
+            let dir = core.library_dir();
+            loop {
+                match db.sync_library(&dir) {
+                    Ok(sync) if sync.changed() => core.emit("library-changed", ()),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("library sync failed: {e:#}"),
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        })
+        .expect("spawn library watcher");
+}
