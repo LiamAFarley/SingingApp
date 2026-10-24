@@ -17,6 +17,7 @@ Those run outside the app and hand it files. The app's side of that boundary is 
 
 **Priorities:**
 
+0. **Absolute-pitch work comes before all of this** (`ap_research_integration_plan.md`). Its AP-1 phase builds the minimal course manifests, progress and gates, which the courses work below then extends.
 1. **Courses and warm-ups first.**
    - Collection pages and course manifests with progress.
    - Warm-up vocalises with generated backing tracks.

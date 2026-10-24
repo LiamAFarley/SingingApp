@@ -484,7 +484,7 @@ The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, m
 
 Presets and "repeat last session" work without the LLM.
 
-**Research integration:** `ap_research_integration_plan.md` adds the adult-acquisition protocols to this suite: anti-cheating sequencing (octave spread, 13-semitone jumps, 2 s deadline), a Shepard–Risset glissando scrubber, go/no-go detection, the chord identification method, Brady's anchor weighting, custom labels, an errorless mode, inner-voice singing, a working-memory screening battery, per-class mastery with gates, UCSF-style scoring, and a drift detector.
+**Research integration (top priority):** `ap_research_integration_plan.md` restores the out-of-set Other answer for subset training, composes a daily set from all AP courses with one combined progress dashboard, and adds the adult-acquisition protocols to this suite: anti-cheating sequencing (octave spread, 13-semitone jumps, 2 s deadline), a Shepard–Risset glissando scrubber, go/no-go detection, the chord identification method, Brady's anchor weighting, custom labels, an errorless mode, inner-voice singing, a working-memory screening battery, per-class mastery with gates, UCSF-style scoring, and a drift detector.
 
 ---
 

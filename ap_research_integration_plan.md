@@ -1,410 +1,466 @@
 # Absolute pitch: integrating the acquisition research
 
-**Date:** 24 October 2026
+**Date:** 24 October 2026 (revised the same day with the owner's answers)
 **Input:** the deep-research report "Advanced Absolute Pitch Training: Empirical Protocols, Experimental Biohacks, and Architectural Specifications". It is quoted by its section numbers (R§1–R§7).
-**Builds on:** `adaptive_music_training_app_plan.md` §7 (stimuli, masks, exposure log) and §9 (absolute-pitch suite), and the courses work in `song_and_corpus_app_plan.md`.
-**Scope:** exercises and progress tracking only. The pharmacological, neurostimulation and sleep-cueing material is left out (§1).
+**Builds on:** `adaptive_music_training_app_plan.md` §7 (stimuli, masks, exposure log) and §9 (absolute-pitch suite).
+**Priority:** this is the top priority, ahead of the courses, notation and songs work in `song_and_corpus_app_plan.md`. The minimal course machinery it needs (manifests, progress, gates) is pulled forward into AP-1.
+**Scope:** every exercise and tracking idea in the research that looks useful. The pharmacological, neurostimulation, sleep-cueing and infant-exposure material is left out.
 
 ---
 
 ## 0. Bottom line
 
-1. **Most of the research fits the existing design.** It mostly needs new generator parameters, one new mask, new feedback and label options, and better reports, rather than a new architecture.
-   - The app still generates stimuli, grades them deterministically and reports.
-   - The coach still decides progression.
-   - Gates such as "4 passes with an overnight gap" or "14 days before the next chord" are **computed and shown by the app and enforced by the coach** (or by the user following the course page). There is still no adaptive engine inside the app.
-2. **Anti-cheating safeguards become generator and block options:**
-   - at least three octaves per trial;
-   - consecutive trials at least 13 semitones apart;
-   - a 2-second response window;
-   - a 20-second descending Shepard–Risset glissando to clear echoic memory before unassisted blocks;
-   - verification passes separated by sleep.
-3. **Four new exercise kinds:**
-   - `pitch_detect`: go/no-go target detection in a fast stream (Van Hedger's Simple Speed, Cuddy's single anchor, the hot/cold anchor scan);
-   - `chord_color_id`: the Eguchi chord identification method, 14 voiced chords with colour labels, then single notes;
-   - `sing_chord_tones`: Beato-style inner-voice singing;
-   - a **screening battery**: implicit note memory matching, a tonal n-back and a span task.
-4. **New options on existing kinds:**
-   - Brady's probability-weighted anchor class and paced streams;
-   - custom per-class labels (names, colours, words) for Burge- and Gervain-style tagging;
-   - an errorless feedback mode (Taneda);
-   - audio-clip anchors for the mental jukebox.
-5. **New tracking:**
-   - per-class mastery within the time limit;
-   - gate status;
-   - UCSF-style scoring (1 point exact, 0.75 within a semitone) and mean absolute deviation;
-   - d′ for detection;
-   - weekly generalisation trends;
-   - an aptitude profile from screening;
-   - a **drift detector** that tells a uniform shift across the confusion matrix (settings, device or perception) from random forgetting.
-6. **One research recommendation is rejected:** out-of-set "other" distractors during subset training (R§1, safeguard 4). You ruled "Other" out. The loophole it targets, anchoring on the highest and lowest notes of a small subset, is closed instead by the octave spread, the 13-semitone jump rule, and detection streams that always draw from all twelve classes (§3.1).
+1. **Everything useful becomes a course.** The course types are:
+   - multi-octave naming;
+   - fast detection;
+   - Brady's anchor fading;
+   - chord colours;
+   - note colours and names;
+   - contrast drills;
+   - inner voices;
+   - sung-note production;
+   - anchors;
+   - screening;
+   - weekly and maintenance tests.
+
+   Each course is a ladder of levels with a pass rule.
+2. **A daily set is composed from all active courses.** The app picks each course's current level, fits them into a time budget, and adds the weekly test or maintenance on their days. The coach can adjust it, but it works without the coach.
+3. **Progress is tracked as one combined picture.** Per-pitch-class mastery pools all methods (naming, detection, chord extraction, production), plus each course's level. Per-method detail is kept in the data but isn't the headline.
+4. **Gates are shown, not enforced.** Examples are "4 passes, the last at least 12 h after the third" and "14 days before the next chord". The course page and daily set show when an item is due; nothing locks.
+5. **Out-of-set "Other" comes back for subset training,** as the research recommends (Wong safeguard 4), alongside the octave spread and jump rules.
+6. **Spoken audio comes from files you generate** (Breeze TTS). The app reads a speech folder of digits, letters, note names and custom label names. Uses include:
+   - spoken digit span;
+   - letter n-back;
+   - spoken labels in pairing and detection.
 
 ---
 
-## 1. What is in, adapted or out
+## 1. What is in and what is out
 
 | Research item | Decision | Where |
 |---|---|---|
-| Working-memory screening: implicit note memory (INM), auditory n-back, digit span (R§1) | **In**, as a screening battery and aptitude profile | §4.4, §5.6 |
-| Simple Speed go/no-go with a sung prompt (R§1) | **In** | §4.1 |
-| Weekly 120-note five-timbre generalisation test (R§1) | **In**, as a preset | §6 |
-| UCSF-style 36 piano + 36 sine test and its scoring (R§1) | **In, as "UCSF-style".** The real UCSF test has its own stimuli and is not reproduced; its scoring rule is | §5.2, §6 |
-| Wong 2025 safeguards: octave span, scrubber, ≥ 13-semitone jumps, ≤ 2 s responses, 4 passes with an overnight gap, maintenance (R§1) | **In** | §3.1, §3.2, §5.1 |
-| Wong safeguard: out-of-set distractors | **Adapted**: no "Other"; closed by octave spread, jumps and detection streams | §3.1 |
+| Working-memory screening: implicit note memory, n-back, digit span (R§1) | **In**; spoken digits and letters from the speech folder | §4.4, §3.7 |
+| Simple Speed go/no-go with a sung prompt (R§1) | **In**; choir prompt | §4.1 |
+| Weekly 120-note five-timbre test; UCSF-style test and scoring (R§1) | **In** ("UCSF-style": the real test's stimuli aren't reproduced) | §6, §5.3 |
+| Wong safeguards: octave span, scrubber, 13-semitone jumps, 2 s answers, out-of-set distractors, 4 passes with an overnight gap, maintenance (R§1) | **In, all of them** | §3.1, §3.2, §5.2 |
 | Cuddy single reference; Brady probability fading and paced streams (R§2) | **In** | §3.1, §4.1, §6 |
-| Eguchi/CIM 14 chords with colours, then single notes (R§3) | **In** | §4.2, §6 |
-| Taneda errorless discovery (R§3) | **In**, as a feedback mode | §3.4 |
+| Eguchi chord colours, then single notes (R§3) | **In** | §4.2 |
+| Taneda colour discovery, errorless (R§3) | **In**: colour sets, discovery mode, errorless feedback | §3.3, §3.4, §4.5 |
 | Beato inner-voice singing (R§3) | **In** | §4.3 |
-| Age-related drift monitoring (R§3) | **In**, as the drift detector | §5.5 |
-| Burge pitch-colour contrast; Gervain proper names; ideasthetic tags (R§4) | **In**, as custom labels and contrast presets | §3.3, §6 |
-| Shepard–Risset glissando synthesis (R§6) | **In**, as a mask | §3.2 |
-| Mental jukebox flash anchors; hot/cold memorised-piece scan (R§6) | **In.** Clips come from audio files now and from song packages once songs land | §3.6, §4.1 |
-| Valproate/butyrate, psychedelics, ketamine, MDMA, ibogaine, carbamazepine dosing, tDCS (R§5) | **Out** | — |
-| Sleep-stage cueing (TMR), pink noise, the mobile client (R§5) | **Out** | — |
-| Prenatal and infant exposure (Nuryl) (R§3) | **Out** | — |
-| Clinical causes of a uniform shift (R§5) | **Out of the app.** The drift detector reports the shift and checks the app's own settings; interpreting it is up to the user and coach | §5.5 |
+| Age-related drift monitoring (R§3) | **In**, as the drift detector | §5.6 |
+| Burge pitch colour; Gervain names; your own words or colours per note (R§4) | **In** | §3.3, §6 |
+| Shepard–Risset glissando (R§6) | **In**, as the scrubber | §3.2 |
+| Mental jukebox flash anchors; hot/cold memorised-piece scan (R§6) | **In**; clips from audio files now, from song packages later | §3.6, §4.1 |
+| Sung-note production feel (proprioception) and anchor-note singing | **In** | §4.5 |
+| Drugs, supplements, psychedelics, tDCS, carbamazepine, sleep cueing, pink noise, infant exposure (R§3, R§5) | **Out** | — |
 
 ---
 
-## 2. Principles kept from the current design
+## 2. Principles
 
-- **No adaptive engine in the app.** The app reports gate status and mastery; the coach (or the user, from the course page) advances. Presets and courses still work without the coach.
-- **No "Other" answer.** Subsets play and offer only their own notes.
-- **Training and holdout pools** stay. Verification and assessment blocks use holdout timbres and octaves unless a block overrides it.
-- **The reference-exposure log stays, and is extended.**
-  - Every labelled tone counts as exposure:
-    - a reference;
-    - hearing an answer after a trial;
-    - the sung prompt in `pitch_detect`;
-    - a chord's colour reveal.
-  - A scrubber resets the "echoic" clock (§3.2). The log then records both `secs_since_labeled_reference` and `scrubbed_since_reference`.
-- **The app never reports a single "you have perfect pitch" verdict.** It reports dimensions, including the research's ≥ 90% per-class criterion as one of them.
+- **The app composes and tracks; the coach steers.**
+  - The daily set is a deterministic rule: each course's current level, within a time budget.
+  - The coach can change budgets, pause courses, add sessions or override levels.
+  - There is still no hidden learner model. The levels come from stored results and the course pass rules.
+- **One combined progress picture.** All methods feed per-class mastery, because this is a personal tool. Per-method numbers stay queryable for the coach.
+- **Training and holdout pools stay.** Weekly and UCSF-style tests use holdout timbres and octaves.
+- **The reference-exposure log stays, and counts every labelled sound:**
+  - the reference tones;
+  - hearing answers after a trial;
+  - the sung prompt in detection;
+  - chord colour reveals;
+  - anchor clips;
+  - spoken labels.
+
+  A scrubber resets the echoic clock; the log records both `secs_since_labeled_reference` and `scrubbed_since_reference`.
+- **The app never declares "you have perfect pitch."** It reports classes mastered, within the time limit, across octaves and timbres.
 
 ---
 
 ## 3. Changes to existing pieces
 
-### 3.1 Sequencing safeguards in `pitch_id` (and the other AP kinds)
+### 3.1 Sequencing and answer options for `pitch_id` (and the other AP kinds)
 
-New optional fields in `PitchIdParams`, reused by `sing_pitch`, `pitch_detect` and the screening tasks where they apply:
+New optional fields, reused by `sing_pitch`, `pitch_detect`, `chord_color_id` single-note trials and the screening tasks where they apply:
 
 | Field | Meaning | Research default |
 |---|---|---|
-| `min_jump_semitones` | Each stimulus is at least this far from the previous one (MIDI distance), across the block and across the mask | 13 (Wong) |
-| `octaves` (exists) | Validator warns when `min_jump_semitones > 0` and the span is under 3 octaves, which makes the rule impossible or too predictable | C4–B6 (Wong); 4 octaves (Solfeto) |
-| `class_weights` | Per-class probability weights; unlisted classes share the rest equally | Brady: `{"C": 0.40}`, others ≈ 0.0545 |
-| `pacing` | `respond` (default: next trial after the answer) or `stream { ioi_ms, response_window_ms }`, where tones arrive on a fixed schedule whether or not you answered; a miss is a timeout | Brady: IOI 5000 → 1400 ms |
-| `deadline_ms` (exists) | Response ceiling; a late answer is recorded with `in_time: false` | 2000 (Wong) |
-| `labels` | Custom label set (§3.3) | — |
-| `requeue_misses` | Missed classes come back later in the block, in another octave | Taneda, Eguchi |
+| `min_jump_semitones` | Each stimulus is at least this far from the previous one, across the block and across masks | 13 (Wong) |
+| `octaves` (exists) | Validator warns when a jump rule is set with under 3 octaves | C4–B6 (Wong); 4 octaves (Solfeto) |
+| `out_of_set_rate` (restored) | For subsets: this share of trials plays a note outside the subset, at the edges of the range, answered with an **Other** button | 0.15–0.20 (Wong) |
+| `class_weights` | Per-class probability weights; unlisted classes share the rest | Brady: C 0.40, others ≈ 0.0545 |
+| `pacing` | `respond` (next trial after the answer) or `stream { ioi_ms, response_window_ms }` (fixed schedule; a miss is a timeout) | Brady: 5000 → 1400 ms |
+| `deadline_ms` (exists) | Response ceiling; late answers are stored with `in_time: false` | 2000 (Wong) |
+| `labels` | Label and colour set (§3.3) | — |
+| `requeue_misses` | Missed classes return later in the block, in another octave | Taneda, Eguchi |
+| `register` | `spread` (default) or `fixed` (one octave, for contrast drills such as Burge's E♭3/F♯3) | — |
 
-**Generator change.** The octave draw and the class bag stay. When the next draw would break `min_jump_semitones`, the generator redraws the octave first, then the class, within a bounded number of tries, and records `constraint_relaxed: true` if it had to give up. Class weights replace the uniform bag with weighted sampling without replacement per cycle, so streaks stay bounded.
+**Generator.**
 
-**Why this replaces "Other".**
+- When a draw would break `min_jump_semitones`, the generator redraws the octave, then the class. After a bounded number of tries it records `constraint_relaxed: true`.
+- Class weights use weighted sampling without replacement per cycle, so streaks stay short.
+- Out-of-set notes are drawn from the classes outside the subset, preferring octaves at the range's extremes.
 
-- The subset-anchoring loophole works when a small set of notes sits in a narrow range: the highest note heard is "the G".
-- With three or more octaves and 13-semitone jumps, a class's height is uninformative: the same class appears near both ends of the range.
-- `pitch_detect` streams (§4.1) always draw distractors from all twelve classes, so subset learners still hear and reject the other notes, but are never asked to name them.
+**"Other" in feedback.** After answering, clicking **Other** plays the out-of-set note that was heard, if that trial had one. Scoring: Other is correct for an out-of-set note and wrong otherwise. Out-of-set trials don't count toward any class's mastery.
 
 ### 3.2 Memory scrubber: the Shepard–Risset glissando
 
-- **New mask:** `Mask::ShepardGlissando { seconds: 20, direction: down, rate_s_per_octave: 8 }`. It is a continuously gliding Shepard tone: octave-spaced partials under a fixed Gaussian log-frequency envelope, with the phase offset gliding so it descends endlessly. The renderer already has static Shepard tones (`render.rs::shepard_note`); this adds a gliding version.
-- **Block-level `pre_mask`.** Any block can start with a mask. Verification, weekly and UCSF-style presets start with the 20-second glissando.
-- **Automatic scrubbing rules (block option `scrub_after_reference`):**
-  - When a labelled reference was heard less than N minutes before an unassisted block, the block starts with the glissando, whether or not the coach asked for it.
-  - The runner tracks this from the exposure log.
-- Masks between trials stay as they are (`random_tones` by default when feedback reveals answers). The glissando is too long for every trial and is meant for block boundaries.
+- **New mask** `ShepardGlissando { seconds: 20, direction: down, s_per_octave: 8 }`. It is a gliding Shepard tone: octave-spaced partials under a fixed Gaussian log-frequency envelope, gliding endlessly downward. Static Shepard tones already exist in `render.rs`.
+- **Block `pre_mask`.** Verification, weekly, UCSF-style and maintenance blocks start with the glissando.
+- **Scrub rule.** When a labelled sound was heard less than N minutes (default 5) before a block without feedback, the block starts with the glissando automatically. The daily set (§6.2) places tests first anyway.
 
-### 3.3 Custom labels: names, colours, words
+### 3.3 Labels and colours
 
-- **A label set** is a map from pitch class to `{name?, color?, word?}`, for example:
-  - Gervain's names (Sarah, David, Francine, ...);
-  - Eguchi colours;
-  - the user's own words for each note ("bold", "mellow").
-- **Storage.** Label sets are stored in settings, so the coach can set them over MCP (`set_label_set`). A block refers to one by id; `default` means note names.
-- **Display.** Answer buttons show the label and colour, and feedback shows the label (plus the note name unless `hide_note_names`).
-- **Where they apply:** `pitch_id`, `pitch_detect` (the target prompt), `pitch_pairing`, `incidental_pairing` (which already has a class-to-colour map; it moves onto label sets), and `chord_color_id` (per-chord labels).
-- **Tracking.** Labels change only the display: trials still record the pitch class, so stats are comparable across label sets. The trial also records `label_set` so the coach can compare.
+- **A label set maps each pitch class to `{name?, color?, word?, speech?}`.** `speech` is a file in the speech folder (§3.7).
+- **Shipped sets:**
+  - `note_names` (default);
+  - `taneda_colors`: seven white keys, red, blue, yellow, orange, brown, grey, green for C–B; black keys added as the course extends them;
+  - `gervain_names`: Sarah, David, Francine, Jimmy, Karen, Leo for the six whole-tone classes; six more names for the other whole-tone set;
+  - `my_colors`: empty for you to fill (Burge-style pitch colours, your own words).
+- **The coach and you can edit sets** in Settings and over MCP (`set_label_set`).
+- **Display:**
+  - answer buttons show the label, colour and word;
+  - with `color_flash`, the screen tints in the played note's colour after you answer, or during passive pairing;
+  - `hide_note_names` hides letter names entirely.
+- **Data.** Trials always store the pitch class, so every label set feeds the same mastery numbers. The set's id is stored too.
+- **Chord colours** (§4.2) use the same mechanism, with per-chord labels.
 
-### 3.4 Errorless feedback mode (Taneda)
+### 3.4 Errorless feedback
 
-- New `FeedbackMode::Errorless`:
-  - a wrong answer shows no error mark, red colour or sound;
-  - the correct answer is shown neutrally (its label and colour light up), and you can hear it, as now;
-  - with `requeue_misses`, the class returns later in the block.
-- **Grading and storage are unchanged.** The trial is still recorded as wrong, so progress stays honest. Only the screen avoids the error signal.
-- Block summaries in this mode show "found" counts and per-class progress rather than "wrong".
+- **`FeedbackMode::Errorless`:**
+  - a wrong answer gets no error mark, red or "wrong" sound;
+  - the right answer lights up in its colour, you hear it, and with `requeue_misses` it comes back later in the block.
+- **Grading and storage are unchanged**, so progress stays honest.
+- **Where it applies.** It can be chosen on any identification block. It is the default for the first levels of the colour, chord-colour and contrast courses. Later levels switch to normal feedback, so you learn exactly which notes you confuse. Tests show no results in either mode.
+- **Override.** A Settings switch, "Errorless early levels", turns those defaults off if you prefer normal feedback everywhere.
 
 ### 3.5 Time-limited mastery
 
-- Identification trials gain `in_time` (answered within `deadline_ms` or the stream's response window).
-- **Mastery and gate reports count only correct, in-time, unassisted answers.** A slow correct answer is recorded as such, because the research's criterion is ≥ 90% within about 2 s.
+Identification and detection trials record `in_time`. Mastery counts correct, in-time, unassisted answers. Slow correct answers are kept and shown separately.
 
-### 3.6 Anchors with audio clips (mental jukebox)
+### 3.6 Anchors and anchor clips
 
-- Anchors (`anchor_song`) gain an optional `clip`:
+- **Anchors** (`anchor_song`, which exists) gain an optional `clip`:
 
   ```json
-  {"file": "...", "start_s": 0.0, "dur_ms": 300, "pitch_class": "A", "midi": 69}
+  {"file": "...", "start_s": 0.0, "dur_ms": 300, "midi": 69}
   ```
 
-  It is a 200–400 ms slice of the original recording around the anchor note. The file sits in the anchors folder; the app plays the slice with a short fade.
+  The clip is a short slice of the original recording around the anchor note, played with fades.
 - **Uses:**
-  - **reference playback** ("hear your anchor for A"), logged as labelled exposure;
-  - **"Sing the anchor note"**, which already exists as mode A;
-  - the **hot/cold scan**: `pitch_detect` with the anchor as target (§4.1).
-- A twelve-anchor "jukebox" is just twelve anchors, one per class. `get_anchors` reports which classes have one.
-- Once song packages exist, "make anchor from song" picks a vocal note and writes the clip and pitch automatically. Until then you choose the file and time.
+  - a **reference** ("hear your A anchor"), logged as labelled exposure;
+  - **sing the anchor note** (exists, mode A), now also with the lock-on tuner after a miss;
+  - **the hot/cold scan**: `pitch_detect` with the anchor as target (§4.1);
+  - the **anchor route to a note**: hear a note, recall the anchor whose note matches, then answer. This is `pitch_id` with the anchor list shown as a hint panel.
+- **A jukebox** is a set of twelve anchors, one per class. The anchors page shows coverage.
+- **Clips from songs.** Once song packages exist, "make anchor from song" picks a vocal note and writes the clip. Until then you choose the file and time.
+
+### 3.7 Speech samples folder
+
+- **Location and format.** `%APPDATA%\SingingTrainer\speech\`, with files named by what they say:
+
+  ```
+  speech/digits/0.wav … 9.wav
+  speech/letters/A.wav … Z.wav
+  speech/notes/C.wav, C#.wav, Db.wav, …   (note names, both spellings optional)
+  speech/labels/<set-id>/<label>.wav      (e.g. labels/gervain_names/Sarah.wav)
+  speech/prompts/<id>.wav                 (optional phrases such as "sing", "now")
+  ```
+
+  WAV, FLAC or MP3 at any sample rate. The app resamples, trims leading and trailing silence, and normalises loudness on load.
+- **Generation.** Breeze TTS (or any recorder) produces them. A script in `tools/` writes the file list to generate, so nothing is missed.
+- **Uses:**
+  - spoken digit span and letter n-back (§4.4);
+  - spoken labels in `pitch_pairing` and incidental pairing;
+  - the target name in `pitch_detect` prompts;
+  - Gervain-name sets;
+  - spoken prompts for future hands-free mode.
+- **Missing files** disable only the features that need them, and the Settings page lists what's missing.
 
 ---
 
 ## 4. New exercise kinds
 
-### 4.1 `pitch_detect`: go/no-go target detection
+### 4.1 `pitch_detect`: fast detection (Simple Speed, Cuddy, hot/cold)
 
-**Covers:** Van Hedger's Simple Speed, Cuddy's single-reference training, and the hot/cold memorised-piece scan.
+- **One trial is one stream.**
+  1. The target is shown (label, colour) for 1500 ms while the target note is sung (GM choir "aahs"), optionally with its spoken name.
+  2. Then 16 tones follow, at least `min_jump_semitones` apart, across the block's octaves and timbres. 25% are the target class, in varying octaves; the rest are drawn from all other classes.
+  3. Press **Space** (or tap the pad) on the target. Each tone's response window is 1750 ms; the next tone follows.
+- **Targets:**
+  - a pitch class, the default, rotating through the active classes;
+  - a fixed note (Cuddy: A4);
+  - an anchor, where the prompt is the anchor's clip or just its name (hot/cold scan).
+- **Results per stream:** hits, misses, false alarms, correct rejections, **d′** (log-linear corrected) and median hit latency. Targets more than an octave from the prompt are reported separately.
+- **Feedback options:** none, a mark after each response, or a summary after the stream, with missed targets replayable.
 
-- **Trial = one stream.**
-  1. The target is shown (label, colour) for `prompt_ms` (default 1500), with a sung rendition of the target note. The default prompt timbre is GM choir "aahs"; once own-voice samples exist, the user's own voice.
-  2. Then `stream_len` tones (default 16), each at least `min_jump_semitones` from the last, across the block's octaves and timbres. A share `target_rate` (default 0.25) are the target class, in varying octaves; the rest are drawn from all other classes.
-  3. You press **Space** (or click the pad) when you hear the target. The response window for each tone is `response_window_ms` (default 1750), and the next tone follows at the end of the window.
-- **Target sources:**
-  - a pitch class, the default;
-  - a fixed note (Cuddy: A4 only);
-  - an anchor, where the prompt is the anchor's clip or its name only and the target is its pitch class (hot/cold scan).
-- **Grading:**
-  - for each tone, hit, miss, false alarm or correct rejection, with latency for hits;
-  - per stream: hit rate, false-alarm rate, **d′** (log-linear corrected) and median hit latency;
-  - a stream "passes" at the block's `pass_mark` on d′ or on accuracy.
-- **Feedback options:** none, a mark after each response, or a summary after the stream. The answer for missed targets can be revealed after the stream (a labelled exposure).
-- **Stats:** d′ and latency by target class, by timbre and by octave distance from the prompt. The prompt's octave is recorded, so "targets more than an octave from the prompt" can be reported separately, as the research does.
+### 4.2 `chord_color_id`: chord colours (Eguchi)
 
-### 4.2 `chord_color_id`: chord identification method (Eguchi)
+- **Exact voicings with colour labels.** The 14-chord sequence:
+  - White phase: Red C E G, Yellow C F A, Blue B D G, Black A C F, Green D G B, Orange E G C, Purple F A C, Pink G B D, Brown G C E;
+  - Black phase: Gray A C♯ E, Tan D F♯ A, Light green E G♯ B, Light purple B♭ D F, Sky blue E♭ G B♭.
 
-- **Chords are exact voicings,** not chord qualities, e.g. Red = C4 E4 G4, Orange = E4 G4 C5 (the inversion has a different colour on purpose). A preset holds the 14-chord sequence from R§3:
-  - White phase: Red CEG, Yellow CFA, Blue BDG, Black ACF, Green DGB, Orange EGC, Purple FAC, Pink GBD, Brown GCE;
-  - Black phase: Gray AC♯E, Tan DF♯A, Light green EG♯B, Light purple B♭DF, Sky blue E♭GB♭.
-- **Params:**
-  - `chords`, the active set with labels, colours and voicings;
-  - `timbre`, default piano;
-  - `register_shift`, default none: CIM keeps fixed voicings, and an option allows octave moves later;
-  - `answer`: colour buttons, or note-name chords in the black phase.
-- **Single-note extraction.** Option `single_note_after`: after each chord answer, one note from the chord (or, in the research's "white chords only on black levels" option, a note from a white chord) plays alone and is named by colour or note. It is recorded as a separate `pitch_id` trial with `context: chord_extraction`. In the final phase the kind hands over to ordinary `pitch_id`.
-- **Sessions are short.** The preset is 20–25 identifications (2–3 minutes), meant to be repeated several times a day; the course page shows sessions done today.
-- **Gates** (computed, §5.1):
-  - 100% on all active chords;
-  - at least 14 days since the last chord was added.
+  Inversions get different colours on purpose. Voicings stay in a fixed register by default; `register_shift` allows octave moves later.
+- **Answers** are colour buttons; in the black phase, colour or chord names.
+- **Single-note extraction** (`single_note_after`): after a chord answer, one of its notes, or a white-chord note, plays alone and is named by colour or note. It is stored as a `pitch_id` trial (`context: chord_extraction`), so it counts toward class mastery.
+- **Short sessions:** 20–25 identifications (2–3 min), meant to recur through the day. The daily set includes one, and the course page offers more.
+- **Pass rule:** 100% on all active chords, and ≥ 14 days since the last chord was added. Shown as "next chord due <date>".
 
-  The course page shows "next chord available on <date>".
+### 4.3 `sing_chord_tones`: inside the chord (Beato)
 
-### 4.3 `sing_chord_tones`: hearing inside the chord (Beato)
-
-- A chord or cluster plays: 3–6 notes, from a voicing list or generated (triads, sevenths, jazz voicings, clusters). Then you sing the notes **bottom to top**, unaccompanied.
+- A chord or cluster of 3–6 notes plays (triads, sevenths, jazz voicings, clusters), then you sing its notes **bottom to top**.
 - **Variants:**
-  - `all_tones`: sing every note;
-  - `missing_tone`: a triad with the third or fifth left out plays, and you sing the missing note;
-  - `name_after`: after singing, name the pitch classes, using the `pitch_id` answer pad with several selections.
-- **Grading:**
-  - sung notes are segmented and aligned in order (untimed: the existing alignment with onset cost off);
-  - each note is graded within ±25 cents of its target in `any_octave` mode, or `absolute` if the block asks;
-  - naming is graded per class.
-- No reference tone is given before singing; the chord is the only stimulus. When the chord's pitches are known by name (a labelled exposure), the next unassisted block's scrubber rule (§3.2) applies.
+  - `missing_tone`: sing the left-out third or fifth;
+  - `name_after`: name the classes on the pad with several selections.
+- **Grading:** sung notes are aligned in order, untimed, each within ±25 cents of its target (any octave by default); naming is graded per class.
 
-### 4.4 Screening battery
+### 4.4 Screening and working memory
 
-These are short tasks whose results form an **aptitude profile** (§5.6), which the coach uses to choose a route (§7). They are assessments: no feedback, holdout settings and a scrubber first.
+These are assessments without feedback. They are repeated occasionally (the screening course schedules one a month) and form the aptitude profile.
 
 - **`pitch_memory_match` (implicit note memory, Van Hedger):**
-  - Grid: 27 sine tones from 471.58 Hz to 547.99 Hz (A♯4 + 20 cents to C♯5 − 20 cents), about 10 cents per step.
-  - A target from the 10 odd steps 5–23 plays (1 s), then a mask (default 2 s noise), then you recreate it, starting from step 1, 3, 25 or 27.
-  - Inner arrows (or ←/→) move one step, outer arrows (Shift+←/→) two steps, and each move plays the current tone. Enter submits.
-  - Graded by absolute error in steps and cents. The research's benchmark is a mean of 2.75 steps (≈ 27.5 cents) or better for later successful adult learners, versus 2.44 for lifelong possessors.
-- **`tone_n_back`:**
-  - a stream of tones (or spoken letters if speech samples are added) where you press when the current item matches the one n back (2-back, 3-back);
-  - graded by d′.
-  - Research figures for successful learners: 4.05 (2-back) and 3.52 (3-back), against 3.37 and 2.27 for students.
+  - 27 sine tones from 471.58 to 547.99 Hz (A♯4 + 20 cents to C♯5 − 20 cents), about 10 cents per step;
+  - a target from the odd steps 5–23 plays, then a 2 s mask, then you recreate it from step 1, 3, 25 or 27;
+  - arrows move 1 step, Shift+arrows 2 steps, and each move plays the tone;
+  - error in steps and cents. The research's benchmark is ≤ 2.75 steps for later successful learners.
+- **`n_back`:**
+  - tones or spoken letters (speech folder), 2-back and 3-back;
+  - press on a match; scored by d′;
+  - research figures for successful learners: 4.05 and 3.52.
 - **`span`:**
-  - hear a sequence, then repeat it, adaptively lengthened (two errors at a length ends the task);
-  - spoken digits need recorded digit samples (decision §9);
-  - a **tone-sequence span** (sing or play back on the pad) works without them.
-  - Research figures: 8.83 digits for successful learners, 8.1 for non-AP musicians, 10.0 for lifelong possessors.
+  - spoken digits (speech folder) or tone sequences;
+  - type the digits, or replay the tones on the pad;
+  - the length grows until two errors at one length;
+  - research figure for successful learners: 8.83 digits.
+
+### 4.5 Production and the feel of a note
+
+`sing_pitch` and the lock-on tuner exist. These are additions built on them.
+
+- **Anchor auralisation check (Brady).**
+  - At the start of an AP session, you sing your anchor note (C by default, or any chosen class) from memory before hearing anything.
+  - It is graded by cents from the nearest octave of the target.
+  - Tracked over time as **"internal anchor accuracy"**: how far your mental C is from a real C, day to day.
+- **Sing by colour or name:** `sing_pitch` prompted by a label (a colour swatch, "Sarah", a spoken name) instead of the note name.
+- **Sing then check:**
+  - after singing, the target plays and the tuner shows your sung note against it (exists with `reveal_target_after` and the lock-on tuner);
+  - add **"hold and compare"**: sing, the target fades in under your voice, and the tuner shows the gap.
+- **Sing your anchor:** sing an anchor's note (exists), now part of the anchors course.
+- **Production in the mastery picture.** Production trials count toward each class's mastery under a production column, so a class is "known" when it is both named and sung reliably.
+
+### 4.6 Colour discovery (Taneda)
+
+This is a preset course, not a new kind. It uses `pitch_id` with the `taneda_colors` set, starting from two or three white keys in a fixed register. It runs in errorless mode with `requeue_misses` and `color_flash`, and adds a key at each level. Later levels spread octaves and switch to normal feedback.
 
 ---
 
-## 5. Tracking and reports
+## 5. Tracking
 
-### 5.1 Per-class mastery and gates
+### 5.1 The combined AP dashboard
 
-- **`get_class_mastery`** (MCP and the AP page): for each pitch class, recent correct-in-time accuracy (§3.5) on unassisted trials, split by:
-  - training vs holdout;
-  - octave band;
-  - timbre group.
+- **Per pitch class:**
+  - identification mastery (correct in time, unassisted, last N trials, across all methods);
+  - production mastery (sung within ±50 cents of the class, any octave);
+  - detection d′;
+  - last seen.
 
-  The ≥ 90% criterion is marked per class, together with the number of classes at or above it (the research's main outcome, e.g. "7.08 classes mastered").
-- **Gates.** A gate is a named rule evaluated over stored blocks:
+  A class shows as mastered at ≥ 90% identification within the time limit.
+- **Per course:** current level, pass status, next due date or gate, and time spent this week.
+- **Headline numbers:**
+  - classes mastered;
+  - weekly test score (UCSF-style points and MAD);
+  - internal anchor accuracy;
+  - total AP practice time.
+- **Trend charts:** weekly test, classes mastered, internal anchor accuracy.
+- **MCP:** the coach reads the same picture through `get_ap_dashboard`. Per-method breakdowns stay available through `get_stats`.
 
-  | Gate | Rule |
-  |---|---|
-  | `verification_4x` (Wong) | 4 verification blocks (unassisted, no feedback, scrubbed, ≥ 3 octaves, jumps ≥ 13, deadline ≤ 2 s) at ≥ 90%, with ≥ 12 h between the 3rd and 4th |
-  | `spacing` (Eguchi) | ≥ N days since the item was introduced, and 100% on all active items |
-  | `consecutive_sessions` (current progressive stages) | ≥ 90% over two sessions |
-  | `maintenance` | a maintenance block in the last N days (twice weekly → 4 days) |
+### 5.2 Pass rules and gates
 
-  Gates attach to course items, extending the corpus plan's pass criteria with `gate`. `get_gate_status(course, item)` returns: met or not, the qualifying passes with times, and what remains (e.g. "pass 4 available after 07:40 tomorrow").
-- **Display and enforcement.** The course page shows the status and the next eligible time. Nothing is locked by the app; the coach and course page use the status. A setting can turn "lock until eligible" on for self-study without the coach.
+A course level passes on a rule evaluated over stored blocks:
 
-### 5.2 UCSF-style scoring and mean absolute deviation
+| Rule | Meaning |
+|---|---|
+| `accuracy` | ≥ X% (in time) over the last N blocks or sessions |
+| `verification_4x` (Wong) | 4 verification blocks (no feedback, scrubbed, ≥ 3 octaves, jumps ≥ 13, deadline ≤ 2 s) at ≥ 90%, with ≥ 12 h between the 3rd and 4th |
+| `spacing` (Eguchi) | 100% on all active items and ≥ N days since the last was added |
+| `detection` | d′ ≥ X over the last N streams |
+| `maintenance` | a maintenance block in the last N days |
 
-- Every identification block reports, alongside exact and ±1 accuracy (which exist):
-  - **UCSF-style points:** 1.0 for exact, 0.75 within ±1 semitone, as a total and a percentage;
-  - **MAD** in semitones, folded to the nearest octave, so 0 is perfect and 3 is chance.
-- Per-test thresholds (e.g. the UCSF "AP-1" cut-offs) are shown only as reference lines in reports, with a note that the app's test is not the UCSF test.
+`get_gate_status` gives each rule's state, the qualifying passes with times, and what is still due, e.g. "pass 4 due after 07:40 tomorrow". It is displayed, not enforced.
 
-### 5.3 Weekly generalisation trend
+### 5.3 Scoring additions
 
-- The `ap_weekly` preset (§6) is tagged `weekly_gate`. `get_ap_profile` adds a time series over those runs: accuracy, MAD and UCSF-style points, each per timbre (piano, cello, clarinet, harpsichord, square) and overall.
-- Retention: when the gap between runs is long (more than 4 weeks), the report says so.
+Every identification block reports:
 
-### 5.4 Detection reports
+- exact and ±1 accuracy (these exist);
+- **UCSF-style points:** 1.0 for exact, 0.75 within ±1, as a total and a percentage;
+- **MAD:** semitones folded to the nearest octave; 0 is perfect, 3 is chance.
 
-`pitch_detect` stats are d′, hit rate, false-alarm rate and median hit latency, each by target class, timbre, and octave distance from the prompt.
+### 5.4 Weekly and retention trends
 
-### 5.5 Drift detector
+`ap_weekly` runs are tagged, and `get_ap_dashboard` shows the series per timbre. A gap of more than 4 weeks between runs is marked as a retention measurement.
 
-- **What it computes.**
-  - From recent unassisted identification trials, the signed error distribution per class (the profile already has `signed_error_by_pitch_class`).
-  - A **uniform shift** is flagged when most classes' mean signed error moves in the same direction by about a semitone or more, consistently across timbres and over the last few sessions, compared with the user's own earlier baseline. Random forgetting spreads errors in both directions instead.
-  - Production (`sing_pitch`) is checked the same way: a uniform sharp or flat bias in sung notes across classes.
-- **What it reports:** direction, size, how many classes, since when, and whether production shows the same shift.
-- **Checks the app runs itself when a shift is flagged:**
-  - the A4 reference setting (`a4_hz`) and any change to it in the period;
-  - the output device's sample rate against the engine's render rate (a mismatch shifts everything; 44.1 vs 48 kHz is about 1.5 semitones);
-  - the SoundFont or tuning changes in the period.
-- Beyond that, the report states the shift neutrally. The skill history is not rewritten, and the coach and user decide what it means.
+### 5.5 Aptitude profile
 
-### 5.6 Aptitude profile
+`get_aptitude_profile` gives:
 
-- **`get_aptitude_profile`:**
-  - INM mean error in steps and cents, n-back d′ (2 and 3) and span;
-  - each against the research benchmarks quoted in §4.4;
-  - with the date of each run, so it can be repeated later.
-- The coach uses it for routing (§7). The app does not route.
+- implicit note memory error;
+- n-back d′;
+- span;
+- the date of each run.
+
+The research benchmarks are shown as reference lines. The coach uses it to weight the daily set, e.g. more chord colours and Brady when working memory is lower.
+
+### 5.6 Drift detector
+
+- **What it flags.** A **uniform shift**: most classes' mean signed error moving the same way by about a semitone, across timbres and recent sessions, compared with your own baseline. Production is checked the same way.
+- **Checks when a shift is flagged:**
+  - the A4 setting and any change to it;
+  - the output device's sample rate against the render rate (44.1 vs 48 kHz is ≈ 1.5 semitones);
+  - SoundFont or tuning changes.
+- **Reporting.** The shift is reported neutrally on the dashboard and to the coach. Internal anchor accuracy (§4.5) is a second, independent signal for the same thing.
 
 ---
 
-## 6. Presets and courses
+## 6. Courses and the daily set
 
-These ship as course manifests (corpus plan, Phase A) with gates. Each is a ladder of items that point at presets.
+### 6.1 Courses
 
-| Course or preset | Content | Gate |
+Courses are shipped as manifests: levels pointing at block specs, each with a pass rule. Defaults are tunable, and the coach can edit or add courses.
+
+| Course | Levels | Pass rule |
 |---|---|---|
-| `ap_screening` | INM (40 trials), tone 2-back and 3-back, span | — (assessment) |
-| `ap_progressive` (revise existing) | Current stages, now with ≥ 3 octaves, jumps ≥ 13 and a 2 s deadline at the later stages; verification block per stage | `verification_4x` for the 12-class stage; `consecutive_sessions` earlier |
-| `ap_multioctave` (Wong-style ladder) | Class subsets growing toward 12, C4–B6, piano/guitar/synth, training levels with feedback and verification levels without, scrubbed | `verification_4x` per stage. The research does not detail Wong's 288 levels; this ladder follows its rules, not its exact levels |
-| `ap_speed` (Simple Speed) | `pitch_detect`, 14 streams per session, a sung prompt, all 12 classes as targets in rotation | d′ trend; no gate |
-| `ap_brady` | `pitch_id` with all 12 classes over 3 octaves, `class_weights` C fading 0.40 → 0.30 → 0.20 → 0.12 → 1/12, stream pacing 5000 → 1400 ms; "keep C in mind" instruction | `consecutive_sessions` per step |
-| `ap_cim` | `chord_color_id`, 14 chords added one at a time, then single-note extraction, then `pitch_id` | `spacing` (14 days, 100%) |
-| `ap_contrast` (Burge/Gervain) | `pitch_id` contrasts: E♭3 vs F♯3, + A3, + the black keys; custom label set; "no humming" instruction | `consecutive_sessions` |
-| `ap_errorless` | Any of the above with `feedback: errorless` and `requeue_misses` | as the source course |
-| `ap_inner_voices` | `sing_chord_tones`: triads → sevenths → clusters; missing-tone variant | `consecutive_sessions` |
-| `ap_weekly` | 120 trials, 24 each of piano, cello, clarinet, harpsichord, square; no feedback; scrubbed first | — (assessment, tagged `weekly_gate`) |
-| `ap_ucsf_style` | 36 piano + 36 sine, no feedback, scrubbed, UCSF-style scoring | — (assessment) |
-| `ap_maintenance` | 5 minutes, mixed 12-class identification across octaves and timbres | `maintenance` |
-| `ap_assessment` (existing) | Unchanged, plus a glissando pre-mask, UCSF-style points and MAD | — |
+| `ap_naming` (replaces `ap_progressive`) | subsets of 3 → 12 classes; early levels with out-of-set Other; ≥ 3 octaves and 13-semitone jumps from the start; deadlines 4 s → 2 s; training timbres widen | `accuracy` per level; `verification_4x` for the 12-class level |
+| `ap_speed` (Simple Speed) | `pitch_detect` targets rotating through the classes; window 2500 → 1750 ms | `detection` |
+| `ap_brady` | all 12 classes over 3 octaves; C weight 0.40 → 0.30 → 0.20 → 0.12 → 1/12; stream IOI 5000 → 1400 ms; anchor auralisation check first | `accuracy` per step |
+| `ap_chord_colors` (Eguchi) | 9 white chords, then 5 black, then single-note extraction | `spacing` (14 days, 100%) |
+| `ap_note_colors` (Taneda) | §4.6 | `accuracy` |
+| `ap_contrast` (Burge/Gervain) | E♭3 vs F♯3 (fixed register), + A3, + the black keys, then spread; your colour/word set or Gervain names; "no humming" | `accuracy` |
+| `ap_inner_voices` | `sing_chord_tones`: triads → sevenths → clusters; missing tone; naming | `accuracy` |
+| `ap_production` | `sing_pitch`: by name → by colour/label → with distractor music first; hold-and-compare | `accuracy` (±50 cents) |
+| `ap_anchors` | sing each anchor; anchor reference; hot/cold scan per anchor | `accuracy` / `detection` |
+| `ap_screening` | implicit note memory, n-back (tones, letters), span (digits, tones) | — (assessment, monthly) |
+| `ap_weekly` | 120 trials: 24 each of piano, cello, clarinet, harpsichord, square; no feedback; scrubbed | — (weekly) |
+| `ap_ucsf_style` | 36 piano + 36 sine, no feedback, scrubbed | — (occasional) |
+| `ap_maintenance` | 5 min mixed 12-class naming across octaves and timbres | `maintenance` (twice weekly once `ap_naming` is complete) |
 
-Existing presets keep working. The `ap_progressive` stages gain the safeguards as new fields with the old behaviour as default, so older sessions still parse.
+### 6.2 The daily set
+
+- **A daily-set config** (Settings, and MCP `set_daily_plan`) lists the active courses with minutes per day, plus the weekly test day. Example: naming 8, speed 4, chord colours 3, Brady 5, production 4, anchors 2; weekly test on Sunday.
+- **Composing "Start today's AP set":**
+  1. a 20 s scrubber, and the anchor auralisation check if `ap_brady` or `ap_production` is active;
+  2. due tests first: the weekly test on its day, any `verification_4x` pass that has come due, and maintenance if due;
+  3. each active course's **current level** (its first level not yet passed), trimmed to its minutes. Order rotates daily so no course is always last;
+  4. extra short chord-colour sessions offered later in the day as reminders on the Practice page (no notifications).
+- **Progress view.** One dashboard (§5.1) covers the whole set. The set's session is tagged `ap_daily_set`, so the coach can see adherence.
+- **Coach.** It can read the planned set before it runs (`preview_daily_set`), change minutes, pause a course, or queue its own session instead.
 
 ---
 
 ## 7. Coach (MCP)
 
-- **New read tools:**
-  - `get_class_mastery`, `get_gate_status`, `get_aptitude_profile`;
-  - `get_detection_stats` (or `get_stats` grouping on `pitch_detect` metrics);
-  - `get_drift_report`;
-  - `get_anchors` (exists) reports clips and coverage.
-- **New write tools:**
-  - `set_label_set`;
+- **Read:**
+  - `get_ap_dashboard`, `get_gate_status`, `get_aptitude_profile`, `get_drift_report`;
+  - `preview_daily_set`;
+  - `get_anchors` (with clips and coverage);
+  - per-method detail via `get_stats`.
+- **Write:**
+  - `set_daily_plan`, `set_label_set`;
   - `save_anchor` with a clip;
-  - session specs with the new params and kinds.
-- **Server instructions gain the research's routing** as guidance, not app logic:
-  - Screen first.
-  - Near-benchmark working memory (INM ≤ 2.75 steps, 3-back d′ ≥ 3.5) → the multi-octave ladder plus Simple Speed.
-  - Otherwise → CIM or Brady first, with custom labels and the errorless mode, before the multi-octave ladder.
-  - Always scrub before unassisted checks.
-  - Use verification passes on separate days, and keep maintenance going once classes are mastered.
-  - Breathing, sleep and the other excluded topics are not the app's business.
+  - `set_course_level`, a manual override;
+  - course manifest edits;
+  - session specs with the new kinds and fields.
+- **Server instructions** carry the research's guidance:
+  - screen first;
+  - weight toward chord colours, Brady and errorless levels when working memory is lower;
+  - scrub before tests;
+  - verification passes on separate days;
+  - maintenance once classes are mastered.
 
 ---
 
 ## 8. Phases
 
-Sizes as in the corpus plan: S a few days, M one to two weeks.
+AP comes first. Sizes: S a few days, M one to two weeks.
 
-### AP-1: safeguards and tracking (M)
+### AP-1: foundations, naming and the daily set (M)
 
-- `min_jump_semitones`, `class_weights`, `pacing: stream`, `in_time` (§3.1, §3.5).
-- Shepard–Risset glissando mask, block `pre_mask` and the scrub rule (§3.2).
-- UCSF-style points and MAD, the weekly trend, class mastery and gate evaluation (§5.1–§5.3).
-- Drift detector (§5.5).
-- Presets: revised `ap_progressive`, `ap_multioctave`, `ap_brady`, `ap_weekly`, `ap_ucsf_style`, `ap_maintenance`.
+- Course manifests with levels, pass rules, gates and the due display. This is the minimal part of the corpus plan's courses work, pulled forward.
+- Sequencing fields: jumps, restored out-of-set Other, class weights, stream pacing, fixed register, `in_time` (§3.1, §3.5).
+- Glissando scrubber and the scrub rule (§3.2).
+- UCSF-style points and MAD (§5.3).
+- The combined dashboard (§5.1).
+- The daily set (§6.2).
+- Courses: `ap_naming`, `ap_brady`, `ap_weekly`, `ap_ucsf_style`, `ap_maintenance`.
 
 **Exit:**
 
-- a verification block never has two consecutive tones within 12 semitones;
-- the glissando plays before it;
-- `get_gate_status` reports passes and the overnight rule correctly on fixture data;
-- a synthetic uniform +1 shift is flagged and a random error pattern is not.
+- "Start today's AP set" runs naming and Brady levels after a scrubber;
+- the dashboard shows classes mastered and course levels;
+- `verification_4x` due times show correctly;
+- no two consecutive tones in a verification block are within 12 semitones.
 
-### AP-2: labels, errorless mode, detection (M)
+### AP-2: colours, labels, detection (M)
 
-- Custom label sets and `ap_contrast` (§3.3).
-- Errorless feedback and `requeue_misses` (§3.4).
-- `pitch_detect` with class, note and anchor targets; `ap_speed` (§4.1).
+- Label and colour sets with `color_flash` (§3.3).
+- Errorless mode and requeue (§3.4).
+- The speech folder (§3.7).
+- `pitch_detect` (§4.1).
+- `chord_color_id` with single-note extraction (§4.2).
+- Courses: `ap_speed`, `ap_chord_colors`, `ap_note_colors`, `ap_contrast`.
 
-**Exit:** a Simple Speed session runs with sung prompts and reports d′ and latency; an errorless block shows no error marks while storing correct results.
+**Exit:**
 
-### AP-3: chords, inner voices, screening (M)
+- a Simple Speed stream reports d′ and latency;
+- the chord-colour course shows its next-chord date;
+- errorless levels store true results with no error marks.
 
-- `chord_color_id` with the 14-chord course and single-note extraction (§4.2).
+### AP-3: production, inner voices, screening (M)
+
+- Anchor auralisation check, sing by label, hold-and-compare (§4.5).
 - `sing_chord_tones` (§4.3).
-- `pitch_memory_match`, `tone_n_back`, tone span and the aptitude profile (§4.4, §5.6).
+- `pitch_memory_match`, `n_back`, `span` with spoken digits and letters (§4.4).
+- Aptitude profile (§5.5) and drift detector (§5.6).
+- Courses: `ap_production`, `ap_inner_voices`, `ap_screening`.
 
-**Exit:**
+### AP-4: anchors (S)
 
-- the CIM course runs with colour buttons and shows its 14-day gate;
-- an inner-voice trial grades each sung tone;
-- the screening battery produces a profile with benchmark comparisons.
+- Anchor clips, jukebox coverage, the hot/cold scan and the anchor hint panel (§3.6). This is the `ap_anchors` course.
+- Clips from songs come with the deferred songs work.
 
-### AP-4: anchor clips (S)
-
-- Anchor clips from audio files, the jukebox coverage report, and the hot/cold scan (§3.6).
-- Automatic clips from song packages come with the deferred songs work.
-
-### Where these fit with the other plan
-
-- AP-1 needs the course manifests and gates from the corpus plan's Phase A, so they belong together: Phase A adds course gates and AP-1 uses them.
-- AP-2 and AP-3 can follow Phase A and run alongside the notation work (Phase B); they share nothing with it.
+After AP: the remaining courses and warm-ups work, then notation, then the rest of the courses (`song_and_corpus_app_plan.md`). Songs are deferred.
 
 ---
 
-## 9. Decisions needed
+## 9. Decisions
 
-1. **Order:** AP-1 alongside courses Phase A, and AP-2/AP-3 before or after the notation work (Phase B)?
-2. **Gate enforcement:** show only (the coach decides), or offer "lock until eligible" for self-study?
-3. **Span task:** tone-sequence span only, or also spoken digits, which need recorded digit and letter samples bundled with the app?
-4. **Prompt voice for `pitch_detect`:** GM choir "aahs" for now; record your own voice for the twelve classes later (the `own_voice` timbre is in the plan but not built)?
-5. **Errorless mode scope:** only for the early stages and CIM, or available on every identification block?
+**Resolved 24 October 2026:**
+
+- AP first.
+- Gates shown, not enforced.
+- Spoken digits and letters from locally generated files.
+- Choir prompt for detection.
+- Out-of-set Other restored for subset training.
+- Combined tracking.
+- Errorless available everywhere, default on early colour, chord and contrast levels.
+
+**Open (defaults assumed until changed):**
+
+1. Daily set length: about 30 minutes by default, with the per-course minutes in §6.2.
+2. Weekly test day: Sunday.
+3. Brady anchor class: C.
 
 ---
 
 ## 10. Tests to automate
 
-- **Sequencing:** 10,000 generated trials at three octaves with a 13-semitone minimum never violate it, or record `constraint_relaxed`; class weights match their targets within 2% over 10,000 draws.
-- **Glissando:** the rendered scrubber is continuous (no clicks at buffer joins) and descends for its whole length; no partial goes above or below the envelope's audible bounds.
-- **Detection:** d′ matches hand-computed values on fixture responses, including the all-hits and no-false-alarm cases (log-linear correction).
-- **INM:** step and cent errors match fixtures; start positions are always outside the target range.
-- **Gates:** fixture histories pass and fail `verification_4x`, `spacing` and `maintenance` exactly at the boundaries (11 h 59 m vs 12 h).
-- **Scoring:** UCSF-style points and folded MAD match fixtures; MAD of uniformly random answers is ≈ 3.
-- **Drift:** a synthetic uniform +1 semitone shift across all classes is flagged; the same number of errors in random directions is not; an `a4_hz` change in the period is reported.
-- **Errorless:** trials are stored with the true result while the feedback view has no error state.
+- **Sequencing:** 10,000 generated trials at three octaves with a 13-semitone minimum never violate it, or record `constraint_relaxed`. Class weights land within 2% of their targets. The out-of-set rate lands within 2% of its target, and those notes are outside the subset.
+- **Glissando:** continuous across buffer joins and descending for its whole length.
+- **Detection:** d′ matches hand-computed values, including the all-hits and no-false-alarm cases.
+- **Screening:** implicit note memory step and cent errors match fixtures, with starts always outside the target range; span stops after two errors at a length.
+- **Gates:** fixture histories pass and fail each rule exactly at the boundaries (11 h 59 m vs 12 h; 13 vs 14 days).
+- **Daily set:** given fixture progress, the composed set contains the right levels, puts due tests first, respects minutes, and rotates order.
+- **Scoring:** UCSF-style points and folded MAD match fixtures; random answers give MAD ≈ 3.
+- **Drift:** a synthetic uniform +1 shift is flagged; random errors are not; an A4 change is reported.
+- **Errorless:** stored results are true while the feedback view has no error state.
+- **Speech folder:** missing files are listed, and the features that need them are disabled, not broken.
