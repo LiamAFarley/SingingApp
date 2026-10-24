@@ -34,6 +34,9 @@ const presets: PresetView[] = [
   p("ear_intervals_in_key", "Intervals in a key", "Ear training", "Diatonic intervals in C major after a cadence, both notes from the scale.", 30, 5.0, ["Melodic intervals in C major"]),
   p("ear_interval_comparison", "Interval comparison", "Ear training", "Two intervals in a row: say which is larger, or that they are the same.", 30, 3.5, ["Which interval is larger?"]),
   p("ear_chords", "Chords: triads and inversions", "Ear training", "Triads, inversions and seventh chords.", 60, 6.8, ["Triads", "Major and minor inversions", "Seventh chords"]),
+  p("harmony_01", "Harmony: a third below", "Singing", "Sing a third below the melody: three times hearing your part, then six times by ear.", 9, 4.2, ["Practice: your part plays along", "By ear"]),
+  p("harmony_05", "Harmony: a fifth below", "Singing", "Sing a fifth below the melody: three times hearing your part, then six times by ear.", 9, 4.2, ["Practice: your part plays along", "By ear"]),
+  p("harmony_08", "Harmony: a fourth above", "Singing", "Sing a fourth above the melody: three times hearing your part, then six times by ear.", 9, 4.2, ["Practice: your part plays along", "By ear"]),
   p("sing_pitch_matching", "Pitch matching and sustain", "Singing", "Hear a note and sing it back, then hold notes steadily.", 19, 3.1, ["Match the note", "Hold steadily"]),
   p("sing_scales", "Scales: listen and repeat", "Singing", "Listen to a scale, then sing it back in time.", 8, 4.9, ["Major scale", "Natural minor scale"]),
   p("sing_warmup", "Warm-up patterns", "Singing", "Five-note scales and arpeggios, moving up a semitone at a time.", 14, 5.6, ["Five-note scale, sing along", "Major arpeggio, echo"]),
@@ -533,13 +536,15 @@ function harmonyLane(): LaneSpec {
 
 function harmonyTrial(): TrialView {
   const trial = sungTrial();
-  lane = harmonyLane();
-  laneStart = clock() + 0.2 - (scenario === "harmony" ? lane.sing_start_s + 5 * lane.beat_s : 0);
+  const practice = scenario === "harmony-practice";
+  lane = { ...harmonyLane(), targets_hidden: !practice };
+  laneStart = clock() + 0.2 - (scenario === "harmony" || practice ? lane.sing_start_s + 5 * lane.beat_s : 0);
   return {
     ...trial,
     kind: "harmony",
     prompt: "Sing a third below the melody",
     lane,
+    assisted: practice,
     show_live_pitch: true,
     timeline_start_s: laneStart,
     response_start_s: laneStart + lane.sing_start_s,
@@ -636,8 +641,8 @@ const report: SessionReport = {
   accuracy: 0.86,
   duration_s: 541,
   blocks: [
-    { index: 0, title: "Name the note", kind: "pitch_id", trials: 60, graded: 60, correct: 53, accuracy: 0.883, mean_score: 0.883, median_rt_ms: 1240, median_abs_cents: null, pass_mark: 0.9, passed: false, feedback: "after_trial", assessment: false },
-    { index: 1, title: "Sing the note", kind: "sing_pitch", trials: 12, graded: 12, correct: 9, accuracy: 0.75, mean_score: 0.75, median_rt_ms: 820, median_abs_cents: 23, pass_mark: null, passed: null, feedback: "after_trial", assessment: false },
+    { index: 0, title: "Name the note", kind: "pitch_id", trials: 60, assisted: 0, graded: 60, correct: 53, accuracy: 0.883, mean_score: 0.883, median_rt_ms: 1240, median_abs_cents: null, pass_mark: 0.9, passed: false, feedback: "after_trial", assessment: false },
+    { index: 1, title: "Sing the note", kind: "sing_pitch", trials: 12, assisted: 2, graded: 12, correct: 9, accuracy: 0.75, mean_score: 0.75, median_rt_ms: 820, median_abs_cents: 23, pass_mark: null, passed: null, feedback: "after_trial", assessment: false },
   ],
   trials: Array.from({ length: 72 }, (_, i) => {
     const sung = i >= 60;
@@ -671,10 +676,11 @@ function startScenario() {
     const trial = sungTrial();
     emit({ phase: "recording", session_id: "demo", title: "Scales: listen and repeat", block_count: 2, block_title: "Major scale", block_kind: "pattern", trial_index: 1, trial_count: 4, done_in_block: 1, correct_in_block: 1, feedback_mode: "continuous", trial });
     if (scenario === "sung-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
-  } else if (scenario === "harmony" || scenario === "harmony-feedback") {
+  } else if (scenario === "harmony" || scenario === "harmony-feedback" || scenario === "harmony-practice") {
     kind = "sung";
     const trial = harmonyTrial();
-    emit({ phase: "recording", session_id: "demo", title: "Harmony: thirds below", block_count: 1, block_title: "Parallel thirds by ear", block_kind: "harmony", trial_index: 2, trial_count: 6, done_in_block: 2, correct_in_block: 1, feedback_mode: "continuous", trial });
+    const practice = scenario === "harmony-practice";
+    emit({ phase: "recording", session_id: "demo", title: "Harmony: a third below", block_index: practice ? 0 : 1, block_count: 2, block_title: practice ? "Practice: your part plays along" : "By ear", block_kind: "harmony", trial_index: 1, trial_count: practice ? 3 : 6, done_in_block: practice ? 0 : 2, correct_in_block: practice ? 0 : 1, feedback_mode: "continuous", trial });
     if (scenario === "harmony-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
   } else if (scenario === "sing-pitch") {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });

@@ -1990,29 +1990,39 @@ fn diatonic_shift(key: &KeySig, p: Pitch, steps: i32) -> Pitch {
     Pitch::new(q.step, key.signature_alter(q.step), q.octave)
 }
 
-/// A generated melody and its parallel voice, as (sung, played).
-fn parallel_voices(
-    pp: &ParallelHarmony,
-    tempo_bpm: f32,
-    rng: &mut Rng,
-    ctx: &GenContext,
-) -> Result<(Score, Score), GenError> {
-    let melody =
-        generate_melody(&pp.melody, ctx.comfortable, tempo_bpm, rng).map_err(|e| GenError(format!("melody: {e}")))?;
+/// The note a perfect fourth above or below `p`, on the letter three steps away (B♭ above F,
+/// F♯ below B).
+fn perfect_fourth(p: Pitch, up: bool) -> Pitch {
+    let q = Pitch::from_diatonic(p.diatonic() + if up { 3 } else { -3 }, 0);
+    let target = p.midi() + if up { 5 } else { -5 };
+    Pitch::new(q.step, (target - q.midi()) as i8, q.octave)
+}
+
+/// A melody and the voice that follows it a diatonic interval away, as (sung, played).
+fn parallel_voices(melody: Score, pp: &ParallelHarmony, ctx: &GenContext) -> (Score, Score) {
     let steps = pp.voice.steps();
+    let key = melody.key.clone();
+    let tonic_step = key.degree(0, 4).step;
+    let ends_on_tonic = melody
+        .pitched()
+        .last()
+        .is_some_and(|(_, p)| (p.midi() - key.tonic_pc()).rem_euclid(12) == 0);
     let mut voice = melody.clone();
-    let tonic_step = melody.key.degree(0, 4).step;
     let last = voice.notes.iter().rposition(|n| n.pitch.is_some());
     for (i, n) in voice.notes.iter_mut().enumerate() {
         let Some(p) = n.pitch else { continue };
-        let mut h = diatonic_shift(&melody.key, p, steps);
-        // End on the tonic triad: a final note outside it moves a step to one inside it.
-        if Some(i) == last {
+        let mut h = diatonic_shift(&key, p, steps);
+        // Over a closing tonic the voice ends on the tonic triad: a note outside it moves a step.
+        if ends_on_tonic && Some(i) == last {
             let in_triad = |d: i32| [0, 2, 4].contains(&d.rem_euclid(7));
             let degree = h.step as i32 - tonic_step as i32;
             if !in_triad(degree) {
-                h = diatonic_shift(&melody.key, h, if in_triad(degree - 1) { -1 } else { 1 });
+                h = diatonic_shift(&key, h, if in_triad(degree - 1) { -1 } else { 1 });
             }
+        }
+        // A tritone against the melody (fa against ti) becomes a perfect fourth.
+        if pp.avoid_tritone && (h.midi() - p.midi()).rem_euclid(12) == 6 {
+            h = perfect_fourth(p, steps > 0);
         }
         n.pitch = Some(h);
     }
@@ -2034,16 +2044,7 @@ fn parallel_voices(
             sung.clef = ClefChoice::Auto.resolve(lo, hi);
         }
     }
-    Ok((sung, played))
-}
-
-fn voice_name(v: HarmonyVoice) -> &'static str {
-    match v {
-        HarmonyVoice::ThirdBelow => "a third below",
-        HarmonyVoice::ThirdAbove => "a third above",
-        HarmonyVoice::SixthBelow => "a sixth below",
-        HarmonyVoice::SixthAbove => "a sixth above",
-    }
+    (sung, played)
 }
 
 fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> Result<Vec<TrialSpec>, GenError> {
@@ -2051,9 +2052,13 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
     if !(30.0..=220.0).contains(&p.tempo_bpm) {
         return err("tempo_bpm must be 30–220");
     }
-    // Library pieces in block order: (piece, part sung).
-    let pieces: Vec<(&LibraryPiece, usize)> = match &p.source {
-        HarmonySource::Parallel(_) => Vec::new(),
+    // Melodies for parallel harmony; library pieces in block order with the part sung.
+    enum Voices<'a> {
+        Parallel(&'a ParallelHarmony, Melodies<'a>),
+        Library(&'a LibrarySelect, Vec<(&'a LibraryPiece, usize)>),
+    }
+    let voices = match &p.source {
+        HarmonySource::Parallel(pp) => Voices::Parallel(pp, Melodies::new(&pp.melody, ctx, rng)?),
         HarmonySource::Library(sel) => {
             let mut v: Vec<(&LibraryPiece, usize)> = library::select(&ctx.library, sel, 2)
                 .map_err(|e| GenError(format!("source.library: {e}")))?
@@ -2063,22 +2068,26 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
             if sel.shuffle {
                 rng.shuffle(&mut v);
             }
-            v
+            Voices::Library(sel, v)
         }
     };
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let (sung, played, prompt, extra) = match &p.source {
-            HarmonySource::Parallel(pp) => {
-                let (sung, played) = parallel_voices(pp, p.tempo_bpm, rng, ctx)?;
+        let (sung, played, prompt, extra) = match &voices {
+            Voices::Parallel(pp, melodies) => {
+                let (melody, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+                let (sung, played) = parallel_voices(melody, pp, ctx);
                 let prompt = match pp.sing {
-                    HarmonyLine::Harmony => format!("Sing {} the melody", voice_name(pp.voice)),
-                    HarmonyLine::Melody => format!("Sing the melody over a voice {}", voice_name(pp.voice)),
+                    HarmonyLine::Harmony => format!("Sing {} the melody", pp.voice.describe()),
+                    HarmonyLine::Melody => format!("Sing the melody over a voice {}", pp.voice.describe()),
                 };
-                let extra = json!({ "source": "parallel", "voice": pp.voice, "sing": pp.sing });
+                let mut extra = json!({ "source": "parallel", "voice": pp.voice, "sing": pp.sing });
+                if let Some(id) = piece {
+                    extra["piece"] = json!(id);
+                }
                 (sung, vec![played], prompt, extra)
             }
-            HarmonySource::Library(sel) => {
+            Voices::Library(sel, pieces) => {
                 let (piece, part) = pieces[i % pieces.len()];
                 let mut melodies: Vec<CompactMelody> = (0..piece.parts.len()).map(|k| piece.melody(k)).collect();
                 if !sel.piece_tempo {
@@ -2134,10 +2143,16 @@ fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> 
         if !notation {
             t.score = None;
         }
+        // Practice: your part plays along and its notes are shown.
+        if p.practice {
+            t.guide = true;
+            t.lane_targets = LaneTargets::Shown;
+        }
         if let (Some(a), Some(b)) = (t.stimulus.as_object_mut(), extra.as_object()) {
             a.extend(b.clone());
             a.insert("notation".into(), json!(notation));
             a.insert("start".into(), json!(p.start));
+            a.insert("practice".into(), json!(p.practice));
         }
         out.push(TrialSpec::Sung(t));
     }
@@ -2417,6 +2432,64 @@ mod tests {
             assert!(t.notes.iter().all(|n| ctx.comfortable.contains(n.midi) || (n.midi - ctx.comfortable.low.0).abs() < 5));
             assert_eq!(default_mode(&TrialSpec::Sung(t.clone())), PitchRefMode::Absolute);
         }
+    }
+
+    #[test]
+    fn tritones_in_fourths_and_fifths_become_perfect_fourths() {
+        // C, F, B and D in C major: F and B are the tritone pair.
+        let melody = json!({"given": [{"key": "C major", "notes": [
+            {"note": "C4", "beats": 1}, {"note": "F4", "beats": 1}, {"note": "B4", "beats": 1}, {"note": "D5", "beats": 1}]}]});
+        let harmony = |voice: &str, avoid: bool| -> (Vec<i32>, Vec<String>) {
+            let b: BlockSpec = serde_json::from_value(json!({"type": "harmony", "count": 1, "params": {
+                "source": {"parallel": {"voice": voice, "melody": melody, "avoid_tritone": avoid}}, "notation": true}}))
+            .unwrap();
+            let TrialSpec::Sung(t) = generate_block(&b, 1, &GenContext::default()).unwrap().remove(0) else { panic!() };
+            let gaps = t.notes.iter().zip(&t.accompaniment).map(|(s, m)| s.midi - m.midi).collect();
+            let names = t.score.unwrap().pitched().map(|(_, p)| p.name()).collect();
+            (gaps, names)
+        };
+        // Fourth above: F gets B♭ (a perfect fourth), not B.
+        let (gaps, names) = harmony("fourth_above", true);
+        assert_eq!(gaps, [5, 5, 5, 5]);
+        assert!(names[1].starts_with("Bb"), "{names:?}");
+        assert_eq!(harmony("fourth_above", false).0, [5, 6, 5, 5]);
+        // Fourth below: B gets F♯.
+        let (gaps, names) = harmony("fourth_below", true);
+        assert_eq!(gaps, [-5, -5, -5, -5]);
+        assert!(names[2].starts_with("F#"), "{names:?}");
+        // Fifths keep perfect fifths and turn the diminished fifth into a fourth, in the key.
+        assert_eq!(harmony("fifth_below", true).0, [-7, -5, -7, -7]);
+        assert_eq!(harmony("fifth_below", false).0, [-7, -6, -7, -7]);
+        let (gaps, names) = harmony("fifth_above", true);
+        assert_eq!(gaps, [7, 7, 5, 7]);
+        assert!(names[2].starts_with('E'), "{names:?}");
+    }
+
+    #[test]
+    fn harmony_practice_plays_your_part_and_counts_as_assisted() {
+        let b = block(r#"{"type": "harmony", "count": 2, "params": {"practice": true, "source": {"parallel": {"voice": "fifth_below", "melody": {"bars": 2}}}}}"#);
+        for t in generate_block(&b, 4, &GenContext::default()).unwrap() {
+            assert!(t.is_practice());
+            let TrialSpec::Sung(t) = t else { panic!() };
+            assert!(t.guide);
+            assert_eq!(t.lane_targets, LaneTargets::Shown);
+            assert_eq!(t.stimulus["practice"], json!(true));
+            assert_eq!(t.prompt, "Sing a fifth below the melody");
+        }
+        let b = block(r#"{"type": "harmony", "count": 1}"#);
+        assert!(!generate_block(&b, 4, &GenContext::default()).unwrap()[0].is_practice());
+    }
+
+    #[test]
+    fn parallel_melody_accepts_a_bare_generator_or_a_source() {
+        let parse = |v: serde_json::Value| serde_json::from_value::<ParallelHarmony>(v);
+        let bare = parse(json!({"melody": {"bars": 2}})).unwrap();
+        assert!(matches!(bare.melody, MelodySource::Generate(ref m) if m.bars == 2));
+        let tagged = parse(json!({"melody": {"library": {"collection": "Book"}}})).unwrap();
+        assert!(matches!(tagged.melody, MelodySource::Library(_)));
+        assert!(parse(json!({"melody": {"generate": {"bars": "two"}}})).is_err());
+        assert!(matches!(parse(json!({})).unwrap().melody, MelodySource::Generate(_)));
+        assert!(parse(json!({})).unwrap().avoid_tritone);
     }
 
     #[test]

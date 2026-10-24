@@ -41,8 +41,10 @@ Trainer). Suggest the next stage after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
 ({\"given\": [{key, time, notes: [{note, beats}]}]}), or taken from the melody library ({\"library\": {collection | ids | tags}}). \
 Transcribe the user's books into the library with add_library_pieces (or MIDI files with import_library_files) and reuse them. \
-Harmony singing (harmony) sings one voice against another: parallel thirds or sixths to a generated melody, or a part of a \
-multi-part library piece; grading {\"tuning\": \"just\"} scores against pure intervals. \
+Harmony singing (harmony) sings one voice against another: a third, fourth, fifth or sixth above or below a melody (generated, \
+yours or from the library; tritones become perfect fourths), or a part of a multi-part library piece. practice: true plays the \
+singer's part along (stored as assisted); grading {\"tuning\": \"just\"} scores against pure intervals. Presets harmony_01–08 \
+are a course, one interval each. \
 Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \
 -> no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence \

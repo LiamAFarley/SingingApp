@@ -291,7 +291,8 @@ impl<'a> SessionRun<'a> {
             let grading = |t: &TrialSpec| GradingConfig::resolve(&block.grading, default_mode(t));
             for (ti, trial) in trials.iter().enumerate() {
                 let mut attempt = 0u32;
-                let mut assisted = false;
+                // Practice plays the answer along, like a sing-along retry.
+                let mut assisted = trial.is_practice();
                 loop {
                     self.set(|st| {
                         st.trial_index = ti as u32;
@@ -328,7 +329,7 @@ impl<'a> SessionRun<'a> {
                         After::Next => break,
                         After::Retry { assisted: a } => {
                             attempt += 1;
-                            assisted = a;
+                            assisted = a || trial.is_practice();
                         }
                     }
                 }

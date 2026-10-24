@@ -15,6 +15,8 @@ interface Course {
   description: string;
   unit: string;
   storageKey: string;
+  /** Picker label; defaults to the unit and number ("Level 3"). */
+  label?: (p: PresetView) => string;
 }
 
 const COURSES: Course[] = [
@@ -31,6 +33,17 @@ const COURSES: Course[] = [
     description: "A cadence sets the key, a note plays, you name its degree, and it walks to the tonic.",
     unit: "Level",
     storageKey: "practice.degreeLevel",
+  },
+  {
+    pattern: /^harmony_(\d+)$/,
+    title: "Harmony intervals",
+    description: "Sing a third, fourth, fifth or sixth from a melody: first with your part playing along, then by ear.",
+    unit: "Interval",
+    storageKey: "practice.harmonyInterval",
+    label: (p) => {
+      const name = p.title.replace(/^Harmony:\s*/, "");
+      return name.charAt(0).toUpperCase() + name.slice(1);
+    },
   },
 ];
 
@@ -242,7 +255,7 @@ function StageCard({
           >
             {sorted.map((x) => (
               <option key={x.id} value={x.id}>
-                {course.unit} {stageNo(x)}
+                {course.label ? course.label(x) : `${course.unit} ${stageNo(x)}`}
               </option>
             ))}
           </select>

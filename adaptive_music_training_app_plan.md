@@ -12,7 +12,7 @@
   - Interval comparison.
   - Scale degrees in the style of Functional Ear Trainer: a graded eight-level course, fixed or changing keys, and the walk to the tonic (nearest, up or down).
   - Pitch matching, sustain, interval singing and patterns, with the follow-along lane and backing options.
-  - Harmony singing: parallel thirds or sixths to a generated melody, or one part of a multi-part library piece, with equal or just-intonation grading.
+  - Harmony singing: a third, fourth, fifth or sixth above or below a melody (generated, coach-written or from the library; tritones become perfect fourths), or one part of a multi-part library piece. Practice mode plays the singer's part along. Grading is equal or just intonation.
   - The range profile, set by hand.
 - **Phase 5, built:**
   - Sight singing from staff notation (VexFlow) and melodic dictation with a monophonic score editor.
@@ -508,7 +508,7 @@ Separate rhythm types (reproduction, reading, error detection) are dropped: rhyt
 | `sustain` | Hold a note for N seconds, optionally over a drone. | absolute; centre error, drift, stability, vibrato |
 | `sing_interval` | From a start note (played or self-chosen), sing an interval up or down. | relative_to_first or absolute |
 | `pattern` | Scales, arpeggios, slides and vocalise patterns, transposed stepwise through a range. | absolute or relative |
-| `harmony` | Sing one voice while the app plays another: a diatonic third or sixth below or above a generated melody (by ear, or read from the staff), the melody over that voice, or one part of a multi-part library piece. The other voice shows in the lane. | absolute; equal or just tuning (each note against the pure interval over the other voice) |
+| `harmony` | Sing one voice while the app plays another: a diatonic third, fourth, fifth or sixth below or above a melody (generated, coach-written or from the library; by ear or read from the staff), the melody over that voice, or one part of a multi-part library piece. A parallel voice that would form a tritone takes a perfect fourth instead. Practice mode plays the singer's part along (stored as assisted). The other voice shows in the lane. | absolute; equal or just tuning (each note against the pure interval over the other voice) |
 | `echo` | Hear a phrase → sing it back. | melody alignment |
 | `own_voice_match` | Match a stored best take of your own voice. | absolute |
 

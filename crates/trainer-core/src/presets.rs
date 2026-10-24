@@ -5,7 +5,7 @@ use serde_json::json;
 use ts_rs::TS;
 
 use crate::schema::{
-    AllKeyword, BlockSpec, ClassSet, Exercise, PitchIdParams, SessionSpec, SingPitchParams,
+    AllKeyword, BlockSpec, ClassSet, Exercise, HarmonyVoice, PitchIdParams, SessionSpec, SingPitchParams,
 };
 use crate::theory::PitchClass;
 
@@ -119,6 +119,37 @@ pub fn scale_degree_level(n: u32) -> SessionSpec {
         }],
     });
     SessionSpec::from_value(spec).expect("scale degree level is valid")
+}
+
+/// The harmony course: one interval per level, thirds and sixths before fifths and fourths.
+pub const HARMONY_LEVELS: [HarmonyVoice; 8] = [
+    HarmonyVoice::ThirdBelow,
+    HarmonyVoice::ThirdAbove,
+    HarmonyVoice::SixthBelow,
+    HarmonyVoice::SixthAbove,
+    HarmonyVoice::FifthBelow,
+    HarmonyVoice::FifthAbove,
+    HarmonyVoice::FourthBelow,
+    HarmonyVoice::FourthAbove,
+];
+
+/// Harmony level `n` (1–8): a voice that interval away from generated melodies, three times with
+/// your part playing along and then six times by ear.
+pub fn harmony_level(n: u32) -> SessionSpec {
+    let voice = HARMONY_LEVELS[(n.clamp(1, HARMONY_LEVELS.len() as u32) - 1) as usize];
+    let name = voice.describe();
+    let source = json!({ "parallel": { "voice": voice, "melody": { "bars": 2, "max_leap": 2, "step_rate": 0.85 } } });
+    let spec = json!({
+        "title": format!("Harmony: {name}"),
+        "protocol": "harmony_intervals",
+        "notes": format!("Sing {name} the melody: three times hearing your part, then six times by ear."),
+        "blocks": [
+            { "type": "harmony", "title": "Practice: your part plays along", "count": 3,
+              "params": { "source": source, "practice": true } },
+            { "type": "harmony", "title": "By ear", "count": 6, "params": { "source": source } },
+        ],
+    });
+    SessionSpec::from_value(spec).expect("harmony level is valid")
 }
 
 const FILES: &[(&str, &str, &str, &str)] = &[
@@ -237,18 +268,6 @@ const FILES: &[(&str, &str, &str, &str)] = &[
         include_str!("../presets/sing_intervals.json"),
     ),
     (
-        "harmony_thirds",
-        "Singing",
-        "A melody plays; sing a diatonic third below it, then a third above, by ear.",
-        include_str!("../presets/harmony_thirds.json"),
-    ),
-    (
-        "harmony_sixths",
-        "Singing",
-        "Sing a sixth below a melody, then sing the melody over the sixths.",
-        include_str!("../presets/harmony_sixths.json"),
-    ),
-    (
         "harmony_read",
         "Singing",
         "Read your harmony part from the staff while the melody plays.",
@@ -314,6 +333,16 @@ pub fn builtin_presets() -> Vec<Preset> {
             spec: serde_json::to_value(&spec).unwrap(),
         });
     }
+    for n in 1..=HARMONY_LEVELS.len() as u32 {
+        let spec = harmony_level(n);
+        out.push(Preset {
+            id: format!("harmony_{n:02}"),
+            title: spec.title.clone(),
+            category: "Singing".into(),
+            description: spec.notes.clone().unwrap_or_default(),
+            spec: serde_json::to_value(&spec).unwrap(),
+        });
+    }
     for (id, category, description, json) in FILES {
         let spec =
             SessionSpec::from_json(json).unwrap_or_else(|e| panic!("preset {id} is invalid: {e}"));
@@ -370,6 +399,22 @@ mod tests {
             }
             _ => panic!(),
         }
+    }
+
+    #[test]
+    fn harmony_levels_practise_then_sing_by_ear() {
+        for n in 1..=HARMONY_LEVELS.len() as u32 {
+            let spec = harmony_level(n);
+            let [practice, test] = &spec.blocks[..] else { panic!("two blocks") };
+            match (&practice.exercise, &test.exercise) {
+                (Exercise::Harmony(a), Exercise::Harmony(b)) => {
+                    assert!(a.practice && !b.practice);
+                    assert_eq!(a.source, b.source);
+                }
+                _ => panic!(),
+            }
+        }
+        assert_eq!(harmony_level(5).title, "Harmony: a fifth below");
     }
 
     #[test]

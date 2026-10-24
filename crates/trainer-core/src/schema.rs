@@ -946,14 +946,18 @@ fn d_dictation_melody() -> MelodySource {
     })
 }
 
-/// The voice that follows a generated melody in parallel harmony, a diatonic third or sixth
-/// away.
+/// The voice that follows the melody in parallel harmony, a diatonic third, fourth, fifth or
+/// sixth away.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum HarmonyVoice {
     #[default]
     ThirdBelow,
     ThirdAbove,
+    FourthBelow,
+    FourthAbove,
+    FifthBelow,
+    FifthAbove,
     SixthBelow,
     SixthAbove,
 }
@@ -964,8 +968,26 @@ impl HarmonyVoice {
         match self {
             HarmonyVoice::ThirdBelow => -2,
             HarmonyVoice::ThirdAbove => 2,
+            HarmonyVoice::FourthBelow => -3,
+            HarmonyVoice::FourthAbove => 3,
+            HarmonyVoice::FifthBelow => -4,
+            HarmonyVoice::FifthAbove => 4,
             HarmonyVoice::SixthBelow => -5,
             HarmonyVoice::SixthAbove => 5,
+        }
+    }
+
+    /// `a third below`, `a fifth above` …
+    pub fn describe(self) -> &'static str {
+        match self {
+            HarmonyVoice::ThirdBelow => "a third below",
+            HarmonyVoice::ThirdAbove => "a third above",
+            HarmonyVoice::FourthBelow => "a fourth below",
+            HarmonyVoice::FourthAbove => "a fourth above",
+            HarmonyVoice::FifthBelow => "a fifth below",
+            HarmonyVoice::FifthAbove => "a fifth above",
+            HarmonyVoice::SixthBelow => "a sixth below",
+            HarmonyVoice::SixthAbove => "a sixth above",
         }
     }
 }
@@ -983,19 +1005,38 @@ pub enum HarmonyLine {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ParallelHarmony {
-    #[serde(default)]
-    pub melody: MelodyParams,
+    /// The melody the voice follows: generated (default), written by the coach (`given`) or from
+    /// the library. A bare generator object such as `{"bars": 2}` means `{"generate": {…}}`.
+    #[serde(default, deserialize_with = "melody_or_generator")]
+    pub melody: MelodySource,
     #[serde(default)]
     pub voice: HarmonyVoice,
     #[serde(default)]
     pub sing: HarmonyLine,
+    /// A harmony note a tritone from the melody becomes a perfect fourth instead (F–B♭ for
+    /// fourths, F over C for fifths).
+    #[serde(default = "d_true")]
+    pub avoid_tritone: bool,
+}
+
+/// A melody source, or a bare generator object for `generate`.
+fn melody_or_generator<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MelodySource, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    let tagged = v
+        .as_object()
+        .is_some_and(|o| o.len() == 1 && ["generate", "given", "library"].iter().any(|k| o.contains_key(*k)));
+    if tagged {
+        serde_json::from_value(v).map_err(serde::de::Error::custom)
+    } else {
+        serde_json::from_value::<MelodyParams>(v).map(MelodySource::Generate).map_err(serde::de::Error::custom)
+    }
 }
 
 /// Where the voices of a harmony exercise come from.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum HarmonySource {
-    /// A generated melody and a voice a diatonic third or sixth away from it.
+    /// A melody and a voice a diatonic third, fourth, fifth or sixth away from it.
     Parallel(ParallelHarmony),
     /// Pieces with two or more parts from the melody library. `part` is the one you sing; the
     /// app plays the others.
@@ -1018,6 +1059,10 @@ fn d_harmony_tempo() -> f32 {
 pub struct HarmonyParams {
     #[serde(default)]
     pub source: HarmonySource,
+    /// Practice: your part plays along and its notes are shown, so you hear what to sing. These
+    /// attempts are stored as assisted and left out of accuracy.
+    #[serde(default)]
+    pub practice: bool,
     /// Show your part on the staff. Default: shown for library pieces, by ear for parallel
     /// harmony.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1722,6 +1767,11 @@ pub enum TrialSpec {
 }
 
 impl TrialSpec {
+    /// A practice trial plays the answer along (harmony practice); it is stored as assisted.
+    pub fn is_practice(&self) -> bool {
+        matches!(self, TrialSpec::Sung(t) if t.exercise == ExerciseKind::Harmony && t.guide)
+    }
+
     pub fn stimulus(&self) -> &serde_json::Value {
         match self {
             TrialSpec::Identify(t) => &t.stimulus,

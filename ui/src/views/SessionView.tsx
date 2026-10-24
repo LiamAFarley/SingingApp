@@ -724,7 +724,12 @@ function BlockSummary({ report }: { report: BlockReport | null }) {
   return (
     <div className="section" style={{ gap: 18 }}>
       <h2>Block complete</h2>
-      {report ? (
+      {report && report.trials === 0 && report.assisted > 0 ? (
+        <p className="muted">
+          Practice: your part played along, so these {report.assisted} attempts are not scored. Sing it on your own to
+          see your accuracy.
+        </p>
+      ) : report ? (
         <>
           <div className="grid cols-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
             <Stat label="Accuracy" value={pct(report.accuracy)} />

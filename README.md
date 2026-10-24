@@ -25,8 +25,12 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
   - Backing options: click, drone, chords or the melody.
   - Listen, sing along and retry after each attempt.
 - **Harmony singing:** sing one voice while the app plays another.
-  - A third or sixth below or above a generated melody, by ear or from the staff, or the melody over that voice.
+  - A third, fourth, fifth or sixth below or above a melody, by ear or from the staff, or the melody over that voice.
+    - The melody can be generated, written by the coach, or taken from the library.
+    - Where the interval would be a tritone (F against B), the harmony note becomes a perfect fourth instead.
   - Any part of a two-part (or larger) library piece.
+  - Practice mode plays your own part along and shows its notes. Practice attempts are not counted in accuracy.
+  - The **Harmony intervals** course has one interval per level: three trials hearing your part, then six by ear.
   - Optional just-intonation grading against the other voice.
 - **Sight singing:** melodies read from staff notation.
   - The key and first note are played, a bar is counted in, then you sing.
@@ -129,7 +133,7 @@ To work on the UI in a browser without the desktop shell, run `npm run dev` and 
 
 - `pitch`
 - `sung` or `sung-feedback`
-- `harmony` or `harmony-feedback`
+- `harmony`, `harmony-practice` or `harmony-feedback`
 - `sight` or `sight-feedback`
 - `dictation` or `dictation-feedback`
 - `degrees` or `degrees-feedback`
