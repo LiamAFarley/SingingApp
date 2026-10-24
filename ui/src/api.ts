@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Anchor } from "./bindings/Anchor";
+import type { ApDashboard } from "./bindings/ApDashboard";
+import type { DailyPlan } from "./bindings/DailyPlan";
+import type { DailySet } from "./bindings/DailySet";
 import type { AppInfo } from "./bindings/AppInfo";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { AudioView } from "./bindings/AudioView";
@@ -56,6 +59,10 @@ export interface Backend {
   libraryOpenFolder(): Promise<void>;
   libraryPlay(id: string, part: number | null): Promise<number>;
   stopPreview(): Promise<void>;
+  apDashboard(): Promise<ApDashboard>;
+  previewDailySet(): Promise<DailySet>;
+  saveDailyPlan(plan: DailyPlan): Promise<void>;
+  setCourseLevel(course: string, level: number): Promise<void>;
   subscribeLive(onBatch: (b: LiveBatch) => void): Promise<void>;
   listen<T>(event: string, cb: (payload: T) => void): Promise<() => void>;
 }
@@ -101,6 +108,10 @@ async function tauriBackend(): Promise<Backend> {
     libraryOpenFolder: () => call("library_open_folder"),
     libraryPlay: (id, part) => call("library_play", { id, part }),
     stopPreview: () => call("stop_preview"),
+    apDashboard: () => call("ap_dashboard"),
+    previewDailySet: () => call("preview_daily_set"),
+    saveDailyPlan: (plan) => call("save_daily_plan", { plan }),
+    setCourseLevel: (course, level) => call("set_course_level", { course, level }),
     subscribeLive: async (onBatch) => {
       const channel = new core.Channel<LiveBatch>();
       channel.onmessage = onBatch;

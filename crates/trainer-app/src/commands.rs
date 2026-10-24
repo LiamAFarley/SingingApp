@@ -9,6 +9,7 @@ use tauri::ipc::Channel;
 use trainer_audio::calibrate::{CalibrationResult, analyze_clicks};
 use trainer_audio::device::{HostInfo, list_hosts};
 use trainer_audio::{Bus, EngineInfo, SoundBuffer};
+use trainer_core::courses::{self, ApDashboard, DailyPlan, DailySet};
 use trainer_core::library::{self, LibraryPiece};
 use trainer_core::presets::{builtin_presets, find_builtin};
 use trainer_core::reports::{self, SessionReport};
@@ -474,6 +475,22 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                     spec,
                 )
             }
+            StartRequest::DailySet => {
+                let ctx = core.gen_context();
+                let set = courses::compose_daily_set(&db, &ctx, now()).map_err(anyhow_err)?;
+                (
+                    db.start_new_session(&set.spec, "daily").map_err(anyhow_err)?,
+                    set.spec,
+                )
+            }
+            StartRequest::CourseLevel { course, level } => {
+                let c = courses::find_course(&course).ok_or_else(|| format!("unknown course {course}"))?;
+                let spec = courses::level_session(&c, level).map_err(anyhow_err)?;
+                (
+                    db.start_new_session(&spec, "course").map_err(anyhow_err)?,
+                    spec,
+                )
+            }
         };
         drop(db);
         runner.start(id.clone(), spec).map_err(anyhow_err)?;
@@ -616,4 +633,31 @@ mod tests {
         assert_eq!(glyphs("B minor"), "B minor");
         assert_eq!(glyphs("F# minor"), "F♯ minor");
     }
+}
+
+// --- absolute-pitch courses ------------------------------------------------------------------
+
+#[tauri::command]
+pub fn ap_dashboard(state: State<'_, AppState>) -> Res<ApDashboard> {
+    courses::ap_dashboard(&state.core.db.lock(), now()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn preview_daily_set(state: State<'_, AppState>) -> Res<DailySet> {
+    let ctx = state.core.gen_context();
+    courses::compose_daily_set(&state.core.db.lock(), &ctx, now()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_daily_plan(state: State<'_, AppState>, plan: DailyPlan) -> Res<()> {
+    courses::save_daily_plan(&state.core.db.lock(), &plan).map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_course_level(state: State<'_, AppState>, course: String, level: u32) -> Res<()> {
+    courses::set_level(&state.core.db.lock(), &course, level).map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(())
 }

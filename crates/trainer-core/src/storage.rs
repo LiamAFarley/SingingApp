@@ -175,8 +175,31 @@ CREATE TABLE library_pieces (
 CREATE INDEX library_pieces_file ON library_pieces(file);
 "#;
 
+/// Courses: each course's current level, and a log of the levels passed.
+const MIGRATION_4: &str = r#"
+CREATE TABLE course_state (
+  course TEXT PRIMARY KEY,
+  level INTEGER NOT NULL,
+  updated_at TEXT NOT NULL,
+  source TEXT NOT NULL
+);
+CREATE TABLE course_passes (
+  course TEXT NOT NULL,
+  level INTEGER NOT NULL,
+  passed_at TEXT NOT NULL,
+  source TEXT NOT NULL,
+  evidence_json TEXT NOT NULL,
+  PRIMARY KEY (course, level)
+);
+"#;
+
 fn migrations() -> Migrations<'static> {
-    Migrations::new(vec![M::up(MIGRATION_1), M::up(MIGRATION_2), M::up(MIGRATION_3)])
+    Migrations::new(vec![
+        M::up(MIGRATION_1),
+        M::up(MIGRATION_2),
+        M::up(MIGRATION_3),
+        M::up(MIGRATION_4),
+    ])
 }
 
 pub fn now() -> DateTime<Utc> {
@@ -1351,6 +1374,47 @@ impl Db {
                 },
             )
             .optional()?)
+    }
+
+    // --- courses -------------------------------------------------------------------------------
+
+    /// A course's current level (1-based) and how it got there (`passed` or `manual`).
+    pub fn course_level(&self, course: &str) -> Result<Option<(u32, String)>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT level, source FROM course_state WHERE course = ?1",
+                [course],
+                |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)),
+            )
+            .optional()?)
+    }
+
+    pub fn set_course_level(&self, course: &str, level: u32, source: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO course_state(course, level, updated_at, source) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(course) DO UPDATE SET level = excluded.level, updated_at = excluded.updated_at, source = excluded.source",
+            params![course, level, now().to_rfc3339(), source],
+        )?;
+        Ok(())
+    }
+
+    /// Records that `level` was passed (the first time only).
+    pub fn record_course_pass(&self, course: &str, level: u32, source: &str, evidence: &serde_json::Value) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO course_passes(course, level, passed_at, source, evidence_json) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![course, level, now().to_rfc3339(), source, serde_json::to_string(evidence)?],
+        )?;
+        Ok(())
+    }
+
+    /// The levels of a course passed so far: (level, passed_at).
+    pub fn course_passes(&self, course: &str) -> Result<Vec<(u32, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT level, passed_at FROM course_passes WHERE course = ?1 ORDER BY level")?;
+        let rows = stmt.query_map([course], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     // --- presets -------------------------------------------------------------------------------

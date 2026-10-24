@@ -10,6 +10,7 @@ use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabiliti
 use rmcp::{ErrorData, ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use trainer_core::courses::{self, DailyPlan};
 use trainer_core::generate::GenContext;
 use trainer_core::library;
 use trainer_core::presets::{builtin_presets, find_builtin};
@@ -36,8 +37,17 @@ Rules:\n\
 - Fade feedback as accuracy stabilises: continuous -> after_trial -> none. Test transfer (new octaves, timbres, keys) before \
 calling something learned, and retest after gaps for retention.\n\
 - pitch_pairing, incidental_pairing and other exposure are not evidence of absolute pitch.\n\
-- Graded courses are built-in presets: ap_progressive_01–10 and degrees_01–08 (scale degrees in the style of Functional Ear \
-Trainer). Suggest the next stage after at least 90% over two sessions.\n\
+- Absolute pitch is organised in courses (list_courses, get_ap_dashboard): ap_naming (a growing set of notes over three \
+octaves with Other for notes outside the set, a check without feedback per level, the last level needing four checks at 90% \
+with the last one at least 12 h after the third), ap_brady (all twelve notes, C weighted 40% fading to even, paced streams from \
+5 s to 1.4 s apart, starting by singing C from memory), and the tests ap_weekly (120 notes, five timbres, Sundays by default), \
+ap_ucsf_style (every 4 weeks) and ap_maintenance (twice a week once naming is complete). The app moves a course to its next \
+level when the level's checks pass, and the user's \"Today's set\" is composed from the active courses in the daily plan \
+(preview_daily_set, set_daily_plan). Use set_course_level only to correct a level. The dashboard pools every method per \
+note: mastered means at least 90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory \
+with a block pre_mask \"shepard_glissando\" and keep consecutive tones at least 13 semitones apart over three octaves.\n\
+- Other graded courses are built-in presets: degrees_01–08 (scale degrees in the style of Functional Ear Trainer) and \
+harmony_01–08. Suggest the next level after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
 ({\"given\": [{key, time, notes: [{note, beats}]}]}), or taken from the melody library ({\"library\": {collection | ids | tags}}). \
 Transcribe the user's books into the library with add_library_pieces (or MIDI files with import_library_files) and reuse them. \
@@ -140,6 +150,14 @@ pub struct SavePresetRequest {
 pub struct PresetIdRequest {
     /// A built-in preset id from list_presets, or a saved preset name.
     pub id: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CourseLevelRequest {
+    /// A course id from list_courses, e.g. `ap_naming`.
+    pub course: String,
+    /// 1-based. For set_course_level, one past the last level marks the course complete.
+    pub level: u32,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -391,6 +409,100 @@ impl TrainerServer {
     async fn get_ap_profile(&self) -> Result<CallToolResult, ErrorData> {
         match self.with_db(reports::ap_profile) {
             Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Absolute pitch progress in one place: per note, naming accuracy within 2 s over the recent trials from every method (mastered at 90%+) and singing accuracy; every course with its current level, pass-rule progress (e.g. 3 of 4 checks, the next one counting from a given time) and what is due; weekly and UCSF-style test runs (accuracy, UCSF-style points, mean absolute deviation, per timbre); singing C from memory over time; minutes this week; the daily plan."
+    )]
+    async fn get_ap_dashboard(&self) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| courses::ap_dashboard(db, chrono::Utc::now())) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "The built-in courses: each level's title, summary and pass rule, the schedule of the recurring tests, and each course's current status."
+    )]
+    async fn list_courses(&self) -> Result<CallToolResult, ErrorData> {
+        let statuses = match self.with_db(|db| courses::course_statuses(db, chrono::Utc::now())) {
+            Ok(v) => v,
+            Err(e) => return tool_error(e),
+        };
+        let out: Vec<Value> = courses::builtin_courses()
+            .into_iter()
+            .map(|c| {
+                json!({
+                    "id": c.id, "title": c.title, "description": c.description, "schedule": c.schedule,
+                    "levels": c.levels.iter().enumerate().map(|(i, l)| json!({
+                        "level": i + 1, "title": l.title, "summary": l.summary, "pass": l.pass,
+                    })).collect::<Vec<_>>(),
+                    "status": statuses.iter().find(|s| s.id == c.id),
+                })
+            })
+            .collect();
+        text(&out)
+    }
+
+    #[tool(
+        description = "The session spec of one course level (its blocks carry the course tag), e.g. to adapt it or queue it with queue_session."
+    )]
+    async fn get_course_level(
+        &self,
+        Parameters(req): Parameters<CourseLevelRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let Some(c) = courses::find_course(&req.course) else {
+            return tool_error(format!("unknown course `{}`", req.course));
+        };
+        match courses::level_session(&c, req.level) {
+            Ok(spec) => text(&spec),
+            Err(e) => tool_error(format!("{e:#}")),
+        }
+    }
+
+    #[tool(
+        description = "Today's absolute-pitch set as the app would compose it now: tests that are due first, then each active course at its current level fitted to its minutes, with the reason for each item and the full session spec."
+    )]
+    async fn preview_daily_set(&self) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| {
+            let ctx = db.gen_context()?;
+            courses::compose_daily_set(db, &ctx, chrono::Utc::now())
+        }) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Set the daily plan: which ladder courses go into the daily set (active), minutes per course (1–90), and test_day (0 = Monday … 6 = Sunday) for the weekly and UCSF-style tests."
+    )]
+    async fn set_daily_plan(
+        &self,
+        Parameters(plan): Parameters<DailyPlan>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| {
+            courses::save_daily_plan(db, &plan)?;
+            courses::daily_plan(db)
+        }) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Set a course's current level by hand (correcting it; the app normally moves on when a level's checks pass)."
+    )]
+    async fn set_course_level(
+        &self,
+        Parameters(req): Parameters<CourseLevelRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| {
+            courses::set_level(db, &req.course, req.level)?;
+            courses::course_statuses(db, chrono::Utc::now())
+        }) {
+            Ok(v) => text(&v.into_iter().find(|s| s.id == req.course)),
             Err(e) => tool_error(e),
         }
     }
@@ -859,6 +971,34 @@ mod tests {
         let (err, overview) = call(&client, "get_overview", json!({})).await;
         assert!(!err);
         assert_eq!(overview["trials_total"], json!(0));
+
+        // Absolute-pitch courses and the daily set.
+        let (err, courses) = call(&client, "list_courses", json!({})).await;
+        assert!(!err, "{courses}");
+        let ids: Vec<&str> = courses.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
+        assert!(ids.contains(&"ap_naming") && ids.contains(&"ap_weekly"), "{ids:?}");
+        let (err, level) = call(&client, "get_course_level", json!({"course": "ap_naming", "level": 3})).await;
+        assert!(!err, "{level}");
+        assert_eq!(level["blocks"][0]["course"]["level"], json!(3));
+        let (err, set) = call(&client, "preview_daily_set", json!({})).await;
+        assert!(!err, "{set}");
+        assert!(!set["items"].as_array().unwrap().is_empty());
+        let (err, plan) = call(
+            &client,
+            "set_daily_plan",
+            json!({"courses": [{"course": "ap_naming", "minutes": 20, "active": true}, {"course": "ap_brady", "minutes": 5, "active": false}], "test_day": 5}),
+        )
+        .await;
+        assert!(!err, "{plan}");
+        assert_eq!(plan["test_day"], json!(5));
+        let (err, _) = call(&client, "set_daily_plan", json!({"courses": [{"course": "ap_weekly", "minutes": 5, "active": true}], "test_day": 5})).await;
+        assert!(err, "tests are not ladder courses");
+        let (err, st) = call(&client, "set_course_level", json!({"course": "ap_naming", "level": 4})).await;
+        assert!(!err, "{st}");
+        assert_eq!(st["level"], json!(4));
+        let (err, dash) = call(&client, "get_ap_dashboard", json!({})).await;
+        assert!(!err, "{dash}");
+        assert_eq!(dash["classes"].as_array().unwrap().len(), 12);
 
         let session = json!({"title": "Coach session", "blocks": [
             {"type": "pitch_id", "count": 20, "params": {"classes": ["C", "F#"]}},

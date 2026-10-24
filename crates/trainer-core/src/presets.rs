@@ -4,10 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use ts_rs::TS;
 
-use crate::schema::{
-    AllKeyword, BlockSpec, ClassSet, Exercise, HarmonyVoice, PitchIdParams, SessionSpec, SingPitchParams,
-};
-use crate::theory::PitchClass;
+use crate::schema::{HarmonyVoice, SessionSpec};
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct Preset {
@@ -20,60 +17,11 @@ pub struct Preset {
     pub spec: serde_json::Value,
 }
 
-/// Order in which pitch classes are added in progressive category training: maximally spread
-/// classes first, adjacent semitones last.
+/// Order in which pitch classes are added in progressive category training (the note-naming
+/// course): maximally spread classes first, adjacent semitones last.
 pub const AP_PROGRESSIVE_ORDER: [&str; 12] = [
     "C", "E", "G#", "D", "F#", "A#", "C#", "F", "A", "D#", "G", "B",
 ];
-pub const AP_PROGRESSIVE_STAGES: u32 = 10;
-
-/// Stage `n` (1–10) trains the first `n + 2` classes of [`AP_PROGRESSIVE_ORDER`]: only those notes
-/// are played and offered, with a response deadline that tightens from 4 s to 2.2 s.
-pub fn ap_progressive_stage(n: u32) -> SessionSpec {
-    let n = n.clamp(1, AP_PROGRESSIVE_STAGES);
-    let classes: Vec<PitchClass> = AP_PROGRESSIVE_ORDER[..(n as usize + 2)]
-        .iter()
-        .map(|s| s.parse().unwrap())
-        .collect();
-    let all = classes.len() == 12;
-    let set = if all {
-        ClassSet::Keyword(AllKeyword::All)
-    } else {
-        ClassSet::List(classes.clone())
-    };
-    let mut id = PitchIdParams {
-        classes: set.clone(),
-        ..PitchIdParams::default()
-    };
-    id.deadline_ms = Some(4000 - (n - 1) * 200);
-    let mut id_block = BlockSpec::new(Exercise::PitchId(id), 60);
-    id_block.title = Some("Name the note".into());
-    id_block.pass_mark = Some(0.9);
-    id_block.tags = vec!["ap.progressive".into()];
-    let sing = SingPitchParams {
-        classes: set,
-        ..SingPitchParams::default()
-    };
-    let mut sing_block = BlockSpec::new(Exercise::SingPitch(sing), 12);
-    sing_block.title = Some("Sing the note".into());
-    sing_block.tags = vec!["ap.progressive".into()];
-    SessionSpec {
-        title: format!("Absolute pitch: stage {n}"),
-        protocol: Some("ap_progressive".into()),
-        planned_minutes: None,
-        notes: Some(format!(
-            "Classes: {}. Suggested criterion for the next stage: at least 90% over two sessions.",
-            classes
-                .iter()
-                .map(|c| c.display_name())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )),
-        seed: None,
-        blocks: vec![id_block, sing_block],
-    }
-}
-
 pub const DEGREE_LEVELS: u32 = 8;
 
 /// Level `n` (1–8) of the scale-degree course, after Functional Ear Trainer: a cadence sets the
@@ -312,16 +260,6 @@ const FILES: &[(&str, &str, &str, &str)] = &[
 
 pub fn builtin_presets() -> Vec<Preset> {
     let mut out = Vec::new();
-    for n in 1..=AP_PROGRESSIVE_STAGES {
-        let spec = ap_progressive_stage(n);
-        out.push(Preset {
-            id: format!("ap_progressive_{n:02}"),
-            title: spec.title.clone(),
-            category: "Absolute pitch".into(),
-            description: spec.notes.clone().unwrap_or_default(),
-            spec: serde_json::to_value(&spec).unwrap(),
-        });
-    }
     for n in 1..=DEGREE_LEVELS {
         let spec = scale_degree_level(n);
         out.push(Preset {
@@ -367,7 +305,7 @@ pub fn find_builtin(id: &str) -> Option<SessionSpec> {
 mod tests {
     use super::*;
     use crate::generate::GenContext;
-    use crate::schema::KeyChange;
+    use crate::schema::{Exercise, KeyChange};
     use crate::validate::validate_session;
 
     #[test]
@@ -414,20 +352,5 @@ mod tests {
             }
         }
         assert_eq!(harmony_level(5).title, "Harmony: a fifth below");
-    }
-
-    #[test]
-    fn progressive_stages_grow() {
-        let s1 = ap_progressive_stage(1);
-        let s10 = ap_progressive_stage(10);
-        match (&s1.blocks[0].exercise, &s10.blocks[0].exercise) {
-            (Exercise::PitchId(a), Exercise::PitchId(b)) => {
-                assert_eq!(a.classes.classes().len(), 3);
-                assert!(b.classes.is_all());
-                assert_eq!(a.deadline_ms, Some(4000));
-                assert_eq!(b.deadline_ms, Some(2200));
-            }
-            _ => panic!(),
-        }
     }
 }

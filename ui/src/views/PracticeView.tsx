@@ -21,13 +21,6 @@ interface Course {
 
 const COURSES: Course[] = [
   {
-    pattern: /^ap_progressive_(\d+)$/,
-    title: "Absolute pitch: progressive",
-    description: "Name and sing a growing set of pitch classes, one stage at a time.",
-    unit: "Stage",
-    storageKey: "practice.apStage",
-  },
-  {
     pattern: /^degrees_(\d+)$/,
     title: "Scale degrees",
     description: "A cadence sets the key, a note plays, you name its degree, and it walks to the tonic.",
@@ -62,11 +55,13 @@ export function PracticeView({
   audio,
   onOpenSession,
   onOpenAudio,
+  onOpenAp,
 }: {
   runner: RunnerState | null;
   audio: AudioView | null;
   onOpenSession: () => void;
   onOpenAudio: () => void;
+  onOpenAp: () => void;
 }) {
   const [presets, setPresets] = useState<PresetView[]>([]);
   const [queue, setQueue] = useState<SessionRow[]>([]);
@@ -177,6 +172,29 @@ export function PracticeView({
           <div className="section" key={cat}>
             <h2>{cat}</h2>
             <div className="grid cols-3">
+              {cat === "Absolute pitch" && (
+                <div className="card preset">
+                  <div>
+                    <div className="title">Today's set</div>
+                    <div className="desc">
+                      The absolute pitch courses (note naming, the fixed C anchor and the tests) composed into one daily session,
+                      with progress on every note.
+                    </div>
+                  </div>
+                  <div className="row" style={{ justifyContent: "space-between" }}>
+                    <button className="btn small quiet" onClick={onOpenAp}>
+                      Progress and courses
+                    </button>
+                    <button
+                      className="btn small primary"
+                      disabled={active || starting != null}
+                      onClick={() => start("daily", { source: "daily_set" })}
+                    >
+                      {starting === "daily" ? "Starting…" : "Start"}
+                    </button>
+                  </div>
+                </div>
+              )}
               {courses.map(({ course, stages }) => (
                 <StageCard
                   key={course.storageKey}
@@ -215,7 +233,7 @@ export function PracticeView({
   );
 }
 
-/** A graded course (progressive absolute pitch, scale degrees) as one card with a stage picker. */
+/** A graded course (scale degrees, harmony intervals) as one card with a stage picker. */
 function StageCard({
   course,
   stages,

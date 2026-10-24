@@ -17,6 +17,8 @@ pub enum Phase {
     Idle,
     /// Block title and instructions, waiting for Begin.
     BlockIntro,
+    /// The pitch-memory clearing sound before a block (`scrub_end_s` says when it ends).
+    Scrubbing,
     /// Rendering audio for the next trial.
     Preparing,
     /// Stimulus or mask playing; answers are not accepted yet.
@@ -219,6 +221,8 @@ pub struct RunnerState {
     pub block_report: Option<BlockReport>,
     pub session_report: Option<SessionReport>,
     pub error: Option<String>,
+    /// Master-clock time at which the clearing sound before a block ends.
+    pub scrub_end_s: Option<f64>,
     /// Increments on every change.
     #[ts(type = "number")]
     pub seq: u64,
@@ -246,6 +250,7 @@ impl Default for RunnerState {
             block_report: None,
             session_report: None,
             error: None,
+            scrub_end_s: None,
             seq: 0,
         }
     }
@@ -293,6 +298,13 @@ pub enum StartRequest {
     #[ts(type = "{ source: \"spec\", spec: Record<string, unknown> }")]
     Spec {
         spec: serde_json::Value,
+    },
+    /// Today's absolute-pitch set, composed from the active courses.
+    DailySet,
+    /// One level of a course.
+    CourseLevel {
+        course: String,
+        level: u32,
     },
 }
 
@@ -450,5 +462,7 @@ mod export_more {
         trainer_core::stats::StatsRow::export_all(&cfg).unwrap();
         trainer_core::storage::TrialRow::export_all(&cfg).unwrap();
         trainer_core::schema::Anchor::export_all(&cfg).unwrap();
+        trainer_core::courses::ApDashboard::export_all(&cfg).unwrap();
+        trainer_core::courses::DailySet::export_all(&cfg).unwrap();
     }
 }

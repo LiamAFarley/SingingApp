@@ -383,7 +383,17 @@ Courses are shipped as manifests: levels pointing at block specs, each with a pa
 
 AP comes first. Sizes: S a few days, M one to two weeks.
 
-### AP-1: foundations, naming and the daily set (M)
+### AP-1: foundations, naming and the daily set (M) — built
+
+Built 24 October 2026 as planned, with these details:
+
+- Courses are built in, in `trainer-core/src/courses.rs`; course manifests the coach can edit come later.
+- A block's `course` field tags its trials `course.<id>.<level>`, and check blocks also get `course.check`. Pass rules count those blocks. Progress is stored in `course_state` and `course_passes`.
+- "In time" is computed by the dashboard: correct within 2 s.
+- No separate `register` field: a fixed register is just a single octave in `octaves`.
+- In weighted blocks, a repeated note moves octave instead of being redrawn, so an anchor's share stays exact.
+- New Tauri commands: `ap_dashboard`, `preview_daily_set`, `save_daily_plan` and `set_course_level`. The matching MCP tools are `get_ap_dashboard`, `list_courses`, `get_course_level`, `preview_daily_set`, `set_daily_plan` and `set_course_level`.
+
 
 - Course manifests with levels, pass rules, gates and the due display. This is the minimal part of the corpus plan's courses work, pulled forward.
 - Sequencing fields: jumps, restored out-of-set Other, class weights, stream pacing, fixed register, `in_time` (§3.1, §3.5).

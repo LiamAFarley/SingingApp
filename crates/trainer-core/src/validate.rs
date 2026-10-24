@@ -5,7 +5,7 @@ use serde_json::Value;
 use ts_rs::TS;
 
 use crate::generate::{GenContext, block_seed, generate_block};
-use crate::schema::{Exercise, Mask, Pool, SessionSpec, TrialSpec};
+use crate::schema::{Exercise, Mask, Pacing, Pool, SessionSpec, TrialSpec};
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct Issue {
@@ -42,8 +42,9 @@ fn issue(path: impl Into<String>, message: impl Into<String>) -> Issue {
 
 /// Rough wall-clock seconds for one trial, including answering and feedback.
 pub fn estimate_trial_seconds(t: &TrialSpec) -> f32 {
-    let mask_s = |m: Mask| if m == Mask::None { 0.0 } else { 1.6 };
+    let mask_s = |m: Mask| m.seconds();
     match t {
+        TrialSpec::Identify(t) if t.pace_ms.is_some() => t.pace_ms.unwrap_or(0) as f32 / 1000.0,
         TrialSpec::Identify(t) => {
             let span = t
                 .events
@@ -136,10 +137,21 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
             _ => {}
         }
         if let Exercise::PitchId(p) = &b.exercise {
-            if p.mask == Mask::None && b.effective_feedback().shows_trial_result() {
+            // A stream is too fast to chain intervals, and a 13-semitone jump rule defeats it.
+            let chaining_closed = p.pacing != Pacing::Respond || p.min_jump_semitones >= 13;
+            if p.mask == Mask::None && b.effective_feedback().shows_trial_result() && !chaining_closed {
                 warnings.push(issue(
                     format!("{path}.params.mask"),
                     "without a mask, each answer reveals a labelled pitch that can be used as a relative reference for the next trial",
+                ));
+            }
+        }
+        if let Exercise::PitchId(p) = &b.exercise {
+            let span = p.octaves.iter().max().unwrap_or(&0) - p.octaves.iter().min().unwrap_or(&0) + 1;
+            if p.min_jump_semitones >= 12 && span < 3 {
+                warnings.push(issue(
+                    format!("{path}.params.min_jump_semitones"),
+                    "a jump rule of an octave or more needs at least three octaves, or tones become predictable",
                 ));
             }
         }
@@ -147,6 +159,9 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
             Ok(trials) => {
                 for t in &trials {
                     seconds += estimate_trial_seconds(t);
+                }
+                if let Some(m) = b.pre_mask {
+                    seconds += m.seconds();
                 }
                 if let Some(TrialSpec::Sung(_)) = trials.first() {
                     let out_of_range = trials

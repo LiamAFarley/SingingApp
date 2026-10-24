@@ -318,7 +318,9 @@ Per-stimulus parameters: pitch, timbre, duration, loudness, attack shape, option
 
 ### Masks between trials
 
-A mask between AP trials stops the next trial being solved by relative pitch from the previous, labelled one: `none | noise | random_tones | chromatic_cluster`. The default is `random_tones` (~1.5 s of random pitches across the range) whenever feedback reveals answers.
+A mask between AP trials stops the next trial being solved by relative pitch from the previous, labelled one: `none | noise | random_tones | chromatic_cluster | shepard_glissando`. The default is `random_tones` (~1.5 s of random pitches across the range) whenever feedback reveals answers. `min_jump_semitones` (13 over three octaves) closes the same loophole without a mask.
+
+A block's `pre_mask` plays once before its first trial. `shepard_glissando` is a 20-second, endlessly descending Shepard–Risset glissando that clears echoic and tonal memory. An absolute-pitch block without feedback gets it automatically when a named tone was heard in the last five minutes (`pre_mask: none` turns that off).
 
 ### Reference-exposure log
 
@@ -454,7 +456,7 @@ Pitch-class identification · note labelling with octave · AP production · cro
 
 | Type | What happens | Key params |
 |---|---|---|
-| `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). A subset plays and offers only its own notes; there is no "other" answer. After answering, any answer can be clicked to hear it. | classes, octaves, timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
+| `pitch_id` | Tone plays → user names it (12 on-screen buttons, computer keys in piano layout, or a silent MIDI keyboard). A subset plays its own notes plus, with `out_of_set_rate`, notes from outside it at the edges of the range, answered Other. After answering, any answer can be clicked to hear it. | classes, out_of_set_rate, octaves, min_jump_semitones, class_weights, pacing (`respond` or `stream` with ioi_ms), timbres, pool, duration, loudness range, deadline_ms, mask, answer = `pitch_class` \| `note_with_octave` |
 | `sing_pitch` | Named prompt ("Sing E♭"), no reference → user sings; graded by pitch class, octave reported. | classes, prompt (on-screen text; speech arrives with hands-free mode, §17), response_ms, delay_ms, pre_mask, distractor (tones or music before the prompt), reveal_target_after |
 | `pitch_pairing` | Passive: tone → pause → on-screen label (spoken labels arrive with hands-free mode, §17). No response. Logged as exposure, never counted as AP evidence. | classes, timbres, octaves, gap_ms, rate |
 | `incidental_pairing` | Secondary visual task (e.g. press the colour shown) in which each colour is consistently accompanied by one pitch class. Logged as exposure; transfer is measured only with ordinary `pitch_id`. | class-to-colour map, timbres, octaves |
@@ -479,12 +481,12 @@ The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, m
 ### Presets shipped with the app
 
 - `ap_assessment` — the battery above.
-- `ap_progressive/stage_NN` — starts with three classes spread across the octave (e.g. C, E, G♯), the only notes played and offered; each stage adds one class; deadlines tighten from 4 s to 2 s. Suggested criterion: ≥ 90 % over two sessions. Stats tools report the criterion; the LLM (or the user) moves to the next stage.
+- Courses replace the progressive stages (`ap_research_integration_plan.md` §6): `ap_naming` (ten levels, three classes to twelve, ≥ 3 octaves, 13-semitone jumps, Other, a check without feedback per level), `ap_brady`, `ap_weekly`, `ap_ucsf_style` and `ap_maintenance`. A level passes on its rule and the course moves on; the daily set is composed from the active courses.
 - `ap_daily` — short mixed identification and production block.
 
 Presets and "repeat last session" work without the LLM.
 
-**Research integration (top priority):** `ap_research_integration_plan.md` restores the out-of-set Other answer for subset training, composes a daily set from all AP courses with one combined progress dashboard, and adds the adult-acquisition protocols to this suite: anti-cheating sequencing (octave spread, 13-semitone jumps, 2 s deadline), a Shepard–Risset glissando scrubber, go/no-go detection, the chord identification method, Brady's anchor weighting, custom labels, an errorless mode, inner-voice singing, a working-memory screening battery, per-class mastery with gates, UCSF-style scoring, and a drift detector.
+**Research integration (top priority; AP-1 built):** `ap_research_integration_plan.md` restores the out-of-set Other answer for subset training, composes a daily set from all AP courses with one combined progress dashboard, and adds the adult-acquisition protocols to this suite: anti-cheating sequencing (octave spread, 13-semitone jumps, 2 s deadline), a Shepard–Risset glissando scrubber, go/no-go detection, the chord identification method, Brady's anchor weighting, custom labels, an errorless mode, inner-voice singing, a working-memory screening battery, per-class mastery with gates, UCSF-style scoring, and a drift detector.
 
 ---
 
@@ -816,7 +818,7 @@ SingingApp/
 │  ├─ trainer-app/         Tauri 2 app: commands, session runner, queue watcher
 │  └─ trainer-mcp/         stdio MCP server (rmcp)
 ├─ ui/                     React + TypeScript + Vite (OSMD, canvas tuner, uPlot)
-├─ presets/                ap_assessment.json, ap_progressive/*.json, ap_daily.json, …
+├─ presets/                ap_assessment.json, ap_daily.json, … (AP courses are in courses.rs)
 ├─ assets/                 soundfonts (FluidR3_GM), default stimulus pools
 ├─ ml/                     Part 2 Python worker (uv project)
 └─ docs/

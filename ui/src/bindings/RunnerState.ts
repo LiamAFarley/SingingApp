@@ -9,6 +9,10 @@ import type { TrialView } from "./TrialView";
 
 export type RunnerState = { phase: Phase, session_id: string | null, title: string, notes: string | null, block_index: number, block_count: number, block_title: string, block_instructions: string | null, block_kind: ExerciseKind | null, trial_index: number, trial_count: number, feedback_mode: FeedbackMode, done_in_block: number, correct_in_block: number, trial: TrialView | null, feedback: FeedbackView | null, block_report: BlockReport | null, session_report: SessionReport | null, error: string | null, 
 /**
+ * Master-clock time at which the clearing sound before a block ends.
+ */
+scrub_end_s: number | null, 
+/**
  * Increments on every change.
  */
 seq: number, };

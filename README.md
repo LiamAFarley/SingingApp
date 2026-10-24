@@ -10,7 +10,14 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
 ## Exercises
 
 - **Absolute pitch:**
-  - Note naming in progressive stages: each stage plays and offers only its own notes, until all twelve. Several octaves and timbres, and a deadline.
+  - **Today's set** (Absolute pitch page): one daily session composed from the active courses, each at its current level and fitted to its minutes, with any test that is due first.
+  - Courses:
+    - **Note naming**: ten levels from three notes to all twelve. Notes are spread over three octaves, never within 13 semitones of the one before, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four checks at 90%, the fourth at least 12 h after the third.
+    - **Fixed C anchor** (Brady): all twelve notes from the start, C on 40% of tones fading to an even share, tones arriving at a steady pace from every 5 s to every 1.4 s. Each session starts by singing C from memory.
+    - **Weekly test** (120 notes on five instruments), **UCSF-style test** (every four weeks) and **maintenance** (twice a week once naming is complete).
+  - A course moves to its next level when the level's checks pass. The page shows what each rule still needs and when the next check counts. Levels can also be set by hand.
+  - Progress per note pools every method: a note is mastered at 90% named within 2 s. Also shown: weekly and UCSF-style results (exact, UCSF-style points, mean error in semitones, per instrument) and how far your remembered C is from a real C.
+  - Before a check without feedback, a 20-second endlessly falling Shepard–Risset tone clears pitch memory. It plays automatically when you heard a named note in the last five minutes.
   - After answering any identification question, click an answer to hear it: the other notes, intervals, chords, scales, keys or degrees, in the same register and sound.
   - Singing a named note. After a miss, a tuner aimed at that note opens so you can practise locking on (hold it within 15 cents for a second), with an optional drone.
   - Passive pairing and key finding.

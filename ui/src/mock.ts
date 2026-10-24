@@ -15,6 +15,10 @@ import type { SessionRow } from "./bindings/SessionRow";
 import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { Anchor } from "./bindings/Anchor";
+import type { ApDashboard } from "./bindings/ApDashboard";
+import type { CourseStatus } from "./bindings/CourseStatus";
+import type { DailyPlan } from "./bindings/DailyPlan";
+import type { DailySet } from "./bindings/DailySet";
 import type { LibraryEntry } from "./bindings/LibraryEntry";
 import type { Score } from "./bindings/Score";
 import type { ScoreNote } from "./bindings/ScoreNote";
@@ -22,9 +26,6 @@ import type { ScoreNote } from "./bindings/ScoreNote";
 const clock = () => performance.now() / 1000;
 
 const presets: PresetView[] = [
-  p("ap_progressive_01", "Absolute pitch: stage 1", "Absolute pitch", "Classes: C, E, A♭. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
-  p("ap_progressive_02", "Absolute pitch: stage 2", "Absolute pitch", "Classes: C, E, A♭, D. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
-  p("ap_progressive_03", "Absolute pitch: stage 3", "Absolute pitch", "Classes: C, E, A♭, D, F♯. Suggested criterion for the next stage: at least 90% over two sessions.", 72, 7.6, ["Name the note", "Sing the note"]),
   p("ap_daily", "Absolute pitch: daily", "Absolute pitch", "Name 36 notes and sing 12, all twelve pitch classes.", 48, 5.4, ["Name the note", "Sing the note"]),
   p("ap_assessment", "Absolute pitch assessment", "Absolute pitch", "Holdout tones, no feedback: identification across octaves and timbres, speed, singing and key. Run first in a session.", 156, 16.5, ["12-class identification", "Cross-octave identification"]),
   p("ear_intervals_melodic", "Intervals: melodic", "Ear training", "Melodic intervals up and down, minor 2nd to octave.", 30, 3.2, ["Interval identification"]),
@@ -126,6 +127,7 @@ function idle(): RunnerState {
     block_report: null,
     session_report: null,
     error: null,
+    scrub_end_s: null,
     seq: 0,
   };
 }
@@ -143,8 +145,8 @@ function choiceTrial(): TrialView {
     kind: "pitch_id",
     interaction: "choice",
     prompt: "Name the note",
-    // Stage 1 of the progressive protocol: three classes.
-    choices: ["C", "E", "G#"].map((id) => ({ id, label: LABELS[PCS.indexOf(id)] })),
+    // Level 1 of note naming: three notes, and Other for notes outside the set.
+    choices: [...["C", "E", "G#"].map((id) => ({ id, label: LABELS[PCS.indexOf(id)] })), { id: "other", label: "Other" }],
     layout: "pitch_classes",
     deadline_ms: null,
     can_replay: true,
@@ -755,6 +757,8 @@ function startScenario() {
     }
   } else if (scenario === "colors") {
     emit({ phase: "answering", session_id: "demo", title: "Colour task (incidental pairing)", block_count: 1, block_title: "Press the colour", block_kind: "incidental_pairing", trial_index: 11, trial_count: 60, done_in_block: 11, correct_in_block: 11, trial: colorTrial() });
+  } else if (scenario === "scrubbing") {
+    emit({ phase: "scrubbing", session_id: "demo", title: "Absolute pitch: today's set", block_count: 4, block_index: 1, block_title: "Naming · Check: no feedback", block_kind: "pitch_id", trial_count: 24, feedback_mode: "none", scrub_end_s: clock() + 14 });
   } else if (scenario === "summary") {
     emit({ phase: "session_summary", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, session_report: report });
   }
@@ -945,6 +949,11 @@ export function mockBackend(): Backend {
     listQueue: async () => queued,
     removeQueued: async () => true,
     startSession: async (req) => {
+      if (req.source === "daily_set" || req.source === "course_level") {
+        kind = "choice";
+        emit({ ...idle(), phase: "block_intro", session_id: "demo", title: req.source === "daily_set" ? "Absolute pitch: today's set" : "Note naming: level 3 (5 notes)", block_count: 4, block_title: "Naming · Name the note", block_kind: "pitch_id", trial_count: 40, block_instructions: null, notes: "Note naming: level 3 (5 notes) · Fixed C anchor (Brady): level 1 (C 40%, 5.0 s apart)" });
+        return "demo";
+      }
       const preset = req.source === "preset" ? presets.find((x) => x.id === req.id) : null;
       kind = preset?.category === "Singing" ? "sung" : "choice";
       emit({ ...idle(), phase: "block_intro", session_id: "demo", title: preset?.title ?? "Session", block_count: 2, block_title: preset?.block_titles[0] ?? "Block", block_kind: kind === "sung" ? "pattern" : "pitch_id", trial_count: 3, block_instructions: null });
@@ -990,6 +999,14 @@ export function mockBackend(): Backend {
     libraryOpenFolder: async () => {},
     libraryPlay: async () => 4000,
     stopPreview: async () => {},
+    apDashboard: async () => mockDashboard(),
+    previewDailySet: async () => mockDailySet(),
+    saveDailyPlan: async (plan) => {
+      apPlan = plan;
+    },
+    setCourseLevel: async (course, level) => {
+      courseLevels[course] = level;
+    },
     subscribeLive: async (onBatch) => {
       let t0 = clock();
       setInterval(() => {
@@ -1021,4 +1038,133 @@ export function mockBackend(): Backend {
       };
     },
   };
+}
+
+// --- absolute pitch --------------------------------------------------------------------------
+
+let apPlan: DailyPlan = {
+  courses: [
+    { course: "ap_naming", minutes: 15, active: true },
+    { course: "ap_brady", minutes: 10, active: true },
+  ],
+  test_day: 6,
+};
+const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1 };
+const daysAgo = (d: number) => new Date(Date.now() - d * 86400_000).toISOString();
+
+function mockCourses(): CourseStatus[] {
+  const naming = ["3 notes", "4 notes", "5 notes", "6 notes", "7 notes", "8 notes", "9 notes", "10 notes", "11 notes", "All twelve notes"];
+  const brady = ["C 40%, 5.0 s apart", "C 30%, 4.0 s apart", "C 20%, 3.0 s apart", "C 12%, 2.0 s apart", "Even, 1.4 s apart"];
+  const plan = (id: string) => apPlan.courses.find((c) => c.course === id);
+  const ladder = (id: string, title: string, short: string, description: string, titles: string[], summary: string, pass: string): CourseStatus => {
+    const level = courseLevels[id] ?? 1;
+    return {
+      id,
+      title,
+      short,
+      description,
+      kind: "ladder",
+      level,
+      levels: titles.length,
+      complete: level > titles.length,
+      level_title: titles[level - 1] ?? null,
+      level_summary: summary,
+      level_titles: titles,
+      level_set_manually: false,
+      pass: { met: false, summary: pass, passes: 1, needed: 2, next_after: null },
+      last_practised: daysAgo(1),
+      due: false,
+      due_note: null,
+      in_plan: plan(id)?.active ?? false,
+      minutes: plan(id)?.minutes ?? null,
+    };
+  };
+  const test = (id: string, title: string, short: string, description: string, due: boolean, note: string, last: string | null): CourseStatus => ({
+    id,
+    title,
+    short,
+    description,
+    kind: "recurring",
+    level: 1,
+    levels: 1,
+    complete: false,
+    level_title: null,
+    level_summary: null,
+    level_titles: [title],
+    level_set_manually: false,
+    pass: null,
+    last_practised: last,
+    due,
+    due_note: note,
+    in_plan: false,
+    minutes: null,
+  });
+  return [
+    ladder(
+      "ap_naming",
+      "Note naming",
+      "Naming",
+      "Name a growing set of notes spread over three octaves, never two tones close together, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four passes, the last after a night's sleep.",
+      naming,
+      "C E A♭ D F♯, plus Other for notes outside the set, over three octaves, answered within 3.6 s.",
+      "1 of 2 checks in a row at 90% or more (last: 92%).",
+    ),
+    ladder(
+      "ap_brady",
+      "Fixed C anchor (Brady)",
+      "Anchor C",
+      "Brady's fixed-scale method: all twelve notes from the start, C heard far more often at first and the pace slow; C fades to an even share and the pace rises to a tone every 1.4 s. Starts by singing your C from memory.",
+      brady,
+      "All twelve notes over three octaves, a tone every 5.0 s, C on 40% of tones. Keep C in your mind's ear and judge each note against it.",
+      "Needs 2 checks in a row at 80% or more.",
+    ),
+    test("ap_weekly", "Weekly test", "Weekly test", "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback, after the pitch-memory clearing sound.", true, "Due today.", daysAgo(7)),
+    test("ap_ucsf_style", "UCSF-style test", "UCSF-style test", "36 piano and 36 sine tones over five octaves, no feedback, scored as the UCSF test is: a point for an exact answer, three quarters for a semitone off. Not the UCSF test itself.", false, "Next on the Sunday test day from 15 Nov.", daysAgo(14)),
+    test("ap_maintenance", "Maintenance", "Maintenance", "Five minutes of all twelve notes over three octaves and several timbres, twice a week, once note naming is complete.", false, "Starts once note naming is complete.", null),
+  ];
+}
+
+function mockDashboard(): ApDashboard {
+  const naming = [0.97, 0.42, 0.55, 0.38, 0.93, 0.47, 0.71, 0.4, 0.92, 0.5, 0.36, 0.44];
+  const trials = [40, 22, 26, 20, 40, 21, 34, 20, 40, 23, 19, 20];
+  const timbres = ["gm:0", "gm:42", "gm:71", "gm:6", "synth:square"];
+  const run = (d: number, acc: number) => ({
+    session_id: `w${d}`,
+    at: daysAgo(d),
+    trials: 120,
+    accuracy: acc,
+    ucsf_points: Math.min(1, acc + 0.12),
+    mad: 2.6 - acc * 2.2,
+    by_timbre: timbres.map((timbre, i) => ({ timbre, trials: 24, accuracy: Math.max(0, acc - 0.06 + i * 0.03) })),
+  });
+  return {
+    classes: PCS.map((pc, i) => ({
+      pitch_class: pc,
+      name: LABELS[i],
+      naming_trials: trials[i],
+      naming_in_time: naming[i],
+      naming_accuracy: Math.min(1, naming[i] + 0.05),
+      mastered: naming[i] >= 0.9 && trials[i] >= 20,
+      singing_trials: i % 3 === 0 ? 12 : 4,
+      singing_accuracy: i % 3 === 0 ? 0.75 : 0.5,
+      last_seen: daysAgo(1),
+    })),
+    classes_mastered: naming.filter((n, i) => n >= 0.9 && trials[i] >= 20).length,
+    courses: mockCourses(),
+    weekly: [run(21, 0.31), run(14, 0.36), run(7, 0.44)],
+    ucsf_style: [{ ...run(14, 0.33), session_id: "u14", trials: 72, by_timbre: [{ timbre: "gm:0", trials: 36, accuracy: 0.39 }, { timbre: "synth:sine", trials: 36, accuracy: 0.28 }] }],
+    anchor: [38, -22, 15, -9, 12].map((cents, i) => ({ at: daysAgo(5 - i), cents })),
+    anchor_median_abs_cents: 15,
+    minutes_this_week: 142,
+    plan: apPlan,
+  };
+}
+
+function mockDailySet(): DailySet {
+  const items = [
+    { course: "ap_weekly", title: "Weekly test", level: null, minutes: 7.6, reason: "Due today.", test: true },
+    { course: "ap_naming", title: "Note naming: level 3 (5 notes)", level: 3, minutes: 14.8, reason: "Level 3 of 10. 1 of 2 checks in a row at 90% or more (last: 92%).", test: false },
+    { course: "ap_brady", title: "Fixed C anchor (Brady): level 1 (C 40%, 5.0 s apart)", level: 1, minutes: 10.1, reason: "Level 1 of 5. Needs 2 checks in a row at 80% or more.", test: false },
+  ].filter((i) => i.test || apPlan.courses.some((c) => c.course === i.course && c.active));
+  return { spec: {}, items, minutes: Math.round(items.reduce((a, i) => a + i.minutes, 0) * 10) / 10 };
 }

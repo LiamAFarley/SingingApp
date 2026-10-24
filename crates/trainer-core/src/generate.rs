@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::library::{self, LibraryPiece};
 use crate::melody::{MelodyParams, generate_melody};
-use crate::rng::{BalancedBag, Rng};
+use crate::rng::{BalancedBag, Rng, WeightedBag};
 use crate::schema::*;
 use crate::score::{ClefChoice, CompactMelody, KeySig, Pitch, Score, ScoreNote, note_events};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
@@ -178,6 +178,9 @@ fn gain_db(range: Option<[f32; 2]>, rng: &mut Rng) -> f32 {
     }
 }
 
+/// The answer id for a tone from outside a training subset.
+pub const OTHER: &str = "other";
+
 fn pc_choices(classes: &[PitchClass]) -> Vec<Choice> {
     let mut sorted = classes.to_vec();
     sorted.sort();
@@ -235,6 +238,53 @@ fn pick_note(range: NoteRange, last: &mut Option<i32>, rng: &mut Rng) -> i32 {
 // Absolute pitch
 // ---------------------------------------------------------------------------------------------
 
+/// The classes a naming block draws: evenly, or by `class_weights`.
+enum ClassDraw {
+    Even(BalancedBag<PitchClass>),
+    Weighted(WeightedBag<PitchClass>),
+}
+
+impl ClassDraw {
+    fn new(classes: &[PitchClass], weights: &std::collections::BTreeMap<String, f32>) -> Result<Self, GenError> {
+        if weights.is_empty() {
+            return Ok(ClassDraw::Even(BalancedBag::new(classes.to_vec())));
+        }
+        let mut listed: Vec<(PitchClass, f64)> = Vec::new();
+        for (k, w) in weights {
+            let pc: PitchClass = k.parse().map_err(|_| GenError(format!("class_weights: `{k}` is not a pitch class")))?;
+            if !classes.contains(&pc) {
+                return err(format!("class_weights: {k} is not one of the block's classes"));
+            }
+            if !(*w >= 0.0 && w.is_finite()) {
+                return err(format!("class_weights: the weight of {k} must be zero or more"));
+            }
+            listed.push((pc, *w as f64));
+        }
+        let listed_sum: f64 = listed.iter().map(|l| l.1).sum();
+        let rest: Vec<PitchClass> = classes.iter().copied().filter(|c| !listed.iter().any(|l| l.0 == *c)).collect();
+        let mut all = listed;
+        if !rest.is_empty() {
+            if listed_sum > 1.0 + 1e-6 {
+                return err("class_weights: the listed weights add up to more than 1, leaving nothing for the other classes");
+            }
+            let each = (1.0 - listed_sum) / rest.len() as f64;
+            all.extend(rest.into_iter().map(|c| (c, each)));
+        }
+        if all.iter().map(|a| a.1).sum::<f64>() <= 0.0 {
+            return err("class_weights: at least one class needs a weight above zero");
+        }
+        Ok(ClassDraw::Weighted(WeightedBag::new(all, 24)))
+    }
+
+    fn draw(&mut self, rng: &mut Rng) -> PitchClass {
+        match self {
+            ClassDraw::Even(b) => b.draw(rng),
+            ClassDraw::Weighted(b) => b.draw(rng),
+        }
+        .expect("classes are not empty")
+    }
+}
+
 fn gen_pitch_id(
     p: &PitchIdParams,
     n: usize,
@@ -245,13 +295,36 @@ fn gen_pitch_id(
     if classes.is_empty() {
         return err("classes must not be empty");
     }
+    if !(0.0..=0.5).contains(&p.out_of_set_rate) {
+        return err("out_of_set_rate must be between 0 and 0.5");
+    }
+    if p.min_jump_semitones > 24 {
+        return err("min_jump_semitones must be at most 24");
+    }
+    let others: Vec<PitchClass> = PitchClass::ALL.iter().copied().filter(|c| !classes.contains(c)).collect();
+    let use_other = p.out_of_set_rate > 0.0 && !others.is_empty();
+    if use_other && p.answer == PitchAnswer::NoteWithOctave {
+        return err("out_of_set_rate needs answer pitch_class (\"Other\" is a pitch-class answer)");
+    }
+    let pace_ms = match p.pacing {
+        Pacing::Respond => None,
+        Pacing::Stream { ioi_ms } => {
+            if ioi_ms < 800 || ioi_ms < p.duration_ms + 300 {
+                return err("pacing.stream.ioi_ms must be at least 800 ms and 300 ms longer than duration_ms");
+            }
+            Some(ioi_ms)
+        }
+    };
+    // A stream leaves no room for a mask between tones.
+    let mask = if pace_ms.is_some() { Mask::None } else { p.mask };
     let combos = pool_combos(&p.timbres, &p.octaves, p.pool, ctx)?;
-    let mut bag = BalancedBag::new(classes.clone());
+    let mut bag = ClassDraw::new(&classes, &p.class_weights)?;
+    let mut other_bag = BalancedBag::new(others.clone());
     let mut combo_bag = BalancedBag::new((0..combos.len()).collect::<Vec<_>>());
     let lo = *p.octaves.iter().min().unwrap();
     let hi = *p.octaves.iter().max().unwrap();
     let all_notes = PitchClass::new(0).in_octave(lo)..=PitchClass::new(11).in_octave(hi);
-    let choices = match p.answer {
+    let mut choices = match p.answer {
         PitchAnswer::PitchClass => pc_choices(&classes),
         PitchAnswer::NoteWithOctave => all_notes
             .clone()
@@ -261,21 +334,75 @@ fn gen_pitch_id(
             })
             .collect(),
     };
+    if use_other {
+        choices.push(Choice { id: OTHER.into(), label: "Other".into() });
+    }
+    // The octaves each timbre may use, for the jump rule and out-of-set tones.
+    let octaves_of = |timbre: &TimbreId| -> Vec<i32> {
+        combos.iter().filter(|(t, _)| t == timbre).map(|(_, o)| *o).collect()
+    };
+    let min_jump = p.min_jump_semitones as i32;
     let mut last_midi = None;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
-        let mut pc = bag.draw(rng).unwrap();
-        let (timbre, octave) = combos[combo_bag.draw(rng).unwrap()].clone();
+        let out_of_set = use_other && rng.chance(p.out_of_set_rate as f64);
+        let mut pc = if out_of_set { other_bag.draw(rng).unwrap() } else { bag.draw(rng) };
+        let (timbre, mut octave) = combos[combo_bag.draw(rng).unwrap()].clone();
+        if out_of_set {
+            // At the edges of the range, where a small set's highest and lowest notes would
+            // otherwise be guessable by height alone.
+            let octs = octaves_of(&timbre);
+            let (lo_t, hi_t) = (*octs.iter().min().unwrap(), *octs.iter().max().unwrap());
+            octave = if rng.chance(0.5) { lo_t } else { hi_t };
+        }
         let mut midi = pc.in_octave(octave);
-        if Some(midi) == last_midi && classes.len() > 1 {
-            pc = bag.draw(rng).unwrap();
+        if Some(midi) == last_midi && classes.len() > 1 && !out_of_set {
+            if let ClassDraw::Weighted(_) = bag {
+                // Redrawing the class would thin out a weighted anchor; move the octave instead.
+                let octs: Vec<i32> = octaves_of(&timbre).into_iter().filter(|&o| o != octave).collect();
+                if let Some(&o) = rng.choose(&octs) {
+                    octave = o;
+                }
+            } else {
+                pc = bag.draw(rng);
+            }
             midi = pc.in_octave(octave);
+        }
+        let mut relaxed = false;
+        if let (true, Some(prev)) = (min_jump > 0, last_midi) {
+            if (midi - prev).abs() < min_jump {
+                let far = |c: PitchClass, o: i32| (c.in_octave(o) - prev).abs() >= min_jump;
+                let octs = octaves_of(&timbre);
+                let same_class: Vec<i32> = octs.iter().copied().filter(|&o| far(pc, o)).collect();
+                if let Some(&o) = rng.choose(&same_class) {
+                    octave = o;
+                } else {
+                    let group = if out_of_set { &others } else { &classes };
+                    let cands: Vec<(PitchClass, i32)> = group
+                        .iter()
+                        .flat_map(|&c| octs.iter().map(move |&o| (c, o)))
+                        .filter(|&(c, o)| far(c, o))
+                        .collect();
+                    match rng.choose(&cands) {
+                        Some(&(c, o)) => {
+                            pc = c;
+                            octave = o;
+                        }
+                        None => relaxed = true,
+                    }
+                }
+                midi = pc.in_octave(octave);
+            }
         }
         last_midi = Some(midi);
         let gain = gain_db(p.loudness_db, rng);
-        let correct = match p.answer {
-            PitchAnswer::PitchClass => pc.name().to_string(),
-            PitchAnswer::NoteWithOctave => Note(midi).name(),
+        let correct = if out_of_set {
+            OTHER.to_string()
+        } else {
+            match p.answer {
+                PitchAnswer::PitchClass => pc.name().to_string(),
+                PitchAnswer::NoteWithOctave => Note(midi).name(),
+            }
         };
         let tone = |m: i32| SoundEvent {
             midi: m,
@@ -286,7 +413,8 @@ fn gen_pitch_id(
             detune_cents: p.detune_cents,
         };
         // Each answer as it would have sounded: the nearest note of that name, same timbre.
-        let choice_sounds = match p.answer {
+        // "Other" plays the tone itself when it was from outside the set.
+        let mut choice_sounds: Vec<ChoiceSound> = match p.answer {
             PitchAnswer::PitchClass => classes
                 .iter()
                 .map(|c| ChoiceSound { id: c.name().to_string(), events: vec![tone(nearest_of_class(*c, midi))] })
@@ -295,32 +423,52 @@ fn gen_pitch_id(
                 all_notes.clone().map(|m| ChoiceSound { id: Note(m).name(), events: vec![tone(m)] }).collect()
             }
         };
+        if out_of_set {
+            choice_sounds.push(ChoiceSound { id: OTHER.into(), events: vec![tone(midi)] });
+        }
         let holdout = ctx.pools.is_holdout(&timbre, octave);
+        let mut stimulus = json!({
+            "pitch_class": pc.name(),
+            "octave": octave,
+            "midi": midi,
+            "timbre": timbre,
+            "holdout": holdout,
+            "gain_db": gain,
+            "mask": mask,
+            "class_set_size": classes.len(),
+        });
+        if use_other {
+            stimulus["out_of_set"] = json!(out_of_set);
+        }
+        if min_jump > 0 {
+            stimulus["min_jump"] = json!(min_jump);
+        }
+        if relaxed {
+            stimulus["constraint_relaxed"] = json!(true);
+        }
+        if let Some(ms) = pace_ms {
+            stimulus["pace_ms"] = json!(ms);
+        }
+        if !p.class_weights.is_empty() {
+            stimulus["weighted"] = json!(true);
+        }
         out.push(TrialSpec::Identify(IdentifyTrial {
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            pace_ms,
             exercise: ExerciseKind::PitchId,
             prompt: match p.answer {
                 PitchAnswer::PitchClass => "Name the note".into(),
                 PitchAnswer::NoteWithOctave => "Name the note and octave".into(),
             },
             events: vec![tone(midi)],
-            mask_before: p.mask,
+            mask_before: mask,
             choices: choices.clone(),
             correct,
             deadline_ms: p.deadline_ms,
             reference: None,
-            stimulus: json!({
-                "pitch_class": pc.name(),
-                "octave": octave,
-                "midi": midi,
-                "timbre": timbre,
-                "holdout": holdout,
-                "gain_db": gain,
-                "mask": p.mask,
-                "class_set_size": classes.len(),
-            }),
+            stimulus,
             choice_sounds,
         }));
     }
@@ -480,6 +628,7 @@ fn gen_anchor_song(
                     answer_after_ms: None,
                     after_answer: None,
                     cue: None,
+                    pace_ms: None,
                     exercise: ExerciseKind::AnchorSong,
                     prompt: format!("“{}”: original key or shifted?", a.title),
                     events,
@@ -570,6 +719,7 @@ fn gen_incidental(
                 "timbre": timbre,
             }),
             cue: Some(VisualCue { color: color(shown).0.into(), delay_ms: p.cue_delay_ms }),
+            pace_ms: None,
         }));
     }
     Ok(out)
@@ -639,6 +789,7 @@ fn gen_tonal_center(
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            pace_ms: None,
             exercise: ExerciseKind::TonalCenterId,
             prompt: if p.reference {
                 "The first tone is A. Name the key".into()
@@ -759,6 +910,7 @@ fn gen_interval_id(
             answer_after_ms: (t0 > 0.0).then_some(t0),
             after_answer: None,
             cue: None,
+            pace_ms: None,
             exercise: ExerciseKind::IntervalId,
             prompt: if p.in_key { "Which interval? (in the key)".into() } else { "Which interval?".into() },
             events,
@@ -993,6 +1145,7 @@ fn gen_scale_degree(p: &ScaleDegreeParams, n: usize, rng: &mut Rng) -> Result<Ve
                 "timbre": timbre,
             }),
             cue: None,
+            pace_ms: None,
             answer_after_ms: Some(t0),
             after_answer: (p.resolution != Resolution::None).then(|| walk(0, 0.0)),
             choice_sounds: degrees
@@ -1068,6 +1221,7 @@ fn gen_interval_comparison(
                 "timbre": timbre,
             }),
             cue: None,
+            pace_ms: None,
             answer_after_ms: Some(span + 600.0),
             after_answer: None,
             choice_sounds: vec![
@@ -1160,6 +1314,7 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            pace_ms: None,
             exercise: ExerciseKind::ChordId,
             prompt: if p.answer_inversion {
                 "Which chord and inversion?".into()
@@ -1262,6 +1417,7 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            pace_ms: None,
             exercise: ExerciseKind::ScaleId,
             prompt: "Which scale?".into(),
             events,
@@ -2837,4 +2993,98 @@ mod tests {
         let TrialSpec::Identify(t) = &generate_block(&no_same, 1, &GenContext::default()).unwrap()[0] else { panic!() };
         assert_eq!(t.choices.len(), 2);
     }
+
+    fn pitch_trials(json: &str, seed: u64) -> Vec<IdentifyTrial> {
+        generate_block(&block(json), seed, &GenContext::default())
+            .unwrap()
+            .into_iter()
+            .map(|t| match t {
+                TrialSpec::Identify(t) => t,
+                _ => panic!("not an identification trial"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn jump_rule_keeps_consecutive_tones_apart() {
+        for seed in 0..10 {
+            let trials = pitch_trials(
+                r#"{"type": "pitch_id", "count": 1000, "params": {"octaves": [3, 4, 5], "min_jump_semitones": 13}}"#,
+                seed,
+            );
+            for w in trials.windows(2) {
+                let (a, b) = (w[0].events[0].midi, w[1].events[0].midi);
+                assert!(w[1].stimulus.get("constraint_relaxed").is_none(), "seed {seed}: relaxed");
+                assert!((a - b).abs() >= 13, "seed {seed}: {a} then {b}");
+            }
+            // Every class still comes up often.
+            for pc in PitchClass::ALL {
+                let n = trials.iter().filter(|t| t.correct == pc.name()).count();
+                assert!(n > 50, "seed {seed}: {pc:?} only {n} times");
+            }
+        }
+    }
+
+    #[test]
+    fn subsets_mix_in_other_at_the_edges() {
+        let trials = pitch_trials(
+            r#"{"type": "pitch_id", "count": 1000, "params": {"classes": ["C", "E", "G#"], "out_of_set_rate": 0.2, "octaves": [3, 4, 5], "min_jump_semitones": 13}}"#,
+            3,
+        );
+        let others: Vec<&IdentifyTrial> = trials.iter().filter(|t| t.correct == OTHER).collect();
+        let share = others.len() as f64 / trials.len() as f64;
+        assert!((share - 0.2).abs() < 0.03, "{share}");
+        for t in &trials {
+            assert_eq!(t.choices.len(), 4);
+            assert_eq!(t.choices.last().unwrap().id, OTHER);
+            let pc = t.stimulus["pitch_class"].as_str().unwrap();
+            let inside = ["C", "E", "G#"].contains(&pc);
+            assert_eq!(t.correct == OTHER, !inside);
+            assert_eq!(t.stimulus["out_of_set"], json!(!inside));
+            if !inside {
+                // "Other" plays the tone that was heard.
+                assert_eq!(t.choice_sound(OTHER).unwrap()[0].midi, t.events[0].midi);
+            }
+        }
+        // Out-of-set tones sit at the edges of the range unless the jump rule moved them.
+        let edge = others.iter().filter(|t| matches!(t.stimulus["octave"].as_i64(), Some(3) | Some(5))).count();
+        assert!(edge as f64 / others.len() as f64 > 0.75, "{edge} of {}", others.len());
+        // "Other" is a pitch-class answer.
+        let bad = block(r#"{"type": "pitch_id", "count": 5, "params": {"classes": ["C", "E"], "out_of_set_rate": 0.2, "answer": "note_with_octave"}}"#);
+        assert!(generate_block(&bad, 1, &GenContext::default()).is_err());
+    }
+
+    #[test]
+    fn class_weights_set_the_anchor_share() {
+        let trials = pitch_trials(r#"{"type": "pitch_id", "count": 1000, "params": {"class_weights": {"C": 0.4}}}"#, 9);
+        let share = |pc: &str| trials.iter().filter(|t| t.correct == pc).count() as f64 / trials.len() as f64;
+        assert!((share("C") - 0.4).abs() < 0.02, "{}", share("C"));
+        for pc in PitchClass::ALL.iter().skip(1) {
+            assert!((share(pc.name()) - 0.6 / 11.0).abs() < 0.02, "{pc:?}: {}", share(pc.name()));
+        }
+        let ctx = GenContext::default();
+        for bad in [
+            r#"{"type": "pitch_id", "params": {"class_weights": {"C": 1.2}}}"#,
+            r#"{"type": "pitch_id", "params": {"classes": ["C", "E"], "class_weights": {"D": 0.5}}}"#,
+            r#"{"type": "pitch_id", "params": {"class_weights": {"H": 0.5}}}"#,
+        ] {
+            assert!(generate_block(&block(bad), 1, &ctx).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn streams_are_paced_without_masks() {
+        let trials = pitch_trials(
+            r#"{"type": "pitch_id", "count": 5, "params": {"pacing": {"stream": {"ioi_ms": 1400}}, "mask": "random_tones"}}"#,
+            1,
+        );
+        for t in &trials {
+            assert_eq!(t.pace_ms, Some(1400));
+            assert_eq!(t.mask_before, Mask::None);
+        }
+        // A tone must fit in its slot.
+        let tight = block(r#"{"type": "pitch_id", "count": 5, "params": {"pacing": {"stream": {"ioi_ms": 1100}}}}"#);
+        assert!(generate_block(&tight, 1, &GenContext::default()).is_err());
+    }
+
 }

@@ -92,6 +92,10 @@ pub fn run() {
             commands::list_anchors,
             commands::save_anchor,
             commands::remove_anchor,
+            commands::ap_dashboard,
+            commands::preview_daily_set,
+            commands::save_daily_plan,
+            commands::set_course_level,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Singing Trainer");

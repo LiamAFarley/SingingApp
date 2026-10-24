@@ -94,6 +94,7 @@ fn runner_main(core: Arc<Core>, rx: Receiver<RunnerMsg>, state: Arc<RwLock<Runne
             session_id,
             spec,
             last_labeled,
+            stream_next: None,
         };
         let result = s.run();
         last_labeled = s.last_labeled;
@@ -183,7 +184,13 @@ struct SessionRun<'a> {
     session_id: String,
     spec: SessionSpec,
     last_labeled: Option<chrono::DateTime<chrono::Utc>>,
+    /// The output frame of the next tone in a paced stream.
+    stream_next: Option<u64>,
 }
+
+/// A block answered without help starts with the clearing sound if a named tone was heard this
+/// recently.
+const SCRUB_WITHIN: Duration = Duration::from_secs(5 * 60);
 
 fn secs(engine: &AudioEngine, frame: u64) -> f64 {
     frame as f64 / engine.sample_rate() as f64
@@ -288,6 +295,22 @@ impl<'a> SessionRun<'a> {
                     _ => {}
                 }
             }
+            self.stream_next = None;
+            let recent_label = self
+                .last_labeled
+                .map(|l| (now() - l).to_std().map(|d| d < SCRUB_WITHIN).unwrap_or(true))
+                .unwrap_or(false);
+            // Only absolute-pitch blocks need pitch memory cleared.
+            let ap_block = matches!(
+                block.exercise.kind(),
+                ExerciseKind::PitchId | ExerciseKind::SingPitch | ExerciseKind::TonalCenterId | ExerciseKind::AnchorSong
+            );
+            let scrub = match block.pre_mask {
+                Some(m) => m,
+                None if ap_block && !feedback.shows_trial_result() && recent_label => Mask::ShepardGlissando,
+                None => Mask::None,
+            };
+            self.pre_mask(&engine, scrub)?;
             let grading = |t: &TrialSpec| GradingConfig::resolve(&block.grading, default_mode(t));
             for (ti, trial) in trials.iter().enumerate() {
                 let mut attempt = 0u32;
@@ -356,6 +379,11 @@ impl<'a> SessionRun<'a> {
             SessionStatus::Completed,
             &session_summary(&report),
         )?;
+        // Courses move on as soon as a level's checks are passed.
+        if let Err(e) = trainer_core::courses::refresh_progress(self.db) {
+            tracing::warn!("course progress: {e:#}");
+        }
+        self.core.emit("courses-changed", ());
         let report = session_report(self.db, &self.session_id)?;
         self.set(|st| {
             st.phase = Phase::SessionSummary;
@@ -376,6 +404,26 @@ impl<'a> SessionRun<'a> {
             }
         });
         let _ = engine;
+        Ok(())
+    }
+
+    /// Plays a mask before a block (the clearing glissando), showing how long is left. Skip cuts it
+    /// short.
+    fn pre_mask(&mut self, engine: &AudioEngine, mask: Mask) -> R<()> {
+        let Some(buf) = self.core.renderer().render_mask(mask, now().timestamp_micros() as u64) else {
+            return Ok(());
+        };
+        let at = engine.frame_after_ms(150.0);
+        let end = at + buf.frames() as u64;
+        engine.play(Arc::new(buf), at, 1.0, Bus::Prompt)?;
+        self.set(|st| {
+            st.phase = Phase::Scrubbing;
+            st.scrub_end_s = Some(secs(engine, end));
+        });
+        if self.wait_until_frame(engine, end)? {
+            engine.stop_bus(Bus::Prompt);
+        }
+        self.set(|st| st.scrub_end_s = None);
         Ok(())
     }
 
@@ -427,12 +475,21 @@ impl<'a> SessionRun<'a> {
             .map(Arc::new);
         let sr = engine.sample_rate() as f64;
         let mut at = engine.frame_after_ms(80.0);
+        // A paced stream keeps its schedule: the next tone waits for its slot.
+        if let (Some(_), Some(next)) = (t.pace_ms, self.stream_next) {
+            at = at.max(next);
+        }
         if let Some(m) = &mask {
             engine.play(m.clone(), at, 1.0, Bus::Prompt)?;
             at += m.frames() as u64 + engine.frames_from_ms(400.0);
         }
         engine.play(stim.clone(), at, 1.0, Bus::Prompt)?;
         let onset_frame = at;
+        if let Some(ioi) = t.pace_ms {
+            self.stream_next = Some(onset_frame + engine.frames_from_ms(ioi as f64));
+        }
+        // In a stream, answers close shortly before the next tone.
+        let deadline_ms = t.deadline_ms.or(t.pace_ms.map(|p| p.saturating_sub(250)));
         let onset = Instant::now()
             + Duration::from_secs_f64(onset_frame.saturating_sub(engine.now()) as f64 / sr);
         // Answers open at `answer_after_ms` (after a key-setting cadence). Response times and the
@@ -454,8 +511,8 @@ impl<'a> SessionRun<'a> {
         let mut view = self.base_view(t.exercise, Interaction::Choice, &t.prompt, attempt);
         view.choices = t.choices.clone();
         view.layout = layout;
-        view.deadline_ms = t.deadline_ms;
-        view.can_replay = t.deadline_ms.is_none();
+        view.deadline_ms = deadline_ms;
+        view.can_replay = deadline_ms.is_none();
         view.can_reference = t.reference.is_some();
         // The countdown starts where response times do.
         view.response_start_s = Some(secs(engine, onset_frame) + rt_from.saturating_duration_since(onset).as_secs_f64());
@@ -469,9 +526,7 @@ impl<'a> SessionRun<'a> {
             st.phase = Phase::Listening;
             st.trial = Some(view);
         });
-        let deadline = t
-            .deadline_ms
-            .map(|d| rt_from + Duration::from_millis(d as u64));
+        let deadline = deadline_ms.map(|d| rt_from + Duration::from_millis(d as u64));
         let mut answering = false;
         let mut replays = 0u32;
         let (answer, rt) = loop {
@@ -809,6 +864,12 @@ impl<'a> SessionRun<'a> {
                 tags.push(t.clone());
             }
         }
+        if let Some(c) = &block.course {
+            tags.push(c.tag());
+            if c.verify {
+                tags.push(trainer_core::courses::CHECK_TAG.into());
+            }
+        }
         let started = now();
         let secs_since = self
             .last_labeled
@@ -923,7 +984,17 @@ impl<'a> SessionRun<'a> {
             _ => None,
         };
         let passive = matches!(trial, TrialSpec::Pairing(_));
-        let auto_ms = if passive {
+        // A stream moves on in time for the next tone's slot.
+        let stream_ms = match (trial, self.stream_next) {
+            (TrialSpec::Identify(t), Some(next)) if t.pace_ms.is_some() => {
+                let left = next.saturating_sub(engine.now()) as f64 * 1000.0 / engine.sample_rate() as f64;
+                Some((left - 120.0).max(100.0) as u32)
+            }
+            _ => None,
+        };
+        let auto_ms = if let Some(ms) = stream_ms {
+            Some(ms)
+        } else if passive {
             Some(200)
         } else if !show {
             Some(700)

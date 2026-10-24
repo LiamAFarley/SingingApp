@@ -121,6 +121,20 @@ pub fn grade_choice(
             }
         }
     }
+    // Error in pitch classes, folded to −6..5: UCSF-style points (1 exact, 0.75 a semitone off)
+    // and the absolute error that mean absolute deviation is built from.
+    let class_error = match (trial.exercise, metrics.get("signed_error").and_then(serde_json::Value::as_i64)) {
+        (ExerciseKind::PitchId, Some(e)) => Some(((e + 6).rem_euclid(12)) - 6),
+        _ => None,
+    };
+    if let Some(e) = class_error {
+        metrics["class_error"] = json!(e);
+        metrics["ucsf_points"] = json!(match e.abs() {
+            0 => 1.0,
+            1 => 0.75,
+            _ => 0.0,
+        });
+    }
     let summary = match answer {
         None => format!("No answer. It was {}.", label_of(&trial.correct)),
         Some(_) if correct => format!("Correct: {}.", label_of(&trial.correct)),
@@ -814,6 +828,7 @@ mod tests {
             answer_after_ms: None,
             after_answer: None,
             cue: None,
+            pace_ms: None,
             choice_sounds: Vec::new(),
             exercise: ExerciseKind::PitchId,
             prompt: "Name the note".into(),
@@ -831,6 +846,22 @@ mod tests {
             reference: None,
             stimulus: json!({}),
         }
+    }
+
+    #[test]
+    fn naming_scores_ucsf_points_on_the_pitch_class_circle() {
+        let points = |correct: &str, answer: Option<&str>| {
+            let o = grade_choice(&id_trial(correct), answer, Some(900.0));
+            (o.metrics.get("class_error").and_then(|v| v.as_i64()), o.metrics.get("ucsf_points").and_then(|v| v.as_f64()))
+        };
+        assert_eq!(points("C", Some("C")), (Some(0), Some(1.0)));
+        assert_eq!(points("C", Some("C#")), (Some(1), Some(0.75)));
+        // B is a semitone below C around the circle.
+        assert_eq!(points("C", Some("B")), (Some(-1), Some(0.75)));
+        assert_eq!(points("C", Some("F#")).1, Some(0.0));
+        assert_eq!(points("C", None), (None, None));
+        // "Other" on a tone from inside the set has no class error.
+        assert_eq!(points("C", Some("other")), (None, None));
     }
 
     #[test]

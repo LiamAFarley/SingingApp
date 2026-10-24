@@ -76,6 +76,9 @@ pub enum Mask {
     #[default]
     RandomTones,
     ChromaticCluster,
+    /// A 20-second, endlessly descending Shepard–Risset glissando that clears echoic and tonal
+    /// memory before a block answered without help.
+    ShepardGlissando,
 }
 
 impl Mask {
@@ -85,8 +88,32 @@ impl Mask {
             Mask::Noise => "noise",
             Mask::RandomTones => "random_tones",
             Mask::ChromaticCluster => "chromatic_cluster",
+            Mask::ShepardGlissando => "shepard_glissando",
         }
     }
+
+    /// About how long the mask lasts, in seconds.
+    pub fn seconds(self) -> f32 {
+        match self {
+            Mask::None => 0.0,
+            Mask::ShepardGlissando => SHEPARD_GLISSANDO_S,
+            _ => 1.6,
+        }
+    }
+}
+
+pub const SHEPARD_GLISSANDO_S: f32 = 20.0;
+
+/// When tones arrive in a naming block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Pacing {
+    /// The next tone follows your answer.
+    #[default]
+    Respond,
+    /// A tone every `ioi_ms` whether or not you answered (Brady's paced streams). An answer is
+    /// accepted until shortly before the next tone.
+    Stream { ioi_ms: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -361,6 +388,20 @@ pub struct PitchIdParams {
     pub answer: PitchAnswer,
     #[serde(default)]
     pub detune_cents: f32,
+    /// Each tone is at least this many semitones from the previous one, so it cannot be named by
+    /// its interval from the last (labelled) tone. 13 needs at least three octaves.
+    #[serde(default)]
+    pub min_jump_semitones: u32,
+    /// For a subset: this share of tones comes from outside it, at the edges of the range, and is
+    /// answered "Other".
+    #[serde(default)]
+    pub out_of_set_rate: f32,
+    /// Relative weights per pitch class, e.g. `{"C": 0.4}` (Brady's anchor). Classes not listed
+    /// share what is left equally.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub class_weights: std::collections::BTreeMap<String, f32>,
+    #[serde(default)]
+    pub pacing: Pacing,
 }
 
 impl Default for PitchIdParams {
@@ -1536,6 +1577,32 @@ pub struct BlockSpec {
     /// Marks an assessment block: feedback is forced off and holdout rules are enforced.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub assessment: bool,
+    /// Played once before the first trial, e.g. `shepard_glissando` to clear pitch memory before
+    /// a test. When omitted, a block without feedback starts with the glissando anyway if a named
+    /// tone was heard in the last few minutes; `none` turns that off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_mask: Option<Mask>,
+    /// The course level this block belongs to, for course progress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub course: Option<CourseRef>,
+}
+
+/// A block's place in a course: which course and level, and whether it is the level's check.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct CourseRef {
+    pub course: String,
+    /// 1-based.
+    pub level: u32,
+    /// The level's verification block (no feedback), which its pass rule counts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub verify: bool,
+}
+
+impl CourseRef {
+    /// The trial tag for this course level, e.g. `course.ap_naming.03`.
+    pub fn tag(&self) -> String {
+        format!("course.{}.{:02}", self.course, self.level)
+    }
 }
 
 fn is_default_grading(g: &GradingOverrides) -> bool {
@@ -1555,6 +1622,8 @@ impl BlockSpec {
             title: None,
             instructions: None,
             assessment: false,
+            pre_mask: None,
+            course: None,
         }
     }
 
@@ -1689,6 +1758,9 @@ pub struct IdentifyTrial {
     /// clicked after answering. Made with the trial and not stored.
     #[serde(skip)]
     pub choice_sounds: Vec<ChoiceSound>,
+    /// Paced stream: a tone every this many ms, answered before the next one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pace_ms: Option<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

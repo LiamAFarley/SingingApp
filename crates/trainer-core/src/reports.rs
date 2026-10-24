@@ -350,9 +350,9 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
     vec![
         entry(
             ExerciseKind::PitchId,
-            "A single tone, no reference; name it. Absolute pitch identification. `classes` is all twelve or a subset for progressive category training (only those notes are played and offered as answers); octaves/timbres/pool for transfer tests, deadline_ms for speed. After answering, the user can click any answer to hear it. Keep a mask between trials when feedback reveals answers.",
+            "A single tone, no reference; name it. Absolute pitch identification. `classes` is all twelve or a subset for progressive category training; with out_of_set_rate (0.15–0.2) that share of tones comes from outside the subset, at the edges of the range, answered Other. Anti-cheating options: octaves spanning at least three octaves with min_jump_semitones 13 (no tone within 13 semitones of the last, so it cannot be named by its interval from the previous labelled tone), deadline_ms 2000, and a block pre_mask \"shepard_glissando\" (20 s, clears pitch memory) before unassisted checks. class_weights (e.g. {\"C\": 0.4}) weights an anchor class (Brady); pacing {\"stream\": {\"ioi_ms\": 1400}} plays a tone on a fixed schedule whether or not the user answered. octaves/timbres/pool for transfer tests. After answering, the user can click any answer to hear it. Keep a mask between trials when feedback reveals answers.",
             schema_of::<PitchIdParams>(),
-            json!({"type": "pitch_id", "count": 40, "feedback": "after_trial", "params": {"classes": ["C", "E", "G#"], "timbres": ["gm:0", "gm:48"], "mask": "random_tones"}}),
+            json!({"type": "pitch_id", "count": 40, "feedback": "after_trial", "params": {"classes": ["C", "E", "G#", "D"], "out_of_set_rate": 0.15, "octaves": [3, 4, 5], "min_jump_semitones": 13, "deadline_ms": 3000, "mask": "random_tones"}}),
         ),
         entry(
             ExerciseKind::SingPitch,

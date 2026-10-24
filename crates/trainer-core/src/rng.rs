@@ -125,6 +125,58 @@ impl<T: Clone + PartialEq> BalancedBag<T> {
     }
 }
 
+/// Draws items in proportion to their weights, one cycle at a time. Each cycle holds every item
+/// as many times as its share of the cycle, with the fractions carried into later cycles, then
+/// shuffled, so the long-run shares are exact and long streaks of one item cannot happen.
+pub struct WeightedBag<T: Clone + PartialEq> {
+    items: Vec<(T, f64)>,
+    carry: Vec<f64>,
+    cycle: f64,
+    bag: Vec<T>,
+    last: Option<T>,
+}
+
+impl<T: Clone + PartialEq> WeightedBag<T> {
+    /// `weights` need not sum to one; `cycle` is the number of draws per cycle.
+    pub fn new(weights: Vec<(T, f64)>, cycle: usize) -> Self {
+        let total: f64 = weights.iter().map(|w| w.1.max(0.0)).sum::<f64>().max(1e-12);
+        let items: Vec<(T, f64)> = weights.into_iter().map(|(t, w)| (t, w.max(0.0) / total)).collect();
+        WeightedBag {
+            carry: vec![0.0; items.len()],
+            items,
+            cycle: cycle.max(1) as f64,
+            bag: Vec::new(),
+            last: None,
+        }
+    }
+
+    pub fn draw(&mut self, rng: &mut Rng) -> Option<T> {
+        if self.items.is_empty() {
+            return None;
+        }
+        while self.bag.is_empty() {
+            for (i, (item, w)) in self.items.iter().enumerate() {
+                self.carry[i] += w * self.cycle;
+                let k = self.carry[i].floor();
+                self.carry[i] -= k;
+                for _ in 0..k as usize {
+                    self.bag.push(item.clone());
+                }
+            }
+            rng.shuffle(&mut self.bag);
+            if self.bag.len() > 1 && self.bag.last() == self.last.as_ref() {
+                if let Some(j) = self.bag.iter().position(|x| Some(x) != self.last.as_ref()) {
+                    let n = self.bag.len();
+                    self.bag.swap(n - 1, j);
+                }
+            }
+        }
+        let item = self.bag.pop();
+        self.last = item.clone();
+        item
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -174,5 +226,24 @@ mod tests {
             assert_eq!(draws.iter().filter(|&&d| d == k).count(), 100);
         }
         assert!(draws.windows(2).all(|w| w[0] != w[1]));
+    }
+
+    #[test]
+    fn weighted_bag_matches_the_weights() {
+        let mut r = Rng::new(11);
+        // Brady's first stage: C on 40% of trials, the other eleven sharing the rest.
+        let mut weights = vec![(0usize, 0.40)];
+        weights.extend((1..12).map(|k| (k, 0.60 / 11.0)));
+        let mut bag = WeightedBag::new(weights, 24);
+        let n = 12_000;
+        let draws: Vec<usize> = (0..n).map(|_| bag.draw(&mut r).unwrap()).collect();
+        let share = |k: usize| draws.iter().filter(|&&d| d == k).count() as f64 / n as f64;
+        assert!((share(0) - 0.40).abs() < 0.02, "{}", share(0));
+        for k in 1..12 {
+            assert!((share(k) - 0.60 / 11.0).abs() < 0.02, "{k}: {}", share(k));
+        }
+        // No long streaks of the heavy class.
+        let longest = draws.chunk_by(|a, b| a == b).map(|c| c.len()).max().unwrap();
+        assert!(longest <= 10, "{longest}");
     }
 }

@@ -9,7 +9,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use trainer_core::rng::Rng;
-use trainer_core::schema::{Mask, SoundEvent, SungTrial, TargetNote};
+use trainer_core::schema::{Mask, SHEPARD_GLISSANDO_S, SoundEvent, SungTrial, TargetNote};
+
+/// How fast the memory-clearing glissando falls.
+const GLISSANDO_S_PER_OCTAVE: f64 = 4.0;
 use trainer_core::theory::{ScaleKind, midi_to_hz};
 use trainer_core::timbre::Timbre;
 
@@ -316,6 +319,39 @@ impl Renderer {
         SoundBuffer::from_mono(self.sample_rate, &mono)
     }
 
+    /// An endlessly descending Shepard–Risset glissando: octave-spaced partials under a fixed
+    /// bell-shaped envelope in log frequency, all gliding down together. Each partial fades out
+    /// at the bottom of the envelope as another fades in at the top, so the pitch keeps falling
+    /// without arriving anywhere. Played before a test to clear pitch memory.
+    pub fn shepard_glissando(&self, seconds: f64, s_per_octave: f64) -> SoundBuffer {
+        let sr = self.sample_rate as f64;
+        const OCTAVES: usize = 9;
+        let f_min = 20.0f64;
+        let centre = OCTAVES as f64 / 2.0;
+        let sigma = 1.4;
+        let n = (seconds * sr) as usize;
+        let envelope = |pos: f64| (-0.5 * ((pos - centre) / sigma).powi(2)).exp();
+        let norm: f64 = (0..OCTAVES).map(|k| envelope(k as f64 + 0.5)).sum::<f64>().max(1e-9);
+        let amp = db_to_gain(-10.0) as f64 / norm;
+        let mut phase = [0.0f64; OCTAVES];
+        let mut mono = vec![0.0f32; n];
+        for (i, s) in mono.iter_mut().enumerate() {
+            let t = i as f64 / sr;
+            // Position of partial k in octaves above f_min, drifting down and wrapping.
+            let drift = t / s_per_octave;
+            let mut v = 0.0;
+            for (k, ph) in phase.iter_mut().enumerate() {
+                let pos = (k as f64 - drift).rem_euclid(OCTAVES as f64);
+                let f = f_min * pos.exp2();
+                *ph = (*ph + 2.0 * std::f64::consts::PI * f / sr) % (2.0 * std::f64::consts::PI);
+                v += envelope(pos) * ph.sin();
+            }
+            let fade = (t / 0.5).min(1.0).min((seconds - t) / 0.8).max(0.0);
+            *s = (v * amp * fade) as f32;
+        }
+        SoundBuffer::from_mono(self.sample_rate, &mono)
+    }
+
     /// The interference sound played between absolute-pitch trials.
     pub fn render_mask(&self, mask: Mask, seed: u64) -> Option<SoundBuffer> {
         let mut rng = Rng::new(seed ^ 0x6d61_736b);
@@ -353,6 +389,7 @@ impl Renderer {
                     .collect();
                 Some(SoundBuffer::from_mono(self.sample_rate, &mono))
             }
+            Mask::ShepardGlissando => Some(self.shepard_glissando(SHEPARD_GLISSANDO_S as f64, GLISSANDO_S_PER_OCTAVE)),
             Mask::ChromaticCluster => {
                 let events: Vec<SoundEvent> = (0..24)
                     .map(|k| SoundEvent {
@@ -704,6 +741,26 @@ mod tests {
             assert!(b.duration_s() > 0.9 && b.duration_s() < 2.5, "{m:?}");
             assert!(b.peak() > 0.01 && b.peak() <= 0.95);
         }
+    }
+
+    #[test]
+    fn shepard_glissando_is_smooth_and_falls() {
+        let r = Renderer::new(16_000, SoundFonts::default());
+        let b = r.shepard_glissando(6.0, 4.0);
+        assert!((b.duration_s() - 6.0).abs() < 0.01);
+        assert!(b.peak() > 0.05 && b.peak() <= 0.95, "{}", b.peak());
+        let mono = mono_of(&b);
+        // No clicks: neighbouring samples never jump.
+        let jump = mono.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(jump < 0.2, "{jump}");
+        // Whatever partial the tracker follows, it keeps falling (octave hops aside).
+        let tr = track(&mono[16_000..80_000], &TrackOptions::new(16_000.0));
+        let v: Vec<f32> = tr.frames.iter().filter_map(|f| f.midi).collect();
+        let steps: Vec<f32> = v.windows(2).map(|w| w[1] - w[0]).filter(|d| d.abs() < 3.0).collect();
+        assert!(steps.len() > 50, "{}", steps.len());
+        let falling = steps.iter().filter(|d| **d < 0.0).count() as f32 / steps.len() as f32;
+        assert!(falling > 0.8, "{falling}");
+        assert!(r.render_mask(Mask::ShepardGlissando, 1).unwrap().duration_s() >= 19.9);
     }
 
     #[test]

@@ -83,7 +83,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
         if (k === "t" && fb.can_retry) command({ kind: "retry" });
         if (k === "p" && fb.can_play_answer) command({ kind: "play_answer" });
       }
-      if (k === "s" && (phase === "recording" || phase === "listening")) command({ kind: "skip" });
+      if (k === "s" && (phase === "recording" || phase === "listening" || phase === "scrubbing")) command({ kind: "skip" });
     };
     // Capture phase, so the answer pads never see keys meant for the end-session question.
     window.addEventListener("keydown", onKey, true);
@@ -151,6 +151,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
       </div>
       <div className="stage">
         {phase === "block_intro" && <BlockIntro runner={runner} />}
+        {phase === "scrubbing" && <Scrubbing runner={runner} />}
         {(phase === "preparing" || phase === "listening" || phase === "answering" || phase === "recording" || phase === "grading" || phase === "feedback") &&
           trial && <TrialStage runner={runner} trial={trial} />}
         {phase === "preparing" && !trial && <div className="prompt-sub">Preparing…</div>}
@@ -190,6 +191,32 @@ function BlockIntro({ runner }: { runner: RunnerState }) {
       <div className="controls" style={{ marginTop: 8 }}>
         <button className="btn primary" onClick={() => command({ kind: "begin" })} autoFocus>
           Begin <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Space</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** The clearing glissando before a block answered without help. */
+function Scrubbing({ runner }: { runner: RunnerState }) {
+  useAnimationFrame(true);
+  const end = runner.scrub_end_s ?? live.now();
+  const [total] = useState(() => Math.max(1, end - live.now()));
+  const left = Math.max(0, end - live.now());
+  return (
+    <div className="section" style={{ alignItems: "center", textAlign: "center", gap: 12, margin: "auto 0" }}>
+      <h2 style={{ fontSize: 20 }}>Clearing pitch memory</h2>
+      <p className="muted" style={{ maxWidth: 520 }}>
+        An endlessly falling tone washes out the notes you heard last, so the next answers come from your memory of each
+        note rather than from the last one you were told.
+      </p>
+      <div className="countdown" style={{ width: 320 }}>
+        <div style={{ width: `${(left / total) * 100}%` }} />
+      </div>
+      <div className="small faint num">{Math.ceil(left)} s</div>
+      <div className="controls">
+        <button className="btn quiet" onClick={() => command({ kind: "skip" })}>
+          Skip <span className="kbd">S</span>
         </button>
       </div>
     </div>
