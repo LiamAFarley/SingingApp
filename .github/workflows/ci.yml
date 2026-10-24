@@ -13,6 +13,7 @@ jobs:
   test-linux:
     name: Tests (Linux)
     runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -23,8 +24,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: System packages
         run: |
+          # The man-db trigger makes large installs take many minutes on hosted runners.
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
-          sudo apt-get install -y libasound2-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev
+          sudo apt-get install -y --no-install-recommends libasound2-dev libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev
       - name: Install npm packages
         run: npm ci
       - name: UI type check and build
@@ -39,6 +42,7 @@ jobs:
   windows:
     name: Windows (tests, ASIO, installer)
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       LIBCLANG_PATH: C:\Program Files\LLVM\bin
     steps:
