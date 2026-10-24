@@ -8,14 +8,23 @@
 - **Built:** phases 1–3.
 - **Phase 4, built:**
   - Interval, chord and scale identification.
+  - Intervals inside a key (after a cadence, both notes diatonic) as well as without a key.
+  - Interval comparison.
+  - Scale degrees in the style of Functional Ear Trainer: a graded eight-level course, fixed or changing keys, and the walk to the tonic (nearest, up or down).
   - Pitch matching, sustain, interval singing and patterns, with the follow-along lane and backing options.
-  - The range profile.
+  - Harmony singing: parallel thirds or sixths to a generated melody, or one part of a multi-part library piece, with equal or just-intonation grading.
+  - The range profile, set by hand.
 - **Phase 5, built:**
   - Sight singing from staff notation (VexFlow) and melodic dictation with a monophonic score editor.
-  - Melodies are generated or written by the coach.
+  - Melodies are generated, written by the coach, or taken from the melody library.
+  - The library is a watched folder of JSON and MIDI files, with MCP tools to list, add and import pieces.
 - **All six §9 absolute-pitch types are in, including anchor songs and incidental pairing.**
-- **Phase 4, still to do:** scale-degree, interval comparison, progressions, rhythm types, harmony, echo phrases, range finder, own-voice matching.
-- **Phase 5, still to do:** MusicXML/MIDI import and the score library (`search_scores`, `create_score`); `regrade` and `get_trial_plot` over MCP.
+- **Phase 4, still to do:** progressions, echo phrases, own-voice matching.
+- **Phase 5, still to do:** `regrade` and `get_trial_plot` over MCP.
+- **Dropped:**
+  - The range finder: the singer knows their range and sets it in Settings.
+  - The rhythm types (§10): rhythm is practised inside sight singing.
+  - MusicXML import: the coach converts the user's scores into library JSON or MIDI files instead.
 - **Not started:** Part 2 and §17.
 - **Testing:** everything runs in CI, which builds the Windows installer with ASIO. The audio engine has not yet been run on the Scarlett.
 
@@ -69,9 +78,8 @@ LLM (MCP) reads results → writes session JSON → app validates and queues it
 - Post-trial pitch analysis and grading
 - Full AP suite: identification, production, cross-octave and cross-timbre transfer, speeded identification, passive pairing, incidental pairing, anchor songs, tonal-centre identification, assessment battery
 - Relative pitch: intervals, chords, scale degrees, cadences and progressions, tonic finding
-- Singing: pitch matching, sustain, interval singing, patterns, harmony against drones and chords, echo, range profile, own-voice references
-- Rhythm reproduction against a click
-- Sight singing from generated, LLM-authored and imported melodies; melodic, rhythmic and harmonic dictation
+- Singing: pitch matching, sustain, interval singing, patterns, harmony against a second voice, echo, range profile (set by hand), own-voice references
+- Sight singing from generated, LLM-authored and library melodies (JSON and MIDI files); melodic and harmonic dictation
 - MCP server: read results, generate and queue sessions, author scores, keep coach notes
 
 ### Part 2 (V2)
@@ -478,18 +486,17 @@ Presets and "repeat last session" work without the LLM.
 
 | Type | Description |
 |---|---|
-| `interval_id` | Melodic ascending/descending or harmonic intervals → name the interval. Params: interval set, directions, register, root range, timbres, compound intervals. |
+| `interval_id` | Melodic ascending/descending or harmonic intervals → name the interval. Params: interval set, directions, register, root range, timbres. With `in_key` a cadence plays first and both notes come from the key's scale (fixed key, or a new key per block or per question); without it the intervals have no key. |
 | `chord_id` | Quality (major, minor, diminished, augmented, suspended, sevenths, …) and/or inversion; close or open voicing; register. |
-| `scale_degree_id` | Key established by a cadence or drone, then a tone → name the degree. |
+| `scale_degree_id` | After Functional Ear Trainer: a cadence sets the key, a tone plays → name its degree (numbers or solfège, chromatic degrees optional). After the answer the tone walks the scale to the tonic: to the nearer tonic, always up or always down. Keys fixed or changing per block or per question; presets `degrees_01`–`08` form the course. |
 | `interval_comparison` | Two intervals → which is larger (or are they the same). |
 | `scale_id` | Scale or mode played → name it (major, natural/harmonic/melodic minor, modes, pentatonics, blues, …). |
 | `progression_id` | Identify a cadence type or Roman-numeral progression. |
-| `rhythm_reproduce` | Hear a rhythm → reproduce it by tapping the mic, a MIDI pad or key, or singing "ta" (EarMaster's rhythm imitation). Onsets come from the audio input or MIDI timestamps on the same clock as the click and are graded by alignment. |
-| `rhythm_reading` | See a rhythm in notation → tap it in time with the metronome. |
-| `rhythm_error_detection` | See a rhythm and hear a performance of it → mark the beats or bars that differ. |
 | `melody_error_detection` | See a melody and hear a performance of it → mark the notes that differ in pitch or rhythm. |
 
 Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per block: note names, movable-do, fixed-do or scale-degree numbers.
+
+Separate rhythm types (reproduction, reading, error detection) are dropped: rhythm is trained inside sight singing, where every note is graded for timing.
 
 ---
 
@@ -501,9 +508,8 @@ Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per b
 | `sustain` | Hold a note for N seconds, optionally over a drone. | absolute; centre error, drift, stability, vibrato |
 | `sing_interval` | From a start note (played or self-chosen), sing an interval up or down. | relative_to_first or absolute |
 | `pattern` | Scales, arpeggios, slides and vocalise patterns, transposed stepwise through a range. | absolute or relative |
-| `harmony` | Sing a given line or interval against a drone, chord or melody. | absolute, equal or just tuning |
+| `harmony` | Sing one voice while the app plays another: a diatonic third or sixth below or above a generated melody (by ear, or read from the staff), the melody over that voice, or one part of a multi-part library piece. The other voice shows in the lane. | absolute; equal or just tuning (each note against the pure interval over the other voice) |
 | `echo` | Hear a phrase → sing it back. | melody alignment |
-| `range_finder` | Guided slides and steps to find lowest and highest reachable and comfortable notes. | proposes a range-profile update the user confirms |
 | `own_voice_match` | Match a stored best take of your own voice. | absolute |
 
 ### Live tuner and follow-along display
@@ -514,7 +520,7 @@ Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per b
 
 ### Range profile
 
-`lowest_reachable`, `highest_reachable`, `comfortable_low`, `comfortable_high` (MIDI), plus `updated_at` and `source` (`range_finder`, `manual`, `llm`). Generators keep melodies inside the comfortable range unless a block opts out. The LLM can read and set it. A single extreme note never updates it automatically.
+`lowest_reachable`, `highest_reachable`, `comfortable_low`, `comfortable_high` (MIDI), plus `updated_at` and `source` (`manual`, `llm`). The singer sets it in Settings; there is no range finder. Generators keep melodies inside the comfortable range unless a block opts out. The LLM can read and set it. A single extreme note never updates it automatically.
 
 ---
 
@@ -524,7 +530,10 @@ Tonic finding uses `tonal_center_id` with `reference: true`. Answer labels per b
 
 1. **Generator** (`trainer-core`, deterministic from a seed). Params: key, mode, meter, bars, tempo, range (defaults to the comfortable range), rhythm vocabulary, max leap, step/leap mix, interval weights (e.g. emphasise descending minor sixths), chromatic-note rate, start and end degrees, final cadence, phrase structure (e.g. AABA). Shared by sight singing and dictation.
 2. **LLM-authored**: compact note JSON or MusicXML via MCP (`create_score`).
-3. **Library**: imported MusicXML (`.musicxml`, `.mxl`) and MIDI, with part selection (e.g. the soprano line of a chorale). Sources: the OpenScore Lieder Corpus (CC0 MusicXML), and the music21 corpus (Bach chorale voice parts, Essen folk melodies) exported once to MusicXML with a small music21 script. MIDI import supports quantised single-line material; spelling comes from the key-signature event or key estimation.
+3. **Library**: a watched folder (`%APPDATA%\SingingTrainer\library`) of JSON and MIDI files; a subfolder is a collection. The coach converts the user's existing scores into these files (or adds pieces over MCP with `add_library_pieces`); the app does not import MusicXML.
+   - JSON: one piece, a list, or a collection. A piece has one part (`notes`) or several (`parts`, top first). Notes are `{note, beats}` / `{rest}` objects or compact text, `"Eb4:1 F4:.5 G4 | Ab4:2~ | Ab4:1 R:1"`, with durations that carry over, ties, and checked barlines (a short first bar is a pickup).
+   - MIDI: one part per track, chords reduced to the top line, times rounded to sixteenths, a short first time signature kept as a pickup, the key from the key-signature event or estimated (Krumhansl–Kessler).
+   - Exercises select pieces by id, collection or tag (`{"library": {…}}`), move them by octaves into the comfortable range, and record the piece id with each trial.
 
 ### Internal representation
 
@@ -540,7 +549,6 @@ OSMD renders MusicXML. During an attempt the cursor follows the click; after gra
 |---|---|
 | `sight_sing` | Score shown → count-in → sing. Start pitch given or not (no-reference sight singing doubles as AP practice). Optional click, drone or accompaniment. |
 | `melodic_dictation` | Melody played N times → answer on a MIDI or on-screen keyboard (pitches in order, optionally rhythm by playing in time to the click) or by singing it back. |
-| `rhythmic_dictation` | Rhythm played → tap it back or choose the notation. |
 | `harmonic_dictation` | Progression played → bass line plus chord qualities or Roman numerals. |
 | `audiation` | Score shown, tonic given, silence → sing a requested note or bar on cue. |
 
@@ -601,7 +609,7 @@ mcp_servers:
 | `get_range_profile` | current range profile |
 | `list_exercise_types` | every type with its params schema, defaults, tags and an example |
 | `list_timbres` | timbres with their pool (training or holdout) |
-| `search_scores(filters)` / `get_score(id, format)` | library search by key, meter, range, length, contained intervals and source; a score as MusicXML or note JSON |
+| `list_library(collection?, tag?, query?)` / `get_library_piece(id)` | the melody library: folder, one summary per piece (key, metre, bars, parts, range), unreadable files; one piece in full |
 | `get_coach_notes(tags?)` | notes the LLM saved in earlier conversations |
 
 ### Write tools
@@ -612,8 +620,9 @@ mcp_servers:
 | `queue_session(session, start_now?)` | validates and adds to the app's "Up next"; `start_now` brings the app forward with a Start prompt |
 | `save_preset(name, session_or_block)` | stores a reusable template |
 | `generate_melodies(params, n)` | generator candidates (note JSON + summary) to review before use |
-| `create_score(musicxml \| notes_json, meta)` | validates, normalises and stores; returns id, range, key and an interval summary |
-| `update_score(id, musicxml \| notes_json, reason)` | stores a new version with provenance; earlier versions are kept |
+| `add_library_pieces(pieces, collection?, file_name?)` | validates the pieces and writes them as one JSON file in the library folder (the same file name replaces it) |
+| `import_library_files(paths, collection?)` | copies JSON or MIDI files into the library folder and reads them |
+| `remove_library_file(file)` | deletes a library file and its pieces |
 | `regrade(filters, grading_overrides, persist?)` | re-scores stored traces with different tolerances; results are returned and stored only when `persist` is set |
 | `set_range_profile(...)` | updates the range profile with `source = llm` |
 | `save_coach_note(text, tags)` | persists plans and observations across conversations, stored with the training data whichever agent is used (complements the agent's own memory) |
@@ -770,8 +779,8 @@ Each phase ends with something usable. "Done when" items are acceptance checks.
 | 1. Foundation | Cargo workspace, Tauri shell, `trainer-core` types, SQLite and migrations, cpal ASIO engine, device page, calibration, standalone tuner, post-trial pitch tracker, single-note grading, golden tests | The tuner runs on the Scarlett via ASIO at 128 frames with no xruns; golden tests pass; a loopback calibration is stored |
 | 2. AP suite | Stimulus engine (SoundFont, synth, Shepard, masks, pools), session runner, every §9 exercise type, assessment battery, presets, results view | A full `ap_assessment` and an `ap_progressive` stage run end to end and log trials |
 | 3. MCP | `trainer-mcp` with the read and write tools, server instructions, queue watcher in the app | From OpenCode or Hermes: read the last session, queue a new AP session, run it in the app, read its report |
-| 4. Relative pitch and singing | §10 and §11 types, follow-along pitch lane with metronome, backing options, range profile, own-voice references, rhythm reproduction | Each type runs from an MCP-queued session and grades correctly on golden tests |
-| 5. Sight singing and dictation | Melody generator, score model, MusicXML/MIDI import, OSMD rendering with colouring, melody alignment, §12 types, Listen / Sing along / Retry flow, `generate_melodies` and `create_score` | Generated and LLM-authored melodies are sung and graded; a CC0 MusicXML import works |
+| 4. Relative pitch and singing | §10 and §11 types, follow-along pitch lane with metronome, backing options, range profile, own-voice references | Each type runs from an MCP-queued session and grades correctly on golden tests |
+| 5. Sight singing and dictation | Melody generator, score model, melody library (JSON and MIDI files), staff rendering with colouring, melody alignment, §12 types, Listen / Sing along / Retry flow | Generated, LLM-authored and library melodies are sung and graded; a MIDI file and a coach-written JSON file import |
 | 6. Part 2 ingest | `ml/` worker, import, separation, vocal F0, beat grid | A song produces a vocal stem, an F0 trace and a bar grid |
 | 7. Part 2 transcription | Notes → MusicXML with confidence, MCP transcription tools, listen-and-verify view | The LLM corrects a transcription via MCP and the user marks it verified |
 | 8. Part 2 repertoire | Excerpts, sing-along/karaoke/echo/sight-read modes, contour grading, passage search | A phrase from an imported song is practised and graded against the original vocal |

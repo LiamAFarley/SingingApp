@@ -6,7 +6,7 @@ use crate::library::{self, LibraryPiece};
 use crate::melody::{MelodyParams, generate_melody};
 use crate::rng::{BalancedBag, Rng};
 use crate::schema::*;
-use crate::score::{CompactMelody, Score, ScoreNote, note_events};
+use crate::score::{ClefChoice, CompactMelody, KeySig, Pitch, Score, ScoreNote, note_events};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
 use crate::timbre::{PoolConfig, TimbreId, default_training_timbres, is_valid_timbre};
 
@@ -79,6 +79,7 @@ pub fn generate_block(
         Exercise::IncidentalPairing(p) => gen_incidental(p, n, &mut rng, ctx),
         Exercise::ScaleDegreeId(p) => gen_scale_degree(p, n, &mut rng),
         Exercise::IntervalComparison(p) => gen_interval_comparison(p, n, &mut rng),
+        Exercise::Harmony(p) => gen_harmony(p, n, &mut rng, ctx),
     }
 }
 
@@ -1272,6 +1273,8 @@ fn gen_pitch_match(
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "timbre": timbre, "mode": p.mode }),
         }));
     }
@@ -1311,6 +1314,8 @@ fn gen_sustain(
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "drone": p.drone, "hold_ms": p.hold_ms }),
         }));
     }
@@ -1447,6 +1452,8 @@ fn gen_sing_interval(
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: json!({
                 "interval": iv.id(),
                 "direction": dir,
@@ -1638,6 +1645,8 @@ fn gen_pattern(
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: json!({
                 "pattern": desc,
                 "tonic_midi": t,
@@ -1853,6 +1862,8 @@ fn score_timeline(score: Score, o: &ScoreTimeline) -> SungTrial {
         count_in_beat: Some(count_in),
         sections,
         follow_cursor: o.follow_cursor,
+        accompaniment: Vec::new(),
+        just_cents: Vec::new(),
         stimulus,
     }
 }
@@ -1942,6 +1953,193 @@ fn gen_dictation(
             grade_rhythm: p.grade_rhythm,
             stimulus,
         }));
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Harmony singing
+// ---------------------------------------------------------------------------------------------
+
+/// How far a just interval above a note lies from equal temperament, in cents (5/4 is 13.7
+/// cents flat, 3/2 two cents sharp, 16/9 for the minor seventh).
+pub fn just_deviation(semitones: i32) -> f32 {
+    const DEV: [f32; 12] = [0.0, 11.7, 3.9, 15.6, -13.7, -2.0, -9.8, 2.0, 13.7, -15.6, -3.9, -11.7];
+    DEV[semitones.rem_euclid(12) as usize]
+}
+
+/// Each sung note's offset in just intonation against the lowest other voice sounding at its
+/// onset (0 when the others rest).
+fn just_offsets(notes: &[TargetNote], others: &[TargetNote]) -> Vec<f32> {
+    notes
+        .iter()
+        .map(|n| {
+            let t = n.start_beat + 1e-3;
+            match others.iter().filter(|o| o.start_beat <= t && o.start_beat + o.beats > t).min_by_key(|o| o.midi) {
+                Some(o) if n.midi >= o.midi => just_deviation(n.midi - o.midi),
+                Some(o) => -just_deviation(o.midi - n.midi),
+                None => 0.0,
+            }
+        })
+        .collect()
+}
+
+/// A pitch moved `steps` scale steps in `key`, spelled from the key signature.
+fn diatonic_shift(key: &KeySig, p: Pitch, steps: i32) -> Pitch {
+    let q = Pitch::from_diatonic(p.diatonic() + steps, 0);
+    Pitch::new(q.step, key.signature_alter(q.step), q.octave)
+}
+
+/// A generated melody and its parallel voice, as (sung, played).
+fn parallel_voices(
+    pp: &ParallelHarmony,
+    tempo_bpm: f32,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<(Score, Score), GenError> {
+    let melody =
+        generate_melody(&pp.melody, ctx.comfortable, tempo_bpm, rng).map_err(|e| GenError(format!("melody: {e}")))?;
+    let steps = pp.voice.steps();
+    let mut voice = melody.clone();
+    let tonic_step = melody.key.degree(0, 4).step;
+    let last = voice.notes.iter().rposition(|n| n.pitch.is_some());
+    for (i, n) in voice.notes.iter_mut().enumerate() {
+        let Some(p) = n.pitch else { continue };
+        let mut h = diatonic_shift(&melody.key, p, steps);
+        // End on the tonic triad: a final note outside it moves a step to one inside it.
+        if Some(i) == last {
+            let in_triad = |d: i32| [0, 2, 4].contains(&d.rem_euclid(7));
+            let degree = h.step as i32 - tonic_step as i32;
+            if !in_triad(degree) {
+                h = diatonic_shift(&melody.key, h, if in_triad(degree - 1) { -1 } else { 1 });
+            }
+        }
+        n.pitch = Some(h);
+    }
+    let (mut sung, mut played) = match pp.sing {
+        HarmonyLine::Harmony => (voice, melody),
+        HarmonyLine::Melody => (melody, voice),
+    };
+    // The sung line goes into the comfortable range; the other voice moves with it.
+    if let Some((lo, hi)) = sung.range() {
+        let k = library::best_octave(lo, hi, ctx.comfortable);
+        for s in [&mut sung, &mut played] {
+            for n in &mut s.notes {
+                if let Some(p) = &mut n.pitch {
+                    p.octave += k as i8;
+                }
+            }
+        }
+        if let Some((lo, hi)) = sung.range() {
+            sung.clef = ClefChoice::Auto.resolve(lo, hi);
+        }
+    }
+    Ok((sung, played))
+}
+
+fn voice_name(v: HarmonyVoice) -> &'static str {
+    match v {
+        HarmonyVoice::ThirdBelow => "a third below",
+        HarmonyVoice::ThirdAbove => "a third above",
+        HarmonyVoice::SixthBelow => "a sixth below",
+        HarmonyVoice::SixthAbove => "a sixth above",
+    }
+}
+
+fn gen_harmony(p: &HarmonyParams, n: usize, rng: &mut Rng, ctx: &GenContext) -> Result<Vec<TrialSpec>, GenError> {
+    check_timbres(std::slice::from_ref(&p.timbre))?;
+    if !(30.0..=220.0).contains(&p.tempo_bpm) {
+        return err("tempo_bpm must be 30–220");
+    }
+    // Library pieces in block order: (piece, part sung).
+    let pieces: Vec<(&LibraryPiece, usize)> = match &p.source {
+        HarmonySource::Parallel(_) => Vec::new(),
+        HarmonySource::Library(sel) => {
+            let mut v: Vec<(&LibraryPiece, usize)> = library::select(&ctx.library, sel, 2)
+                .map_err(|e| GenError(format!("source.library: {e}")))?
+                .into_iter()
+                .map(|piece| (piece, sel.part.min(piece.parts.len() - 1)))
+                .collect();
+            if sel.shuffle {
+                rng.shuffle(&mut v);
+            }
+            v
+        }
+    };
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let (sung, played, prompt, extra) = match &p.source {
+            HarmonySource::Parallel(pp) => {
+                let (sung, played) = parallel_voices(pp, p.tempo_bpm, rng, ctx)?;
+                let prompt = match pp.sing {
+                    HarmonyLine::Harmony => format!("Sing {} the melody", voice_name(pp.voice)),
+                    HarmonyLine::Melody => format!("Sing the melody over a voice {}", voice_name(pp.voice)),
+                };
+                let extra = json!({ "source": "parallel", "voice": pp.voice, "sing": pp.sing });
+                (sung, vec![played], prompt, extra)
+            }
+            HarmonySource::Library(sel) => {
+                let (piece, part) = pieces[i % pieces.len()];
+                let mut melodies: Vec<CompactMelody> = (0..piece.parts.len()).map(|k| piece.melody(k)).collect();
+                if !sel.piece_tempo {
+                    for m in &mut melodies {
+                        m.tempo_bpm = None;
+                    }
+                }
+                if sel.fit_range {
+                    if let Some((lo, hi)) = library::melody_range(&melodies[part]) {
+                        let k = library::best_octave(lo, hi, ctx.comfortable);
+                        for m in &mut melodies {
+                            library::shift_octaves(m, k);
+                        }
+                    }
+                }
+                let score = |k: usize| {
+                    Score::from_compact(&melodies[k], p.tempo_bpm)
+                        .map_err(|e| GenError(format!("library piece `{}`: {e}", piece.id)))
+                };
+                let sung = score(part)?;
+                let played = (0..melodies.len()).filter(|k| *k != part).map(score).collect::<Result<Vec<_>, _>>()?;
+                let name = piece.parts[part].name.clone().unwrap_or_else(|| {
+                    match (part, piece.parts.len()) {
+                        (0, _) => "the top part".into(),
+                        (k, n) if k + 1 == n => "the bottom part".into(),
+                        (k, n) => format!("part {} of {n}", k + 1),
+                    }
+                });
+                let prompt = format!("{}: sing {name}", piece.title);
+                let extra = json!({ "source": "library", "piece": piece.id, "part": part, "parts": piece.parts.len() });
+                (sung, played, prompt, extra)
+            }
+        };
+        let notation = p.notation.unwrap_or(matches!(p.source, HarmonySource::Library(_)));
+        let mut t = score_timeline(
+            sung,
+            &ScoreTimeline {
+                exercise: ExerciseKind::Harmony,
+                key: p.start.plays_key(),
+                first_note: p.start.plays_first_note(),
+                count_in_bars: p.count_in_bars,
+                backing: if p.click { Backing::Click } else { Backing::None },
+                backing_volume: 0.7,
+                timbre: &p.timbre,
+                guide: false,
+                follow_cursor: p.follow_cursor,
+                main_label: "Sing",
+            },
+        );
+        t.prompt = prompt;
+        t.accompaniment = played.iter().flat_map(|s| s.targets()).collect();
+        t.just_cents = just_offsets(&t.notes, &t.accompaniment);
+        if !notation {
+            t.score = None;
+        }
+        if let (Some(a), Some(b)) = (t.stimulus.as_object_mut(), extra.as_object()) {
+            a.extend(b.clone());
+            a.insert("notation".into(), json!(notation));
+            a.insert("start".into(), json!(p.start));
+        }
+        out.push(TrialSpec::Sung(t));
     }
     Ok(out)
 }
@@ -2191,6 +2389,49 @@ mod tests {
         let b = block(r#"{"type": "sight_sing", "count": 1, "params": {"melody": {"library": {"tags": ["nothing"]}}}}"#);
         let e = generate_block(&b, 1, &ctx).unwrap_err();
         assert!(e.to_string().contains("no library pieces tagged nothing"), "{e}");
+    }
+
+    #[test]
+    fn parallel_harmony_follows_the_melody_in_thirds_and_ends_on_the_triad() {
+        let b = block(r#"{"type": "harmony", "count": 4, "params": {"source": {"parallel": {"voice": "third_below"}}}}"#);
+        let ctx = GenContext::default();
+        for t in generate_block(&b, 11, &ctx).unwrap() {
+            let TrialSpec::Sung(t) = t else { panic!() };
+            assert_eq!(t.exercise, ExerciseKind::Harmony);
+            assert!(t.score.is_none(), "parallel harmony is sung by ear by default");
+            assert_eq!(t.notes.len(), t.accompaniment.len());
+            let key = KeySig::parse(t.stimulus["key"].as_str().unwrap()).unwrap();
+            for (k, (sung, played)) in t.notes.iter().zip(&t.accompaniment).enumerate() {
+                assert_eq!(sung.start_beat, played.start_beat);
+                let gap = played.midi - sung.midi;
+                if k + 1 < t.notes.len() {
+                    assert!(gap == 3 || gap == 4, "a third below: {gap}");
+                } else {
+                    // The last note is in the tonic triad.
+                    let rel = (sung.midi - key.tonic_pc()).rem_euclid(12);
+                    assert!([0, 3, 4, 7].contains(&rel), "{rel}");
+                }
+            }
+            // Thirds below are pure when 13.7 (major) or 15.6 (minor) cents off equal temperament.
+            assert!(t.just_cents[0] == 13.7 || t.just_cents[0] == -15.6, "{:?}", t.just_cents);
+            assert!(t.notes.iter().all(|n| ctx.comfortable.contains(n.midi) || (n.midi - ctx.comfortable.low.0).abs() < 5));
+            assert_eq!(default_mode(&TrialSpec::Sung(t.clone())), PitchRefMode::Absolute);
+        }
+    }
+
+    #[test]
+    fn library_harmony_sings_one_part_over_the_others() {
+        let ctx = library_context();
+        let b = block(r#"{"type": "harmony", "count": 1, "params": {"source": {"library": {"part": 1}}}}"#);
+        let TrialSpec::Sung(t) = &generate_block(&b, 1, &ctx).unwrap()[0] else { panic!() };
+        assert_eq!(t.stimulus["piece"], "Duets/d1");
+        assert!(t.score.is_some(), "library harmony shows the part");
+        // Both voices move together, so the sixths and thirds stay.
+        assert_eq!(t.notes.iter().map(|n| n.midi).collect::<Vec<_>>(), [60, 62, 60]);
+        assert_eq!(t.accompaniment.iter().map(|n| n.midi).collect::<Vec<_>>(), [64, 65, 64]);
+        assert_eq!(t.prompt, "d1: sing the bottom part");
+        let one_part = block(r#"{"type": "harmony", "count": 1, "params": {"source": {"library": {"collection": "Book"}}}}"#);
+        assert!(generate_block(&one_part, 1, &ctx).unwrap_err().to_string().contains("2 or more parts"));
     }
 
     fn anchor(title: &str, first: &str, melody: bool) -> Anchor {

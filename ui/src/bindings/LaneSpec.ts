@@ -9,7 +9,11 @@ export type LaneSpec = { notes: Array<LaneNote>,
 /**
  * Notes played as the reference before singing (echo / starting pitch).
  */
-reference: Array<LaneNote>, beat_s: number, beats_per_bar: number, sing_start_s: number, total_s: number, midi_low: number, midi_high: number, 
+reference: Array<LaneNote>, 
+/**
+ * The other voice of a harmony exercise, played while singing.
+ */
+accompaniment: Array<LaneNote>, beat_s: number, beats_per_bar: number, sing_start_s: number, total_s: number, midi_low: number, midi_high: number, 
 /**
  * Hide target bars until the attempt is graded (sight-singing style).
  */

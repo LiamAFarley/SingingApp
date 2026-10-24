@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use ts_rs::TS;
 
 use crate::schema::{
-    AnchorSongParams, ChordIdParams, DictationParams, ExerciseKind, IncidentalPairingParams,
+    AnchorSongParams, ChordIdParams, DictationParams, ExerciseKind, HarmonyParams, IncidentalPairingParams,
     IntervalComparisonParams, ScaleDegreeParams, IntervalIdParams, PatternParams, PitchIdParams, PitchMatchParams,
     PitchPairingParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams,
     SustainParams, TonalCenterIdParams,
@@ -445,6 +445,12 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Two intervals play one after the other (melodic or harmonic, on different roots); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder).",
             schema_of::<IntervalComparisonParams>(),
             json!({"type": "interval_comparison", "count": 24, "params": {"differences": [0, 1, 2], "directions": ["ascending"]}}),
+        ),
+        entry(
+            ExerciseKind::Harmony,
+            "Sing one voice while the app plays another, graded note by note like sight singing. `source.parallel`: a generated melody is played and you sing a diatonic third or sixth below or above it (or sing the melody over that voice), by ear unless `notation` is true. `source.library`: pieces with two or more parts from the melody library; you sing `part` (0 = top) from the staff while the app plays the others. The key and your first note are played first (`start`). Grade with {\"grading\": {\"tuning\": \"just\"}} to score each note against the pure interval over the other voice.",
+            schema_of::<HarmonyParams>(),
+            json!({"type": "harmony", "count": 6, "params": {"source": {"parallel": {"voice": "third_below", "melody": {"bars": 2, "max_leap": 2}}}}}),
         ),
     ]
 }

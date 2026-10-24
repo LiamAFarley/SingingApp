@@ -1,0 +1,16 @@
+{
+  "title": "Harmony: pure thirds",
+  "blocks": [
+    {
+      "type": "harmony",
+      "title": "Thirds below, graded in just intonation",
+      "count": 8,
+      "grading": { "tuning": "just", "in_tune_tol_cents": 12 },
+      "params": {
+        "source": { "parallel": { "voice": "third_below", "melody": { "bars": 2, "rhythms": ["whole", "half"], "max_leap": 2 } } },
+        "tempo_bpm": 60,
+        "timbre": "gm:52"
+      }
+    }
+  ]
+}

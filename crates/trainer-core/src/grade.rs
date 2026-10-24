@@ -354,11 +354,17 @@ pub fn grade_sung(
     sing_start_s: f32,
 ) -> TrialOutcome {
     let beat_s = 60.0 / trial.tempo_bpm;
+    // In just intonation each note sits where it is pure against the other voice.
+    let just = |i: usize| match cfg.tuning {
+        Tuning::Just => trial.just_cents.get(i).copied().unwrap_or(0.0) / 100.0,
+        Tuning::Equal => 0.0,
+    };
     let expected: Vec<Expected> = trial
         .notes
         .iter()
-        .map(|n| Expected {
-            midi: n.midi as f32,
+        .enumerate()
+        .map(|(i, n)| Expected {
+            midi: n.midi as f32 + just(i),
             onset: sing_start_s + n.start_beat * beat_s,
             dur: n.beats * beat_s,
         })
@@ -474,7 +480,7 @@ pub fn grade_sung(
             .map(|e| e.abs() <= cfg.category_tol_cents)
             .unwrap_or(false);
         results.push(NoteResult {
-            target_midi: x.midi as i32,
+            target_midi: x.midi.round() as i32,
             expected_onset_s: x.onset,
             matched: m.is_some(),
             sung_midi: m.map(|m| m.target_midi + m.centre_cents / 100.0),
@@ -846,6 +852,8 @@ mod tests {
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: json!({}),
         }
     }
@@ -944,6 +952,29 @@ mod tests {
         let ie = o.metrics["interval_cents_error"].as_f64().unwrap();
         assert!((ie - -20.0).abs() < 3.0, "{ie}");
         assert_eq!(o.metrics["interval_correct"], json!(true));
+    }
+
+    #[test]
+    fn just_tuning_moves_the_targets_by_the_trial_offsets() {
+        // E4 and G4 over a C: the pure third is 13.7 cents flat, the fifth 2 cents sharp.
+        let mut trial = sung_trial(&[(64, 0.0, 2.0), (67, 2.0, 2.0)], 120.0, ExerciseKind::Harmony);
+        trial.just_cents = vec![-13.7, 2.0];
+        let sung = |t: f32| if t < 1.0 { 63.863 } else { 67.02 };
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 2.0, 440.0, sung));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let errors = |tuning: Tuning| -> Vec<f64> {
+            let overrides = GradingOverrides { tuning: Some(tuning), ..GradingOverrides::default() };
+            let o = grade_sung(&trial, &tr, &GradingConfig::resolve(&overrides, PitchRefMode::Absolute), 1.0);
+            let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+            assert_eq!(notes[0].target_midi, 64);
+            notes.iter().map(|n| n.cents_error.unwrap() as f64).collect()
+        };
+        let equal = errors(Tuning::Equal);
+        assert!((equal[0] + 13.7).abs() < 2.0 && (equal[1] - 2.0).abs() < 2.0, "{equal:?}");
+        let just = errors(Tuning::Just);
+        assert!(just.iter().all(|e| e.abs() < 2.0), "{just:?}");
     }
 
     fn dictation(notes: &[(&str, u32, u32)], grade_rhythm: bool) -> DictationTrial {

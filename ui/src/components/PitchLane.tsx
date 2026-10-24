@@ -25,6 +25,8 @@ const COLORS = {
   currentRow: "#f4f7fd",
   refFill: "#f1f3f5",
   refStroke: "#c7cdd4",
+  accFill: "#f3f1f8",
+  accStroke: "#bcb3d4",
   target: "#e8f0fd",
   targetStroke: "#b8cdf5",
   current: "#d3e2fb",
@@ -219,6 +221,8 @@ function draw(
   };
 
   for (const n of lane.reference) bar(n.start_s, n.dur_s, n.midi, COLORS.refFill, COLORS.refStroke);
+  // The other voice of a harmony exercise, named so it reads as the part you hear.
+  for (const n of lane.accompaniment) bar(n.start_s, n.dur_s, n.midi, COLORS.accFill, COLORS.accStroke, noteDisplay(n.midi));
 
   const showTargets = !lane.targets_hidden || !!graded;
   if (showTargets) {

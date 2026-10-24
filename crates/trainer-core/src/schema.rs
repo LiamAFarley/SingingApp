@@ -946,6 +946,107 @@ fn d_dictation_melody() -> MelodySource {
     })
 }
 
+/// The voice that follows a generated melody in parallel harmony, a diatonic third or sixth
+/// away.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum HarmonyVoice {
+    #[default]
+    ThirdBelow,
+    ThirdAbove,
+    SixthBelow,
+    SixthAbove,
+}
+
+impl HarmonyVoice {
+    /// Diatonic steps from the melody.
+    pub fn steps(self) -> i32 {
+        match self {
+            HarmonyVoice::ThirdBelow => -2,
+            HarmonyVoice::ThirdAbove => 2,
+            HarmonyVoice::SixthBelow => -5,
+            HarmonyVoice::SixthAbove => 5,
+        }
+    }
+}
+
+/// Which line of parallel harmony you sing; the app plays the other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum HarmonyLine {
+    /// The added voice, against the melody.
+    #[default]
+    Harmony,
+    /// The melody, against the added voice.
+    Melody,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ParallelHarmony {
+    #[serde(default)]
+    pub melody: MelodyParams,
+    #[serde(default)]
+    pub voice: HarmonyVoice,
+    #[serde(default)]
+    pub sing: HarmonyLine,
+}
+
+/// Where the voices of a harmony exercise come from.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HarmonySource {
+    /// A generated melody and a voice a diatonic third or sixth away from it.
+    Parallel(ParallelHarmony),
+    /// Pieces with two or more parts from the melody library. `part` is the one you sing; the
+    /// app plays the others.
+    Library(LibrarySelect),
+}
+
+impl Default for HarmonySource {
+    fn default() -> Self {
+        HarmonySource::Parallel(serde_json::from_str("{}").unwrap())
+    }
+}
+
+fn d_harmony_tempo() -> f32 {
+    72.0
+}
+
+/// Harmony singing: the app plays one voice while you sing another, graded note by note. With
+/// `notation` your part is shown on the staff; otherwise you sing it by ear.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct HarmonyParams {
+    #[serde(default)]
+    pub source: HarmonySource,
+    /// Show your part on the staff. Default: shown for library pieces, by ear for parallel
+    /// harmony.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notation: Option<bool>,
+    /// Beats per minute in the time signature's unit (a library piece's own tempo wins unless
+    /// `piece_tempo` is off).
+    #[serde(default = "d_harmony_tempo")]
+    pub tempo_bpm: f32,
+    /// What is played first: by default the key, then the first note of your part.
+    #[serde(default)]
+    pub start: SightStart,
+    #[serde(default = "d_one")]
+    pub count_in_bars: u32,
+    /// A click under the singing.
+    #[serde(default = "d_true")]
+    pub click: bool,
+    /// Timbre of the cadence, first note and the other voice.
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+    #[serde(default)]
+    pub follow_cursor: bool,
+}
+
+impl Default for HarmonyParams {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 fn d_dictation_tempo() -> f32 {
     80.0
 }
@@ -1125,6 +1226,7 @@ pub enum Exercise {
     IncidentalPairing(IncidentalPairingParams),
     ScaleDegreeId(ScaleDegreeParams),
     IntervalComparison(IntervalComparisonParams),
+    Harmony(HarmonyParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -1147,10 +1249,11 @@ pub enum ExerciseKind {
     IncidentalPairing,
     ScaleDegreeId,
     IntervalComparison,
+    Harmony,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 17] = [
+    pub const ALL: [ExerciseKind; 18] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -1168,6 +1271,7 @@ impl ExerciseKind {
         ExerciseKind::IncidentalPairing,
         ExerciseKind::ScaleDegreeId,
         ExerciseKind::IntervalComparison,
+        ExerciseKind::Harmony,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -1189,6 +1293,7 @@ impl ExerciseKind {
             ExerciseKind::IncidentalPairing => "incidental_pairing",
             ExerciseKind::ScaleDegreeId => "scale_degree_id",
             ExerciseKind::IntervalComparison => "interval_comparison",
+            ExerciseKind::Harmony => "harmony",
         }
     }
 
@@ -1215,6 +1320,7 @@ impl ExerciseKind {
             ExerciseKind::IncidentalPairing => "Colour task (incidental pairing)",
             ExerciseKind::ScaleDegreeId => "Scale degrees",
             ExerciseKind::IntervalComparison => "Interval comparison",
+            ExerciseKind::Harmony => "Harmony singing",
         }
     }
 
@@ -1237,6 +1343,7 @@ impl ExerciseKind {
             ExerciseKind::IncidentalPairing => &["ap.exposure"],
             ExerciseKind::ScaleDegreeId => &["rp.degree"],
             ExerciseKind::IntervalComparison => &["rp.interval_compare"],
+            ExerciseKind::Harmony => &["voice.harmony"],
         }
     }
 
@@ -1249,6 +1356,7 @@ impl ExerciseKind {
                 | ExerciseKind::SingInterval
                 | ExerciseKind::Pattern
                 | ExerciseKind::SightSing
+                | ExerciseKind::Harmony
         )
     }
 }
@@ -1273,6 +1381,7 @@ impl Exercise {
             Exercise::IncidentalPairing(_) => ExerciseKind::IncidentalPairing,
             Exercise::ScaleDegreeId(_) => ExerciseKind::ScaleDegreeId,
             Exercise::IntervalComparison(_) => ExerciseKind::IntervalComparison,
+            Exercise::Harmony(_) => ExerciseKind::Harmony,
         }
     }
 
@@ -1552,6 +1661,14 @@ pub struct SungTrial {
     pub sections: Vec<TimelineSection>,
     #[serde(default)]
     pub follow_cursor: bool,
+    /// Another voice played while singing (harmony), in beats from the start of singing like
+    /// `notes`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accompaniment: Vec<TargetNote>,
+    /// Per-note offsets in cents from equal temperament for just intonation against the
+    /// accompaniment, used when grading with tuning `just`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub just_cents: Vec<f32>,
 }
 
 /// Hear a melody and write it in the score editor.

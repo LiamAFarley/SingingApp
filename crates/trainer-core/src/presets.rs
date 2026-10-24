@@ -237,6 +237,30 @@ const FILES: &[(&str, &str, &str, &str)] = &[
         include_str!("../presets/sing_intervals.json"),
     ),
     (
+        "harmony_thirds",
+        "Singing",
+        "A melody plays; sing a diatonic third below it, then a third above, by ear.",
+        include_str!("../presets/harmony_thirds.json"),
+    ),
+    (
+        "harmony_sixths",
+        "Singing",
+        "Sing a sixth below a melody, then sing the melody over the sixths.",
+        include_str!("../presets/harmony_sixths.json"),
+    ),
+    (
+        "harmony_read",
+        "Singing",
+        "Read your harmony part from the staff while the melody plays.",
+        include_str!("../presets/harmony_read.json"),
+    ),
+    (
+        "harmony_just",
+        "Singing",
+        "Long notes a third below a choir voice, graded against pure (just) thirds.",
+        include_str!("../presets/harmony_just.json"),
+    ),
+    (
         "sight_stepwise",
         "Sight singing and dictation",
         "Read four bars of mostly stepwise melody from the staff and sing them in time after the key is set.",

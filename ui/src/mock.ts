@@ -242,6 +242,7 @@ function sightLane(): LaneSpec {
   return {
     notes: pitched.map(([p, start, dur]) => ({ midi: NOTE_MIDI[p!], start_s: sing + (start / 4) * beat, dur_s: (dur / 4) * beat })),
     reference: [],
+    accompaniment: [],
     beat_s: beat,
     beats_per_bar: 4,
     sing_start_s: sing,
@@ -480,6 +481,7 @@ function scaleLane(): LaneSpec {
   return {
     notes: degrees.map((d, i) => ({ midi: tonic + d, start_s: sing + i * beat, dur_s: beat })),
     reference: degrees.map((d, i) => ({ midi: tonic + d, start_s: i * beat, dur_s: beat })),
+    accompaniment: [],
     beat_s: beat,
     beats_per_bar: 4,
     sing_start_s: sing,
@@ -490,6 +492,58 @@ function scaleLane(): LaneSpec {
     metronome: true,
     sections: [],
     cursor: false,
+  };
+}
+
+/** Harmony by ear: the melody plays (accompaniment) and the singer adds a third below. */
+function harmonyLane(): LaneSpec {
+  const beat = 60 / 80;
+  const tonic = 50;
+  const dia = (d: number) => 12 * Math.floor(d / 7) + [0, 2, 4, 5, 7, 9, 11][((d % 7) + 7) % 7];
+  const melody: [number, number][] = [[9, 1], [8, 1], [7, 1], [8, 1], [9, 1], [9, 1], [9, 2], [8, 1], [8, 1], [8, 2], [9, 1], [11, 1], [11, 2], [9, 1], [8, 1], [7, 2]];
+  const sing = 13 * beat;
+  let t = 0;
+  const voices = melody.map(([d, len]) => {
+    const n = { d, start: t, len };
+    t += len;
+    return n;
+  });
+  const last = voices.length - 1;
+  return {
+    notes: voices.map((v, i) => ({ midi: tonic + dia(i === last ? v.d - 3 : v.d - 2), start_s: sing + v.start * beat, dur_s: v.len * beat })),
+    reference: [{ midi: tonic + dia(7), start_s: 6 * beat, dur_s: 2 * beat }],
+    accompaniment: voices.map((v) => ({ midi: tonic + dia(v.d), start_s: sing + v.start * beat, dur_s: v.len * beat })),
+    beat_s: beat,
+    beats_per_bar: 4,
+    sing_start_s: sing,
+    total_s: sing + 21 * beat,
+    midi_low: tonic + 8,
+    midi_high: tonic + 23,
+    targets_hidden: true,
+    metronome: true,
+    sections: [
+      { label: "Establish key", start_s: 0, end_s: 5 * beat },
+      { label: "First note", start_s: 6 * beat, end_s: 8 * beat },
+      { label: "Count-in", start_s: 9 * beat, end_s: sing },
+      { label: "Sing", start_s: sing, end_s: sing + 20 * beat },
+    ],
+    cursor: false,
+  };
+}
+
+function harmonyTrial(): TrialView {
+  const trial = sungTrial();
+  lane = harmonyLane();
+  laneStart = clock() + 0.2 - (scenario === "harmony" ? lane.sing_start_s + 5 * lane.beat_s : 0);
+  return {
+    ...trial,
+    kind: "harmony",
+    prompt: "Sing a third below the melody",
+    lane,
+    show_live_pitch: true,
+    timeline_start_s: laneStart,
+    response_start_s: laneStart + lane.sing_start_s,
+    response_end_s: laneStart + lane.total_s,
   };
 }
 
@@ -617,6 +671,11 @@ function startScenario() {
     const trial = sungTrial();
     emit({ phase: "recording", session_id: "demo", title: "Scales: listen and repeat", block_count: 2, block_title: "Major scale", block_kind: "pattern", trial_index: 1, trial_count: 4, done_in_block: 1, correct_in_block: 1, feedback_mode: "continuous", trial });
     if (scenario === "sung-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
+  } else if (scenario === "harmony" || scenario === "harmony-feedback") {
+    kind = "sung";
+    const trial = harmonyTrial();
+    emit({ phase: "recording", session_id: "demo", title: "Harmony: thirds below", block_count: 1, block_title: "Parallel thirds by ear", block_kind: "harmony", trial_index: 2, trial_count: 6, done_in_block: 2, correct_in_block: 1, feedback_mode: "continuous", trial });
+    if (scenario === "harmony-feedback") emit({ phase: "feedback", feedback: sungFeedback() });
   } else if (scenario === "sing-pitch") {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 3, trial_count: 12, done_in_block: 3, correct_in_block: 2, feedback_mode: "continuous", trial: singPitchTrial() });
   } else if (scenario === "pairing") {

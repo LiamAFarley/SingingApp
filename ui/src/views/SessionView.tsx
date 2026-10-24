@@ -214,6 +214,7 @@ function KindHelp({ kind }: { kind: string | null }) {
     incidental_pairing: "A tone plays and a colour appears. Press the colour as fast as you can with the number keys. Nothing is asked about the tone.",
     scale_degree_id: "A cadence sets the key, then one note plays. Name its scale degree (number keys 1–7). Afterwards the note walks to the tonic so you hear where it wants to go.",
     interval_comparison: "Two intervals play. Is the first or the second larger, or are they the same? Number keys pick answers.",
+    harmony: "The key and your first note are played, then a bar is counted in. Sing your part in time while the other voice plays.",
   };
   return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
 }

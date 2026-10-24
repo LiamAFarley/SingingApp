@@ -870,30 +870,41 @@ pub fn select<'a>(
     Ok(out)
 }
 
+/// The whole number of octaves that moves notes spanning `lo`–`hi` best into `range` (the
+/// fewest semitones outside it, then the smallest move).
+pub fn best_octave(lo: i32, hi: i32, range: NoteRange) -> i32 {
+    let cost = |k: i32| (range.low.0 - (lo + 12 * k)).max(0) + ((hi + 12 * k) - range.high.0).max(0);
+    (-3..=3).min_by_key(|k: &i32| (cost(*k), k.abs())).unwrap_or(0)
+}
+
+/// Moves a melody by `k` octaves; the key and spelling stay, and the clef is chosen again.
+pub fn shift_octaves(m: &mut CompactMelody, k: i32) {
+    if k == 0 {
+        return;
+    }
+    for n in &mut m.notes {
+        if let CompactNote::Note { note, .. } = n {
+            note.octave += k as i8;
+        }
+    }
+    m.clef = ClefChoice::Auto;
+}
+
+/// Lowest and highest notes of a melody.
+pub fn melody_range(m: &CompactMelody) -> Option<(i32, i32)> {
+    let midis = m.notes.iter().filter_map(|n| match n {
+        CompactNote::Note { note, .. } => Some(note.midi()),
+        CompactNote::Rest { .. } => None,
+    });
+    midis.fold(None, |acc, x| Some(acc.map_or((x, x), |(lo, hi): (i32, i32)| (lo.min(x), hi.max(x)))))
+}
+
 /// Moves a melody by whole octaves to sit best in `range`; the key and spelling stay. Returns
 /// the number of octaves moved.
 pub fn fit_octaves(m: &mut CompactMelody, range: NoteRange) -> i32 {
-    let midis: Vec<i32> = m
-        .notes
-        .iter()
-        .filter_map(|n| match n {
-            CompactNote::Note { note, .. } => Some(note.midi()),
-            CompactNote::Rest { .. } => None,
-        })
-        .collect();
-    let (Some(lo), Some(hi)) = (midis.iter().min().copied(), midis.iter().max().copied()) else {
-        return 0;
-    };
-    let cost = |k: i32| (range.low.0 - (lo + 12 * k)).max(0) + ((hi + 12 * k) - range.high.0).max(0);
-    let k = (-3..=3).min_by_key(|k: &i32| (cost(*k), k.abs())).unwrap_or(0);
-    if k != 0 {
-        for n in &mut m.notes {
-            if let CompactNote::Note { note, .. } = n {
-                note.octave += k as i8;
-            }
-        }
-        m.clef = ClefChoice::Auto;
-    }
+    let Some((lo, hi)) = melody_range(m) else { return 0 };
+    let k = best_octave(lo, hi, range);
+    shift_octaves(m, k);
     k
 }
 

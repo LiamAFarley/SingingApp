@@ -19,7 +19,7 @@ const EXAMPLE = `{
   "notes": "A4:1 | D5:2 C#5:1 | B4:1 A4 G4 | F#4:3"
 }`;
 
-type Kind = "sight_sing" | "melodic_dictation";
+type Kind = "sight_sing" | "melodic_dictation" | "harmony";
 
 interface Group {
   name: string;
@@ -75,12 +75,14 @@ export function LibraryPage({ sessionActive, onOpenSession }: { sessionActive: b
     }
   };
 
-  const start = async (kind: Kind, title: string, library: { ids: string[] }, count: number) => {
+  const start = async (kind: Kind, title: string, ids: string[], part = 1) => {
     setError(null);
-    const what = kind === "sight_sing" ? "Sight singing" : "Dictation";
+    const what = kind === "sight_sing" ? "Sight singing" : kind === "melodic_dictation" ? "Dictation" : "Harmony";
+    const library = { ids };
+    const params = kind === "harmony" ? { source: { library: { ...library, part } } } : { melody: { library } };
     const spec = {
       title: `${what}: ${title}`,
-      blocks: [{ type: kind, title, count: Math.min(count, MAX_TRIALS), params: { melody: { library } } }],
+      blocks: [{ type: kind, title, count: Math.min(ids.length, MAX_TRIALS), params }],
     };
     try {
       await api("startSession", { source: "spec", spec });
@@ -220,20 +222,26 @@ export function LibraryPage({ sessionActive, onOpenSession }: { sessionActive: b
               <span className="small faint num">
                 {g.pieces.length} piece{g.pieces.length === 1 ? "" : "s"}
               </span>
-              <button
-                className="btn small"
-                disabled={sessionActive}
-                onClick={() => start("sight_sing", g.name, selection(g), g.pieces.length)}
-              >
+              <button className="btn small" disabled={sessionActive} onClick={() => start("sight_sing", g.name, ids(g.pieces))}>
                 Sight-sing
               </button>
               <button
                 className="btn small"
                 disabled={sessionActive}
-                onClick={() => start("melodic_dictation", g.name, selection(g), g.pieces.length)}
+                onClick={() => start("melodic_dictation", g.name, ids(g.pieces))}
               >
                 Dictation
               </button>
+              {g.pieces.some((p) => p.parts.length > 1) && (
+                <button
+                  className="btn small"
+                  disabled={sessionActive}
+                  title="Sing the second part of each piece while the others play"
+                  onClick={() => start("harmony", g.name, ids(g.pieces.filter((p) => p.parts.length > 1)))}
+                >
+                  Harmony
+                </button>
+              )}
             </div>
           </div>
           <div className="card flush">
@@ -270,7 +278,9 @@ export function LibraryPage({ sessionActive, onOpenSession }: { sessionActive: b
                     sameFile={pieces.filter((x) => x.file === p.file).length}
                     onToggle={() => setOpen(open === p.id ? null : p.id)}
                     onPlay={() => play(p.id)}
-                    onSing={() => start("sight_sing", p.title, { ids: [p.id] }, 1)}
+                    onSing={(part) =>
+                      part == null ? start("sight_sing", p.title, [p.id]) : start("harmony", p.title, [p.id], part)
+                    }
                     onDelete={() => setDeleting(p.id)}
                     onCancelDelete={() => setDeleting(null)}
                     onConfirmDelete={() => remove(p.file)}
@@ -286,8 +296,8 @@ export function LibraryPage({ sessionActive, onOpenSession }: { sessionActive: b
 }
 
 /** The pieces listed under a heading (sub-collections have their own). */
-function selection(g: Group): { ids: string[] } {
-  return { ids: g.pieces.map((p) => p.id) };
+function ids(pieces: LibraryEntry[]): string[] {
+  return pieces.map((p) => p.id);
 }
 
 function groupPieces(pieces: LibraryEntry[], filter: string): Group[] {
@@ -332,7 +342,8 @@ function PieceRow({
   sameFile: number;
   onToggle: () => void;
   onPlay: () => void;
-  onSing: () => void;
+  /** Sight-sing (no part), or sing one part of a multi-part piece against the others. */
+  onSing: (part: number | null) => void;
   onDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
@@ -356,9 +367,28 @@ function PieceRow({
             <button className="btn small quiet" onClick={onPlay}>
               {playing ? "Stop" : "Play"}
             </button>
-            <button className="btn small" disabled={sessionActive} onClick={onSing}>
-              Sing
-            </button>
+            {p.parts.length > 1 ? (
+              <select
+                className="sing-part"
+                value=""
+                disabled={sessionActive}
+                title="Sing one part while the others play"
+                onChange={(e) => e.target.value !== "" && onSing(Number(e.target.value))}
+              >
+                <option value="" disabled>
+                  Sing…
+                </option>
+                {p.parts.map((name, k) => (
+                  <option key={k} value={k}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <button className="btn small" disabled={sessionActive} onClick={() => onSing(null)}>
+                Sing
+              </button>
+            )}
             <button className="btn small quiet" onClick={onDelete} title={`Delete ${p.file}`}>
               Delete
             </button>

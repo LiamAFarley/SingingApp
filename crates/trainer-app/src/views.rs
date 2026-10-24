@@ -77,6 +77,8 @@ pub struct LaneSpec {
     pub notes: Vec<LaneNote>,
     /// Notes played as the reference before singing (echo / starting pitch).
     pub reference: Vec<LaneNote>,
+    /// The other voice of a harmony exercise, played while singing.
+    pub accompaniment: Vec<LaneNote>,
     pub beat_s: f32,
     pub beats_per_bar: u32,
     pub sing_start_s: f32,

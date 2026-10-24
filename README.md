@@ -14,20 +14,66 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
   - Singing a named note.
   - Passive pairing and key finding.
   - A holdout assessment battery.
-- **Ear training:** intervals (melodic and harmonic), chords and inversions, scales and modes.
+- **Ear training:**
+  - Intervals, melodic and harmonic, either without a key or inside a key after a cadence.
+  - Interval comparison: which of two intervals is larger.
+  - Scale degrees in the style of Functional Ear Trainer. A cadence sets the key, then you name a note's degree, and the note walks to the tonic (nearest, up or down). Eight graded levels take you from three degrees in C to all twelve in changing keys.
+  - Chords and inversions, scales and modes.
 - **Singing:**
   - Pitch matching, sustained notes, interval singing, scales and warm-up patterns.
   - A follow-along pitch lane that scrolls with the metronome.
   - Backing options: click, drone, chords or the melody.
   - Listen, sing along and retry after each attempt.
+- **Harmony singing:** sing one voice while the app plays another.
+  - A third or sixth below or above a generated melody, by ear or from the staff, or the melody over that voice.
+  - Any part of a two-part (or larger) library piece.
+  - Optional just-intonation grading against the other voice.
 - **Sight singing:** melodies read from staff notation.
   - The key and first note are played, a bar is counted in, then you sing.
   - Afterwards your pitch trace is drawn on the staff, with a mark under each note.
-  - Melodies are generated, or the coach writes them.
+  - Melodies are generated, written by the coach, or taken from the melody library.
 - **Melodic dictation:** hear a melody and write it in the score editor, then check it note by note.
   - 2–6 set the note length, `.` adds a dot, `0` enters a rest.
   - A–G enter notes in the key, the arrow keys move a note, and you can also click on the staff.
 - **Tuner:** live note, cents and pitch history, with a reference note or drone.
+
+Your range is set by hand in **Settings**. Rhythm is trained inside sight singing, where every note is graded for timing.
+
+## Melody library
+
+Every `.json`, `.mid` and `.midi` file in `%APPDATA%\SingingTrainer\library` is read into the **Library** page, and a subfolder is a collection. Changes to the folder are picked up within two seconds.
+
+From the Library page you can:
+
+- Preview and play pieces.
+- Sight-sing a piece or a collection, take it as dictation, or sing one part of a multi-part piece.
+- Import files with **Import files…**, which copies them into the folder.
+
+The coach can use the same pieces in sessions, and can add pieces over MCP: for example, melodies it transcribes from your books.
+
+A melody in JSON:
+
+```json
+{
+  "title": "Exercise 12",
+  "key": "D major",
+  "time": "3/4",
+  "tempo_bpm": 72,
+  "notes": "A4:1 | D5:2 C#5:1 | B4:1 A4 G4 | F#4:3"
+}
+```
+
+- `pitch:beats` is counted in the time signature's unit, and a length carries over to the next note.
+- `R` is a rest and `~` ties to the next note.
+- Every `|` is a barline that is checked. A short first bar is a pickup.
+- A file can hold a list of pieces, or `{"collection": "…", "pieces": […]}`.
+- Several voices go in `"parts": [{"name": "Upper", "notes": "…"}, …]`, top part first.
+
+For MIDI files:
+
+- Each track is a part, and chords keep their top note.
+- Times are rounded to sixteenths.
+- The key comes from the key signature, or is estimated when there is none.
 
 ## Install
 
@@ -57,7 +103,7 @@ It reads and writes the same database as the app, whether or not the window is o
 - **OpenCode:** `opencode.json`, under `mcp` with `"type": "local"`.
 - **Hermes Agent:** `config.yaml`, under `mcp_servers`.
 
-Data lives in `%APPDATA%\SingingTrainer`, which holds `trainer.sqlite`, `recordings\` and `soundfonts\`. Set `SINGING_TRAINER_DATA_DIR` to move it.
+Data lives in `%APPDATA%\SingingTrainer`, which holds `trainer.sqlite`, `recordings\`, `soundfonts\` and `library\`. Set `SINGING_TRAINER_DATA_DIR` to move it.
 
 ## Sounds
 
@@ -83,8 +129,11 @@ To work on the UI in a browser without the desktop shell, run `npm run dev` and 
 
 - `pitch`
 - `sung` or `sung-feedback`
+- `harmony` or `harmony-feedback`
 - `sight` or `sight-feedback`
 - `dictation` or `dictation-feedback`
+- `degrees` or `degrees-feedback`
+- `colors`
 - `summary`
 - `notation`, a gallery of generated melodies
 
@@ -94,6 +143,6 @@ TypeScript types in `ui/src/bindings` are generated from the Rust types by `carg
 | --- | --- |
 | `crates/trainer-core` | Theory, session schema, generators, pitch tracking, grading, storage, stats, presets, reports |
 | `crates/trainer-audio` | Real-time engine, cpal/ASIO device layer, SoundFont and synth rendering, calibration |
-| `crates/trainer-mcp` | MCP server (22 tools) |
+| `crates/trainer-mcp` | MCP server (27 tools) |
 | `crates/trainer-app` | Tauri app: session runner, live pitch forwarding, commands |
 | `ui` | React UI |

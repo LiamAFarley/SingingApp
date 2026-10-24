@@ -1,0 +1,23 @@
+{
+  "title": "Harmony: thirds",
+  "blocks": [
+    {
+      "type": "harmony",
+      "title": "A third below, by ear",
+      "count": 6,
+      "params": {
+        "source": { "parallel": { "voice": "third_below", "melody": { "bars": 2, "max_leap": 2, "step_rate": 0.85 } } },
+        "tempo_bpm": 72
+      }
+    },
+    {
+      "type": "harmony",
+      "title": "A third above, by ear",
+      "count": 6,
+      "params": {
+        "source": { "parallel": { "voice": "third_above", "melody": { "bars": 2, "max_leap": 2, "step_rate": 0.85 } } },
+        "tempo_bpm": 72
+      }
+    }
+  ]
+}

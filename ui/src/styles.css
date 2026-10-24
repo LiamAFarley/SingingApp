@@ -1111,6 +1111,11 @@ pre.code {
   background: var(--wrong-soft);
 }
 
+select.sing-part {
+  padding: 3px 6px;
+  font-size: 13px;
+}
+
 .library-part + .library-part {
   margin-top: 12px;
 }

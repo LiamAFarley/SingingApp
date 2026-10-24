@@ -665,15 +665,26 @@ impl<'a> SessionRun<'a> {
                 dur_s: n.beats * beat,
             })
             .collect();
+        let accompaniment: Vec<LaneNote> = t
+            .accompaniment
+            .iter()
+            .map(|n| LaneNote {
+                midi: n.midi,
+                start_s: (t.sing_start_beat + n.start_beat) * beat,
+                dur_s: n.beats * beat,
+            })
+            .collect();
         let lo = notes
             .iter()
             .chain(&reference)
+            .chain(&accompaniment)
             .map(|n| n.midi)
             .min()
             .unwrap_or(60);
         let hi = notes
             .iter()
             .chain(&reference)
+            .chain(&accompaniment)
             .map(|n| n.midi)
             .max()
             .unwrap_or(60);
@@ -681,6 +692,7 @@ impl<'a> SessionRun<'a> {
         LaneSpec {
             notes,
             reference,
+            accompaniment,
             beat_s: beat,
             beats_per_bar: t.beats_per_bar,
             sing_start_s: t.sing_start_beat * beat,
@@ -1059,7 +1071,11 @@ impl<'a> SessionRun<'a> {
                             let beat_frames = engine
                                 .frames_from_ms(t.beat_ms() * t.sing_start_beat as f64)
                                 as usize;
-                            let guide = trim_front(&audio.guide, beat_frames);
+                            // Your part, with the other voice of a harmony exercise.
+                            let mut guide = audio.guide;
+                            guide.mix(&audio.accompaniment, 0, 1.0);
+                            guide.limit(0.95);
+                            let guide = trim_front(&guide, beat_frames);
                             engine.play_now(Arc::new(guide), 1.0, Bus::Guide)?;
                         }
                         TrialSpec::SingPitch(t) => {

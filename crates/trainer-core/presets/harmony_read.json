@@ -1,0 +1,15 @@
+{
+  "title": "Harmony: read your part",
+  "blocks": [
+    {
+      "type": "harmony",
+      "title": "Thirds below, from the staff",
+      "count": 8,
+      "params": {
+        "source": { "parallel": { "voice": "third_below", "melody": { "bars": 4, "max_leap": 3, "rhythms": ["half", "quarter", "eighth"] } } },
+        "notation": true,
+        "tempo_bpm": 72
+      }
+    }
+  ]
+}

@@ -433,25 +433,37 @@ impl Renderer {
             .map(|n| note_event(n, at(t.sing_start_beat), beat_ms, &t.reference_timbre, -9.0))
             .collect();
         let guide = self.render_events(&guide_events);
+        let accompaniment_events: Vec<SoundEvent> = t
+            .accompaniment
+            .iter()
+            .map(|n| note_event(n, at(t.sing_start_beat), beat_ms, &t.reference_timbre, -7.0))
+            .collect();
+        let accompaniment = self.render_events(&accompaniment_events);
         let gain = t.backing_volume.clamp(0.0, 1.5);
         for v in &mut backing.data {
             *v *= gain;
         }
+        // The other voice keeps its level whatever the backing volume.
+        backing.mix(&accompaniment, 0, 1.0);
         backing.limit(0.95);
         SungAudio {
             backing,
             guide,
             guide_audible: t.guide,
+            accompaniment,
         }
     }
 }
 
 pub struct SungAudio {
+    /// Reference, clicks, drone, chords and the other voice of a harmony exercise.
     pub backing: SoundBuffer,
     /// The target melody, aligned to the same timeline as `backing`.
     pub guide: SoundBuffer,
     /// Whether the trial plays the guide by default.
     pub guide_audible: bool,
+    /// The other voice alone (empty unless the trial has one), on the same timeline.
+    pub accompaniment: SoundBuffer,
 }
 
 fn note_event(
@@ -729,6 +741,8 @@ mod tests {
             count_in_beat: None,
             sections: Vec::new(),
             follow_cursor: false,
+            accompaniment: Vec::new(),
+            just_cents: Vec::new(),
             stimulus: serde_json::json!({}),
         };
         let a = r.render_sung_trial(&t);
