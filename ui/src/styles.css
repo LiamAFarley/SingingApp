@@ -1312,3 +1312,85 @@ select.sing-part {
   border-color: currentColor;
   background: transparent;
 }
+
+/* Session overview: the blocks of this session and what else was done today. */
+.overview {
+  width: min(720px, 100%);
+  margin: 0 auto 16px;
+  text-align: left;
+}
+.overview-blocks,
+.overview-earlier {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  display: grid;
+  gap: 10px;
+}
+.overview-block {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.overview-block.current {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.overview-block.done {
+  opacity: 0.75;
+}
+.overview-earlier li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Colour exercises: after an answer the whole screen is the answer's colour. */
+.session {
+  transition: background-color 120ms ease;
+}
+.session.flashing .stage {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.session.flashing .prompt,
+.session.flashing .prompt-sub,
+.session.flashing .muted,
+.session.flashing h1 {
+  color: inherit;
+}
+.result.flash-word {
+  font-size: 34px;
+  font-weight: 700;
+  color: inherit;
+}
+
+/* Colour answers: large buttons filled with their colour. */
+.choices.big .choice {
+  min-height: 76px;
+  min-width: 150px;
+  font-size: 19px;
+  font-weight: 600;
+  justify-content: center;
+}
+.color-key {
+  min-height: 64px;
+  min-width: 130px;
+  font-size: 17px;
+  font-weight: 600;
+  justify-content: center;
+}
+.color-key .hint {
+  color: inherit;
+  opacity: 0.8;
+}
+/* On a coloured screen, white buttons keep dark text; filled ones get a light edge to stand out. */
+.session.flashing button:not(.tinted):not(.primary) {
+  color: var(--text);
+}
+.session.flashing button.btn.quiet {
+  color: inherit;
+}
+.session.flashing button.tinted {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.75);
+}

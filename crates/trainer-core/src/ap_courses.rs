@@ -196,26 +196,22 @@ fn color_level(
             color_block(
                 n,
                 true,
-                if errorless {
-                    "Check"
-                } else {
-                    "Check: no feedback"
-                },
+                "Check: no feedback",
                 16,
-                if errorless {
-                    "errorless"
-                } else {
-                    "after_trial"
-                },
-                check,
-                if errorless {
-                    "The same, still without an error mark."
-                } else {
-                    "Ordinary feedback, so you can see which colours you mix up."
-                },
+                "none",
+                quiet_check(check),
+                "No results until the end. Answer from the sound alone.",
             ),
         ],
     }
+}
+
+/// A level's check: nothing is shown, so nothing needs masking, and a missed note does not
+/// come back (its return would say it was missed).
+fn quiet_check(mut params: Value) -> Value {
+    params["mask"] = json!("none");
+    params["requeue_misses"] = json!(false);
+    params
 }
 
 fn color_block(
@@ -468,11 +464,11 @@ fn contrast_level(
             contrast_block(
                 n,
                 true,
-                "Check",
+                "Check: no feedback",
                 12,
-                "errorless",
-                check,
-                "The same, still without an error mark. Do not hum.",
+                "none",
+                quiet_check(check),
+                "No results until the end. Answer from the sound alone. Do not hum.",
             ),
         ],
     }
@@ -502,4 +498,44 @@ fn contrast_block(
             "params": params,
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::courses::level_session;
+    use crate::generate::{GenContext, generate_block};
+    use crate::schema::{FeedbackMode, TrialSpec};
+
+    #[test]
+    fn checks_show_nothing() {
+        for c in courses() {
+            for n in 1..=c.levels.len() as u32 {
+                for b in level_session(&c, n).unwrap().blocks {
+                    if b.title.as_deref().unwrap_or("").starts_with("Check") {
+                        assert_eq!(b.feedback, FeedbackMode::None, "{} level {n}", c.id);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_repeated_chord_moves_an_octave() {
+        let c = chord_colors_course();
+        let spec = level_session(&c, 1).unwrap();
+        let mut b = spec.blocks[0].clone();
+        b.count = 200;
+        let trials = generate_block(&b, 4, &GenContext::default()).unwrap();
+        let played: Vec<(String, i64)> = trials
+            .iter()
+            .map(|t| {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                (t.correct.clone(), t.stimulus["midi"][0].as_i64().unwrap())
+            })
+            .collect();
+        let repeats: Vec<_> = played.windows(2).filter(|w| w[0].0 == w[1].0).collect();
+        assert!(repeats.len() > 40, "two chords repeat about half the time");
+        assert!(repeats.iter().all(|w| (w[0].1 - w[1].1).abs() == 12));
+    }
 }

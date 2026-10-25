@@ -266,6 +266,7 @@ impl<'a> SessionRun<'a> {
                 title: self.spec.title.clone(),
                 notes: self.spec.notes.clone(),
                 block_count: blocks.len() as u32,
+                outline: blocks.iter().map(BlockOutline::of).collect(),
                 ..RunnerState::default()
             };
         });
@@ -276,6 +277,10 @@ impl<'a> SessionRun<'a> {
             self.set(|st| {
                 st.phase = Phase::BlockIntro;
                 st.block_index = bi as u32;
+                if let Some(o) = st.outline.get_mut(bi) {
+                    o.status = "current".into();
+                    o.trials = trials.len() as u32;
+                }
                 st.block_title = block.display_title();
                 st.block_instructions = block.instructions.clone();
                 st.block_kind = Some(block.exercise.kind());
@@ -368,6 +373,10 @@ impl<'a> SessionRun<'a> {
                             if outcome.correct == Some(true) {
                                 st.correct_in_block += 1;
                             }
+                            if let Some(o) = st.outline.get_mut(bi) {
+                                o.done += 1;
+                                o.correct += (outcome.correct == Some(true)) as u32;
+                            }
                         });
                     }
                     match self
@@ -400,6 +409,9 @@ impl<'a> SessionRun<'a> {
             let show = feedback != FeedbackMode::EndOfSession;
             self.set(|st| {
                 st.phase = Phase::BlockSummary;
+                if let Some(o) = st.outline.get_mut(bi) {
+                    o.status = "done".into();
+                }
                 st.trial = None;
                 st.feedback = None;
                 st.block_report = if show { block_report } else { None };

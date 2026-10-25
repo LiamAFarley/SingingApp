@@ -48,8 +48,9 @@ What the app does to keep a test honest:
   number*, chosen without looking at the note. With the 13-semitone rule alone, the octave a note
   landed in gave away whether it was above or below the last note's name. The step rule removes
   that leak.
-- **The notes come up evenly.** Each block plays each of the twelve notes the same number of
-  times, give or take one.
+- **The notes come up evenly, but not predictably.** Each block plays each of the twelve notes
+  about equally often, and a note can come straight back in another octave, so the next answer
+  cannot be guessed from the last.
 - **Instruments stay in tune.** Extra SoundFont instruments are only used inside the range they
   were measured in tune (docs/SOUNDFONTS.md). A bank that is not installed is left out.
 

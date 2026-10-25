@@ -9,6 +9,8 @@ import type { TrialView } from "../bindings/TrialView";
 import { ChoiceGrid, DegreePad, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
 import { LockOnTuner } from "../components/LockOnTuner";
 import { PitchLane } from "../components/PitchLane";
+import { SessionOverview } from "../components/SessionOverview";
+import { tint } from "../colors";
 import { offerKey, useKeyOwner } from "../keyboard";
 import { live, useAnimationFrame } from "../live";
 import { beatTicks, describeKey } from "../notation/layout";
@@ -32,6 +34,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
   const trial = runner.trial;
   useAnimationFrame(trial?.interaction === "pairing" || trial?.interaction === "detect");
   const [confirmEnd, setConfirmEnd] = useState(false);
+  const [overview, setOverview] = useState(false);
 
   useEffect(() => {
     if (phase === "session_summary" || phase === "idle") setConfirmEnd(false);
@@ -74,7 +77,13 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
         return;
       }
       if (k === "escape") {
-        if (phase !== "session_summary" && phase !== "error") setConfirmEnd(true);
+        if (overview) setOverview(false);
+        else if (phase !== "session_summary" && phase !== "error") setConfirmEnd(true);
+        return;
+      }
+      if (k === "v") {
+        e.preventDefault();
+        setOverview((o) => !o);
         return;
       }
       if (phase === "answering" && trial?.interaction === "choice") {
@@ -95,7 +104,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
     // Capture phase, so the answer pads never see keys meant for the end-session question.
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [phase, trial, runner.feedback, confirmEnd]);
+  }, [phase, trial, runner.feedback, confirmEnd, overview]);
 
   const blockProgress =
     phase === "block_summary" || phase === "session_summary"
@@ -110,8 +119,14 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
       ? trial.flash_color
       : null) ||
     (trial?.interaction === "detect" ? trial.flash_color : null);
+  // After a colour answer the whole screen takes the right colour, with readable text.
+  const flashing = phase === "feedback" && !!runner.feedback?.flash_color;
+  const fill = flashing ? tint(runner.feedback!.flash_color!, "#ffffff", 1) : undefined;
   return (
-    <div className="session" style={flash ? { background: `color-mix(in srgb, ${flash} 16%, var(--bg))` } : undefined}>
+    <div
+      className={`session ${flashing ? "flashing" : ""}`}
+      style={fill ?? (flash ? { background: `color-mix(in srgb, ${flash} 16%, var(--bg))` } : undefined)}
+    >
       <div className="session-head">
         <div>
           <h1>{runner.title}</h1>
@@ -134,6 +149,11 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
             <span className="badge num">
               {runner.correct_in_block} / {runner.done_in_block} correct
             </span>
+          )}
+          {runner.outline.length > 0 && !confirmEnd && (
+            <button className="btn quiet" onClick={() => setOverview((o) => !o)}>
+              Overview <span className="kbd">V</span>
+            </button>
           )}
           {phase !== "session_summary" && !confirmEnd && (
             <button className="btn quiet" onClick={() => setConfirmEnd(true)}>
@@ -163,6 +183,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
         <div style={{ width: `${Math.min(1, blockProgress) * 100}%` }} />
       </div>
       <div className="stage">
+        {overview && <SessionOverview runner={runner} onClose={() => setOverview(false)} />}
         {phase === "block_intro" && <BlockIntro runner={runner} />}
         {phase === "scrubbing" && <Scrubbing runner={runner} />}
         {(phase === "preparing" || phase === "listening" || phase === "answering" || phase === "recording" || phase === "grading" || phase === "feedback") &&
@@ -265,6 +286,8 @@ function KindHelp({ kind }: { kind: string | null }) {
 function keyStates(runner: RunnerState, picked: string | null): Record<string, KeyState> {
   const fb = runner.feedback;
   const states: Record<string, KeyState> = {};
+  // A colour flash replaces the marks: the screen itself shows the answer.
+  if (runner.phase === "feedback" && fb?.flash_color) return states;
   if (runner.phase === "feedback" && fb && !fb.hidden) {
     if (fb.correct_choice) states[fb.correct_choice] = "correct";
     if (fb.answered && fb.answered !== fb.correct_choice && !fb.errorless) states[fb.answered] = "wrong";
@@ -376,6 +399,11 @@ function Result({ runner }: { runner: RunnerState }) {
   const fb = runner.feedback;
   if (runner.phase !== "feedback" || !fb) return <div className="result" />;
   if (fb.hidden) return <div className="result muted">Answer recorded.</div>;
+  if (fb.flash_color) {
+    // Just the colour's name, large: no note names, no marks.
+    const c = runner.trial?.choices.find((x) => x.id === fb.correct_choice);
+    return <div className="result flash-word">{c?.word ?? c?.label ?? ""}</div>;
+  }
   const cls = fb.correct === true ? "correct" : fb.correct === false ? "wrong" : "";
   return <div className={`result ${cls}`}>{fb.summary}</div>;
 }
@@ -526,8 +554,13 @@ function ColorTask({ trial, enabled, states, onPick }: { trial: TrialView; enabl
       {trial.label_at_s != null && <div className="swatch" style={{ background: shown ? PAIRING_COLORS[shown] ?? shown : "var(--surface-muted)" }} />}
       <div className="row wrap" style={{ gap: 10, justifyContent: "center" }}>
         {trial.choices.map((c, i) => (
-          <button key={c.id} className={`color-key ${states[c.id] ?? ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
-            <span className="dot" style={{ background: c.color ?? PAIRING_COLORS[c.id] ?? "#ccc" }} />
+          <button
+            key={c.id}
+            className={`color-key ${states[c.id] ?? ""}`}
+            disabled={!enabled}
+            onClick={() => onPick(c.id)}
+            style={states[c.id] ? undefined : tint(c.color ?? PAIRING_COLORS[c.id] ?? "#cccccc", "#ffffff", 1)}
+          >
             <span>
               {c.label}
               {c.word && c.word !== c.label ? <span className="hint"> {c.word}</span> : null}

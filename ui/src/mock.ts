@@ -128,6 +128,7 @@ function idle(): RunnerState {
     session_report: null,
     error: null,
     scrub_end_s: null,
+    outline: [],
     seq: 0,
   };
 }
@@ -720,8 +721,31 @@ const report: SessionReport = {
 let scenario = new URLSearchParams(typeof location !== "undefined" ? location.search : "").get("scenario");
 const mockStart = clock();
 
+const OUTLINE = [
+  { title: "Note naming · Check: no feedback", kind: "Name the note", trials: 24, feedback: "none" as const, instructions: "No results until the end. Answer from the sound alone.", course: "Note naming", level: 3, level_summary: "C E A♭ D F♯, plus Other for notes outside the set, over four octaves, answered within 3.6 s.", course_about: "Name a growing set of notes spread over four octaves.", check: true, status: "done", done: 24, correct: 19 },
+  { title: "Contrast · Name the word", kind: "Name the note", trials: 20, feedback: "errorless" as const, instructions: "Do not hum. Answer with the word.", course: "Contrast (Burge / Gervain)", level: 1, level_summary: "E♭ and F♯, in one octave. Do not hum.", course_about: "Starts with E♭3 against F♯3, then A, then the black keys.", check: false, status: "current", done: 7, correct: 6 },
+  { title: "Contrast · Check: no feedback", kind: "Name the note", trials: 12, feedback: "none" as const, instructions: "No results until the end.", course: "Contrast (Burge / Gervain)", level: 1, level_summary: "E♭ and F♯, in one octave. Do not hum.", course_about: null, check: true, status: "upcoming", done: 0, correct: 0 },
+];
+
+function contrastTrial(): TrialView {
+  return {
+    ...choiceTrial(),
+    choices: [
+      { id: "F#", label: "Jimmy", word: "Jimmy", color: "#7a6a1e" },
+      { id: "D#", label: "Oscar", word: "Oscar", color: "#1f5e57" },
+      { id: "other", label: "Other" },
+    ],
+    layout: "list",
+    flash_color: "#1f5e57",
+  };
+}
+
 function startScenario() {
-  if (scenario === "pitch") {
+  if (scenario === "contrast" || scenario === "contrast-flash") {
+    const base = { session_id: "demo", title: "Absolute pitch: today's set", block_index: 1, block_count: 3, block_title: "Contrast · Name the word", block_kind: "pitch_id" as const, trial_index: 7, trial_count: 20, done_in_block: 7, correct_in_block: 6, feedback_mode: "errorless" as const, outline: OUTLINE, trial: contrastTrial() };
+    if (scenario === "contrast") emit({ phase: "answering", ...base });
+    else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57" } });
+  } else if (scenario === "pitch") {
     emit({ phase: "answering", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, block_title: "Name the note", block_kind: "pitch_id", trial_index: 6, trial_count: 60, done_in_block: 6, correct_in_block: 5, trial: choiceTrial() });
   } else if (scenario === "sung" || scenario === "sung-feedback") {
     kind = "sung";

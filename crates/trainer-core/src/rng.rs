@@ -96,14 +96,38 @@ pub struct BalancedBag<T: Clone + PartialEq> {
     items: Vec<T>,
     bag: Vec<T>,
     last: Option<T>,
+    /// A new cycle never starts with the item just drawn.
+    strict: bool,
 }
 
+/// Cards per cycle for `BalancedBag::allowing_repeats`.
+pub const REPEAT_CYCLE: usize = 24;
+
 impl<T: Clone + PartialEq> BalancedBag<T> {
+    /// Every item once per cycle, never the same item twice in a row.
     pub fn new(items: Vec<T>) -> Self {
         BalancedBag {
             items,
             bag: Vec::new(),
             last: None,
+            strict: true,
+        }
+    }
+
+    /// Every item equally often, but with several copies per cycle (at least `REPEAT_CYCLE`
+    /// cards), so an item can come up twice in a row. With one copy each, a small set would
+    /// alternate and the next answer could be guessed from the last.
+    pub fn allowing_repeats(items: Vec<T>) -> Self {
+        let copies = REPEAT_CYCLE.div_ceil(items.len().max(1));
+        let items = items
+            .iter()
+            .flat_map(|x| std::iter::repeat_n(x.clone(), copies))
+            .collect();
+        BalancedBag {
+            items,
+            bag: Vec::new(),
+            last: None,
+            strict: false,
         }
     }
 
@@ -122,7 +146,7 @@ impl<T: Clone + PartialEq> BalancedBag<T> {
         if self.bag.is_empty() {
             self.bag = self.items.clone();
             rng.shuffle(&mut self.bag);
-            if self.bag.len() > 1 && self.bag.last() == self.last.as_ref() {
+            if self.strict && self.bag.len() > 1 && self.bag.last() == self.last.as_ref() {
                 let n = self.bag.len();
                 self.bag.swap(n - 1, 0);
             }

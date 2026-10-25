@@ -287,14 +287,9 @@ impl ClassDraw {
         weights: &std::collections::BTreeMap<String, f32>,
     ) -> Result<Self, GenError> {
         if weights.is_empty() {
-            // About twelve to a cycle, so a small set repeats a class as often as chance would
-            // instead of alternating (two classes in a one-each bag go A B, B A, A B ...).
-            let copies = 12usize.div_ceil(classes.len());
-            let items: Vec<PitchClass> = classes
-                .iter()
-                .flat_map(|c| std::iter::repeat_n(*c, copies))
-                .collect();
-            return Ok(ClassDraw::Even(BalancedBag::new(items)));
+            return Ok(ClassDraw::Even(BalancedBag::allowing_repeats(
+                classes.to_vec(),
+            )));
         }
         let mut listed: Vec<(PitchClass, f64)> = Vec::new();
         for (k, w) in weights {
@@ -627,8 +622,8 @@ fn gen_pitch_id(
             reference: None,
             stimulus,
             choice_sounds,
-            flash_color: p
-                .color_flash
+            // A tone from outside the set is answered Other and flashes nothing.
+            flash_color: (p.color_flash && !out_of_set)
                 .then(|| {
                     label_set
                         .as_ref()
@@ -926,7 +921,8 @@ fn gen_chord_color(
         })
         .collect();
     let shift = p.register_shift * 12;
-    let mut bag = BalancedBag::new(chords.iter().map(|c| c.id.to_string()).collect::<Vec<_>>());
+    let mut bag =
+        BalancedBag::allowing_repeats(chords.iter().map(|c| c.id.to_string()).collect::<Vec<_>>());
     let white: Vec<PitchClass> = [0, 2, 4, 5, 7, 9, 11]
         .into_iter()
         .map(PitchClass::new)
@@ -947,9 +943,24 @@ fn gen_chord_color(
         style_choices(&mut note_choices, set, false);
     }
     let mut out = Vec::with_capacity(n * if p.single_note_after { 2 } else { 1 });
+    let base_shift = shift;
+    let mut last: Option<(String, i32)> = None;
     for _ in 0..n {
         let id = bag.draw(rng).unwrap();
         let chord = crate::labels::eguchi(&id).unwrap();
+        // The same chord twice in a row is played an octave away from the last time (and never
+        // more than an octave from its own register): same colour, not the same sound.
+        let shift = match &last {
+            Some((prev, s)) if *prev == id => {
+                if *s == base_shift {
+                    base_shift + if rng.chance(0.5) { 12 } else { -12 }
+                } else {
+                    base_shift
+                }
+            }
+            _ => base_shift,
+        };
+        last = Some((id.clone(), shift));
         let play = |notes: &[i32]| -> Vec<SoundEvent> {
             notes
                 .iter()
@@ -1107,7 +1118,7 @@ fn gen_pairing(
         return err("classes must not be empty");
     }
     let combos = pool_combos(&p.timbres, &p.octaves, p.pool, ctx)?;
-    let mut bag = BalancedBag::new(classes);
+    let mut bag = BalancedBag::allowing_repeats(classes);
     let mut combo_bag = BalancedBag::new((0..combos.len()).collect::<Vec<_>>());
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
@@ -1305,7 +1316,7 @@ fn gen_incidental(
         .iter()
         .map(|pc| Choice::new(color(*pc).0, color(*pc).1))
         .collect();
-    let mut bag = BalancedBag::new(classes.clone());
+    let mut bag = BalancedBag::allowing_repeats(classes.clone());
     let mut combo_bag = BalancedBag::new((0..combos.len()).collect::<Vec<_>>());
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
@@ -1463,7 +1474,7 @@ fn gen_interval_id(
         return err("intervals and directions must not be empty");
     }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 72));
-    let mut bag = BalancedBag::new(p.intervals.clone());
+    let mut bag = BalancedBag::allowing_repeats(p.intervals.clone());
     let mut choice_ivs = p.intervals.clone();
     choice_ivs.sort();
     choice_ivs.dedup();
@@ -1745,6 +1756,7 @@ fn gen_scale_degree(
     let step = beat * 0.6;
     let mut bags: Vec<(KeyMode, BalancedBag<i32>)> = Vec::new();
     let mut prev_key = None;
+    let mut last_note: Option<i32> = None;
     let mut out = Vec::with_capacity(n);
     for (i, (tonic, mode)) in keys.into_iter().enumerate() {
         let degrees: Vec<i32> = explicit
@@ -1756,15 +1768,23 @@ fn gen_scale_degree(
         let bag = match bags.iter().position(|(m, _)| *m == mode) {
             Some(k) => &mut bags[k].1,
             None => {
-                bags.push((mode, BalancedBag::new(degrees.clone())));
+                bags.push((mode, BalancedBag::allowing_repeats(degrees.clone())));
                 &mut bags.last_mut().unwrap().1
             }
         };
         let semis = bag.draw(rng).unwrap();
         let timbre = pick_timbre(&p.timbres, rng)?;
         let r = cadence_chords(tonic, mode)[0].1[0];
-        let octave = *rng.choose(&p.octaves).unwrap();
+        let mut octave = *rng.choose(&p.octaves).unwrap();
+        // A repeated degree is played in another octave when there is one.
+        if last_note == Some(r + semis + 12 * octave) {
+            let others: Vec<i32> = p.octaves.iter().copied().filter(|o| *o != octave).collect();
+            if let Some(&o) = rng.choose(&others) {
+                octave = o;
+            }
+        }
         let note = r + semis + 12 * octave;
+        last_note = Some(note);
         let cadence = p.cadence_each_trial || prev_key != Some((tonic, mode)) || i % 8 == 0;
         prev_key = Some((tonic, mode));
         let mut events = if cadence {
@@ -1888,7 +1908,7 @@ fn gen_interval_comparison(
     if same {
         choices.push(Choice::new("same", "Same"));
     }
-    let mut bag = BalancedBag::new(p.intervals.clone());
+    let mut bag = BalancedBag::allowing_repeats(p.intervals.clone());
     let mut diffs = BalancedBag::new(p.differences.clone());
     let mut last = None;
     let mut out = Vec::with_capacity(n);
@@ -2003,7 +2023,7 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
             choices.push(Choice::new(q.id(), q.long_name()));
         }
     }
-    let mut bag = BalancedBag::new(p.qualities.clone());
+    let mut bag = BalancedBag::allowing_repeats(p.qualities.clone());
     let dur = p.duration_ms.max(300) as f64;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
@@ -2143,7 +2163,7 @@ fn gen_scale_id(p: &ScaleIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
         return err("scales must not be empty");
     }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 62));
-    let mut bag = BalancedBag::new(p.scales.clone());
+    let mut bag = BalancedBag::allowing_repeats(p.scales.clone());
     let mut kinds: Vec<ScaleKind> = Vec::new();
     for s in &p.scales {
         if !kinds.contains(s) {
@@ -2350,7 +2370,7 @@ fn gen_sing_interval(
     check_timbres(std::slice::from_ref(&p.sung.timbre))?;
     let range = sung_range(p.range, ctx);
     let reference = p.sung.reference.unwrap_or(ReferenceMode::FirstNote);
-    let mut bag = BalancedBag::new(p.intervals.clone());
+    let mut bag = BalancedBag::allowing_repeats(p.intervals.clone());
     let mut out = Vec::with_capacity(n);
     let mut last = None;
     for _ in 0..n {

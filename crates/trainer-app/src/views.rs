@@ -237,9 +237,64 @@ pub struct RunnerState {
     pub error: Option<String>,
     /// Master-clock time at which the clearing sound before a block ends.
     pub scrub_end_s: Option<f64>,
+    /// Every block of the session, for the overview.
+    pub outline: Vec<BlockOutline>,
     /// Increments on every change.
     #[ts(type = "number")]
     pub seq: u64,
+}
+
+/// One block of the running session, as the overview lists it.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct BlockOutline {
+    pub title: String,
+    /// The exercise, e.g. "Name the note".
+    pub kind: String,
+    pub trials: u32,
+    pub feedback: FeedbackMode,
+    pub instructions: Option<String>,
+    /// The course the block belongs to, its level, what the level is and what the course is for.
+    pub course: Option<String>,
+    pub level: Option<u32>,
+    pub level_summary: Option<String>,
+    pub course_about: Option<String>,
+    /// A check or test whose results count towards a level or a test.
+    pub check: bool,
+    /// `upcoming`, `current` or `done`.
+    pub status: String,
+    pub done: u32,
+    pub correct: u32,
+}
+
+impl BlockOutline {
+    pub fn of(block: &trainer_core::schema::BlockSpec) -> Self {
+        let course = block
+            .course
+            .as_ref()
+            .and_then(|c| Some((c, trainer_core::courses::find_course(&c.course)?)));
+        BlockOutline {
+            title: block.display_title(),
+            kind: block.exercise.kind().title().to_string(),
+            trials: block.count,
+            feedback: block.effective_feedback(),
+            instructions: block.instructions.clone(),
+            course: course.as_ref().map(|(_, c)| c.title.clone()),
+            level: course
+                .as_ref()
+                .filter(|(_, c)| c.levels.len() > 1)
+                .map(|(r, _)| r.level),
+            level_summary: course.as_ref().and_then(|(r, c)| {
+                c.levels
+                    .get((r.level as usize).saturating_sub(1))
+                    .map(|l| l.summary.clone())
+            }),
+            course_about: course.as_ref().map(|(_, c)| c.description.clone()),
+            check: block.course.as_ref().map(|c| c.verify).unwrap_or(false) || block.assessment,
+            status: "upcoming".into(),
+            done: 0,
+            correct: 0,
+        }
+    }
 }
 
 impl Default for RunnerState {
@@ -265,6 +320,7 @@ impl Default for RunnerState {
             session_report: None,
             error: None,
             scrub_end_s: None,
+            outline: Vec::new(),
             seq: 0,
         }
     }

@@ -73,7 +73,8 @@ export function PianoPad({ choices, enabled, states, onPick, octave, compact, ke
     const id = idFor(pc);
     const c = byId.get(id);
     const st = states[id] ?? "idle";
-    const tinted = c?.color && st === "idle" ? tint(c.color, sharp ? "#1f2328" : "#ffffff", 0.32) : undefined;
+    // Filled with the label's colour, so the colours are what is learnt.
+    const tinted = c?.color && st === "idle" ? tint(c.color, "#ffffff", 1) : undefined;
     return (
       <button
         key={pc}
@@ -148,8 +149,9 @@ export function ChoiceGrid({ choices, enabled, states, onPick }: Omit<PadProps, 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+  const colored = choices.some((c) => c.color);
   return (
-    <div className="choices">
+    <div className={`choices ${colored ? "big" : ""}`}>
       {choices.map((c, i) => {
         const st = states[c.id] ?? "idle";
         // The label's own colour, with white or dark text, whichever reads.
