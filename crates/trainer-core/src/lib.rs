@@ -14,6 +14,7 @@ pub mod metrics;
 pub mod pitch;
 pub mod presets;
 pub mod reports;
+pub mod rp_courses;
 pub mod rng;
 pub mod schema;
 pub mod score;

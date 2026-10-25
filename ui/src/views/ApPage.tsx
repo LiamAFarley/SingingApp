@@ -64,8 +64,9 @@ export function ApPage({ sessionActive, onOpenSession }: { sessionActive: boolea
   };
 
   const busy = sessionActive || starting != null;
-  const ladders = dash?.courses.filter((c) => c.kind === "ladder") ?? [];
-  const tests = dash?.courses.filter((c) => c.kind === "recurring") ?? [];
+  const own = dash?.courses.filter((c) => c.category === "Absolute pitch") ?? [];
+  const ladders = own.filter((c) => c.kind === "ladder");
+  const tests = own.filter((c) => c.kind === "recurring");
 
   return (
     <div className="page">
@@ -228,7 +229,7 @@ function NoteTile({ c }: { c: ClassProgress }) {
   );
 }
 
-function LadderCard({
+export function LadderCard({
   c,
   plan,
   busy,

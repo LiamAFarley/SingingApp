@@ -404,7 +404,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::IntervalId,
-            "Two notes (ascending, descending or together); name the interval. Free-standing on random roots by default; in_key=true plays a cadence first and takes both notes from the key's scale (diatonic intervals, e.g. 3-6 in D major), with keys/modes/key_change (per_block or per_trial) and cadence_each_trial.",
+            "Two notes (ascending, descending or together); name the interval. Free-standing on random roots by default (root_range). in_key=true plays a cadence (cadence: start | key_change | every, cadence_bpm) and places the notes in the key: start random (any scale note), tonic (from do; also start_note without a key) or fixed (start_note), moved by start_octaves; chromatic=true lets the second note leave the scale (non-diatonic intervals). other_rate (0-0.5) adds intervals from outside the set answered Other, so one interval alone can be drilled. After answering, an in-key interval's notes are named with labels (fixed_do default, solfege, numbers). keys/modes/key_change (per_block = one random key with keys \"all\", per_trial = new key each question).",
             schema_of::<IntervalIdParams>(),
             json!({"type": "interval_id", "count": 30, "params": {"intervals": ["m6", "M6", "P5"], "directions": ["descending"]}}),
         ),
@@ -434,7 +434,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::SingInterval,
-            "The first note is given; sing both notes of the interval in time with the metronome. Reports interval error.",
+            "The first note is given; sing both notes of the interval in time with the metronome. Reports interval error. in_key=true plays a cadence first (cadence plan as for intervals) and starts from the tonic (start tonic) or any scale note (start random), staying in the scale unless chromatic; the prompt names the notes with labels (fixed do by default), e.g. From sol, sing si.",
             schema_of::<SingIntervalParams>(),
             json!({"type": "sing_interval", "count": 12, "params": {"intervals": ["M3", "P5"], "directions": ["up"], "tempo_bpm": 80}}),
         ),
@@ -476,7 +476,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::IntervalComparison,
-            "Two intervals play one after the other (melodic or harmonic, on different roots); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder).",
+            "Two intervals play one after the other (melodic or harmonic); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder). `shared` picks per question which note they share: first (same starting note, easiest), second (same last note), near (starts a semitone to a minor third apart) or none (hardest).",
             schema_of::<IntervalComparisonParams>(),
             json!({"type": "interval_comparison", "count": 24, "params": {"differences": [0, 1, 2], "directions": ["ascending"]}}),
         ),

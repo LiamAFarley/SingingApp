@@ -393,8 +393,12 @@ pub enum StartRequest {
     Spec {
         spec: serde_json::Value,
     },
-    /// Today's absolute-pitch set, composed from the active courses.
-    DailySet,
+    /// Today's set for a category (absolute pitch by default), composed from its active courses.
+    DailySet {
+        #[serde(default)]
+        #[ts(optional)]
+        category: Option<String>,
+    },
     /// One level of a course.
     CourseLevel {
         course: String,

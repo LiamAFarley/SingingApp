@@ -410,6 +410,7 @@ fn maintenance_course() -> Course {
 pub fn builtin_courses() -> Vec<Course> {
     let mut courses = vec![naming_course(), brady_course()];
     courses.extend(crate::ap_courses::courses());
+    courses.extend(crate::rp_courses::courses());
     // Tests in the order they run when several are due: the benchmark before anything is heard.
     courses.extend([
         benchmark_course(),
@@ -866,6 +867,9 @@ fn suggested_minutes(id: &str) -> f32 {
         AP_CHORD_COLORS => 3.0,
         AP_NOTE_COLORS => 8.0,
         AP_CONTRAST => 6.0,
+        crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY => 8.0,
+        crate::rp_courses::RP_SING => 6.0,
+        id if id.starts_with("rp_") => 6.0,
         _ => 10.0,
     }
 }
@@ -940,14 +944,19 @@ const PLAN_KEY: &str = "ap_daily_plan";
 
 pub fn daily_plan(db: &Db) -> Result<DailyPlan> {
     let mut plan: DailyPlan = db.get_setting(PLAN_KEY)?.unwrap_or_default();
-    // Ladder courses added since the plan was saved start inactive.
+    // Ladder courses added since the plan was saved start inactive, except the first two
+    // relative-pitch courses, so that set has something in it from the start.
     for c in builtin_courses() {
         if c.schedule == Schedule::Ladder && !plan.courses.iter().any(|p| p.course == c.id) {
             let minutes = suggested_minutes(&c.id);
+            let active = matches!(
+                c.id.as_str(),
+                crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY
+            );
             plan.courses.push(PlanCourse {
                 course: c.id,
                 minutes,
-                active: false,
+                active,
             });
         }
     }
@@ -977,6 +986,8 @@ pub fn save_daily_plan(db: &Db, plan: &DailyPlan) -> Result<()> {
 pub struct CourseStatus {
     pub id: String,
     pub title: String,
+    /// `Absolute pitch` or `Relative pitch`: which page and which daily set it belongs to.
+    pub category: String,
     pub short: String,
     pub description: String,
     /// `ladder` or `recurring`.
@@ -1139,6 +1150,7 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
         out.push(CourseStatus {
             id: c.id.clone(),
             title: c.title.clone(),
+            category: c.category.clone(),
             short: c.short.clone(),
             description: c.description.clone(),
             kind: match c.schedule {
@@ -1242,10 +1254,25 @@ fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockS
         .collect()
 }
 
-pub fn compose_daily_set(db: &Db, ctx: &GenContext, now: DateTime<Utc>) -> Result<DailySet> {
-    let statuses = course_statuses(db, now)?;
+/// The categories with a daily set of their own.
+pub const ABSOLUTE_PITCH: &str = "Absolute pitch";
+
+pub fn compose_daily_set(
+    db: &Db,
+    ctx: &GenContext,
+    now: DateTime<Utc>,
+    category: &str,
+) -> Result<DailySet> {
+    let ap = category == ABSOLUTE_PITCH;
+    let statuses: Vec<CourseStatus> = course_statuses(db, now)?
+        .into_iter()
+        .filter(|s| s.category == category)
+        .collect();
     let plan = daily_plan(db)?;
-    let courses = builtin_courses();
+    let courses: Vec<Course> = builtin_courses()
+        .into_iter()
+        .filter(|c| c.category == category)
+        .collect();
     let mut items = Vec::new();
     let mut blocks: Vec<BlockSpec> = Vec::new();
     let mut add = |c: &Course,
@@ -1323,19 +1350,19 @@ pub fn compose_daily_set(db: &Db, ctx: &GenContext, now: DateTime<Utc>) -> Resul
             "Nothing to practise: turn on a course in the daily plan."
         ));
     }
-    // Clear pitch memory before anything is heard.
-    if blocks[0].pre_mask.is_none() {
+    // Absolute pitch: clear pitch memory before anything is heard.
+    if ap && blocks[0].pre_mask.is_none() {
         blocks[0].pre_mask = Some(Mask::ShepardGlissando);
     }
     let minutes = items.iter().map(|i| i.minutes).sum::<f64>()
-        + if items.first().map(|i| i.test).unwrap_or(false) {
+        + if !ap || items.first().map(|i| i.test).unwrap_or(false) {
             0.0
         } else {
             20.0 / 60.0
         };
     let mut spec = SessionSpec {
-        title: "Absolute pitch: today's set".into(),
-        protocol: Some("ap_daily_set".into()),
+        title: format!("{category}: today's set"),
+        protocol: Some(if ap { "ap_daily_set" } else { "rp_daily_set" }.into()),
         planned_minutes: Some(minutes as f32),
         notes: Some(
             items
@@ -1739,7 +1766,7 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         let ctx = GenContext::default();
         // 25 October 2026 is a Sunday, the default test day.
-        let sunday = compose_daily_set(&db, &ctx, at(25, 12, 0)).unwrap();
+        let sunday = compose_daily_set(&db, &ctx, at(25, 12, 0), ABSOLUTE_PITCH).unwrap();
         let courses: Vec<&str> = sunday.items.iter().map(|i| i.course.as_str()).collect();
         // The benchmark and transfer test are due on their first run; the benchmark goes first,
         // before anything is heard.
@@ -1759,20 +1786,22 @@ mod tests {
         // Done on Sunday, the two-weekly and four-weekly tests are not due on Monday.
         add_block(&db, AP_BENCHMARK, 1, true, at(25, 9, 0), 60, 0.3);
         add_block(&db, AP_TRANSFER, 1, true, at(25, 9, 30), 60, 0.2);
-        let monday = compose_daily_set(&db, &ctx, at(26, 12, 0)).unwrap();
+        let monday = compose_daily_set(&db, &ctx, at(26, 12, 0), ABSOLUTE_PITCH).unwrap();
         assert!(monday.items.iter().all(|i| !i.test), "{:?}", monday.items);
         // About the planned 25 minutes, plus the clearing sound.
         assert!((18.0..34.0).contains(&monday.minutes), "{}", monday.minutes);
         assert_eq!(monday.spec.blocks[0].pre_mask, Some(Mask::ShepardGlissando));
         // The order of the courses changes from day to day.
-        let tuesday = compose_daily_set(&db, &ctx, at(27, 12, 0)).unwrap();
+        let tuesday = compose_daily_set(&db, &ctx, at(27, 12, 0), ABSOLUTE_PITCH).unwrap();
         assert_ne!(monday.items[0].course, tuesday.items[0].course);
 
         // A test done this week is not due again until next week.
         add_block(&db, AP_WEEKLY, 1, true, at(25, 13, 0), 120, 0.5);
-        let next = compose_daily_set(&db, &ctx, at(25, 18, 0)).unwrap();
+        let next = compose_daily_set(&db, &ctx, at(25, 18, 0), ABSOLUTE_PITCH).unwrap();
         assert!(!next.items.iter().any(|i| i.course == AP_WEEKLY));
-        let week_later = compose_daily_set(&db, &ctx, at(1, 12, 0) + Duration::days(31)).unwrap();
+        let week_later =
+            compose_daily_set(&db, &ctx, at(1, 12, 0) + Duration::days(31), ABSOLUTE_PITCH)
+                .unwrap();
         assert!(
             week_later.items.iter().any(|i| i.course == AP_WEEKLY),
             "{:?}",
@@ -1785,7 +1814,7 @@ mod tests {
             p.active = false;
         }
         save_daily_plan(&db, &plan).unwrap();
-        assert!(compose_daily_set(&db, &ctx, at(26, 12, 0)).is_err());
+        assert!(compose_daily_set(&db, &ctx, at(26, 12, 0), ABSOLUTE_PITCH).is_err());
     }
 
     #[test]

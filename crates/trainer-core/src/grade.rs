@@ -140,7 +140,7 @@ pub fn grade_choice(
             _ => 0.0,
         });
     }
-    let summary = match answer {
+    let mut summary = match answer {
         None => format!("No answer. It was {}.", label_of(&trial.correct)),
         Some(_) if correct => format!("Correct: {}.", label_of(&trial.correct)),
         Some(a) => format!(
@@ -149,6 +149,9 @@ pub fn grade_choice(
             label_of(&trial.correct)
         ),
     };
+    if let Some(x) = &trial.explain {
+        summary = format!("{} ({x}).", summary.trim_end_matches('.'));
+    }
     TrialOutcome {
         correct: Some(correct),
         score: Some(if correct { 1.0 } else { 0.0 }),

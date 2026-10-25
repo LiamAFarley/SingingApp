@@ -21,6 +21,10 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
   - After answering any identification question, click an answer to hear it: the other notes, intervals, chords, scales, keys or degrees, in the same register and sound.
   - Singing a named note. After a miss, a tuner aimed at that note opens so you can practise locking on (hold it within 15 cents for a second), with an optional drone.
   - Passive pairing and key finding.
+- **Relative pitch** (its own page and Today's set): courses that climb a level at a time, practice then a check, in the manner of EarMaster's workshops.
+  - The courses: scale degrees; intervals in a key from do; chromatic intervals in a key; intervals without a key; interval comparison; singing intervals.
+  - Intervals can start from do, a fixed note or anywhere, move through octaves, leave the key, or be drilled alone against Other.
+  - See `docs/RELATIVE_PITCH.md`.
 - **Ear training:**
   - Intervals, melodic and harmonic, either without a key or inside a key after a cadence.
   - Interval comparison: which of two intervals is larger.

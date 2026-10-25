@@ -492,7 +492,8 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
         core.ensure_engine()
             .map_err(|e| format!("Audio is not available: {e:#}"))?;
         // Before taking the database: building the context locks it too.
-        let daily_ctx = matches!(request, StartRequest::DailySet).then(|| core.gen_context());
+        let daily_ctx =
+            matches!(request, StartRequest::DailySet { .. }).then(|| core.gen_context());
         let db = core.db.lock();
         let (id, spec) = match request {
             StartRequest::Preset { id, params } => {
@@ -544,9 +545,11 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                     spec,
                 )
             }
-            StartRequest::DailySet => {
+            StartRequest::DailySet { category } => {
                 let ctx = daily_ctx.unwrap_or_default();
-                let set = courses::compose_daily_set(&db, &ctx, now()).map_err(anyhow_err)?;
+                let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());
+                let set =
+                    courses::compose_daily_set(&db, &ctx, now(), &category).map_err(anyhow_err)?;
                 (
                     db.start_new_session(&set.spec, "daily")
                         .map_err(anyhow_err)?,
@@ -723,9 +726,10 @@ pub fn ap_dashboard(state: State<'_, AppState>) -> Res<ApDashboard> {
 }
 
 #[tauri::command]
-pub fn preview_daily_set(state: State<'_, AppState>) -> Res<DailySet> {
+pub fn preview_daily_set(state: State<'_, AppState>, category: Option<String>) -> Res<DailySet> {
     let ctx = state.core.gen_context();
-    courses::compose_daily_set(&state.core.db.lock(), &ctx, now()).map_err(anyhow_err)
+    let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());
+    courses::compose_daily_set(&state.core.db.lock(), &ctx, now(), &category).map_err(anyhow_err)
 }
 
 #[tauri::command]

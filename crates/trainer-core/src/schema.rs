@@ -582,10 +582,69 @@ pub struct IntervalIdParams {
     pub modes: Vec<KeyMode>,
     #[serde(default)]
     pub key_change: KeyChange,
-    /// With `in_key`: a cadence before every question, otherwise when the key changes and every
-    /// eighth question.
-    #[serde(default = "d_true")]
-    pub cadence_each_trial: bool,
+    /// When the cadence plays (with `in_key`). Default: once at the start in one key, on every
+    /// key change when the key changes.
+    #[serde(default)]
+    pub cadence: Option<CadencePlan>,
+    /// Older form of `cadence: every` (true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cadence_each_trial: Option<bool>,
+    /// Cadence tempo (default 100).
+    #[serde(default)]
+    pub cadence_bpm: Option<f32>,
+    /// Where the first note heard comes from: anywhere (`random`), the key's tonic (`tonic`,
+    /// "from do"; `start_note` without a key) or `start_note` (`fixed`).
+    #[serde(default)]
+    pub start: IntervalStart,
+    /// The fixed first note (default C4).
+    #[serde(default)]
+    pub start_note: Option<Note>,
+    /// Octaves the first note may move by, chosen per question (default [0]).
+    #[serde(default = "d_zero_octaves")]
+    pub start_octaves: Vec<i32>,
+    /// In a key: the second note may leave the scale, for non-diatonic intervals (a minor third
+    /// above the tonic of a major key).
+    #[serde(default)]
+    pub chromatic: bool,
+    /// Share of questions (0–0.5) playing an interval from outside the set, answered Other, so a
+    /// set of one interval is still a question.
+    #[serde(default)]
+    pub other_rate: f32,
+    /// Intervals Other is drawn from (default: every interval up to an octave not in the set).
+    #[serde(default)]
+    pub other_intervals: Vec<Interval>,
+    /// How the two notes are named after answering, in a key.
+    #[serde(default)]
+    pub labels: DegreeLabels,
+}
+
+/// Where an interval's first note comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum IntervalStart {
+    #[default]
+    Random,
+    Tonic,
+    Fixed,
+}
+
+fn d_zero_octaves() -> Vec<i32> {
+    vec![0]
+}
+
+/// Which note two compared intervals share.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SharedNote {
+    /// Unrelated starting notes.
+    #[default]
+    None,
+    /// Both start on the same note.
+    First,
+    /// Both end on the same note.
+    Second,
+    /// They start a semitone to a minor third apart.
+    Near,
 }
 
 fn d_compare_diffs() -> Vec<u32> {
@@ -614,6 +673,14 @@ pub struct IntervalComparisonParams {
     pub timbres: Vec<TimbreId>,
     #[serde(default = "d_ms_700")]
     pub note_ms: u32,
+    /// Which note the two intervals share, picked per question from this list. Sharing a note
+    /// makes the comparison easier; `none` is the hardest.
+    #[serde(default = "d_shared_none")]
+    pub shared: Vec<SharedNote>,
+}
+
+fn d_shared_none() -> Vec<SharedNote> {
+    vec![SharedNote::None]
 }
 
 /// How a scale degree moves to the tonic after it is answered.
@@ -854,6 +921,25 @@ pub struct SingIntervalParams {
     pub directions: Vec<SingDirection>,
     #[serde(default)]
     pub range: Option<NoteRange>,
+    /// Sing inside a key: a cadence first, then the first note, named by `labels`.
+    #[serde(default)]
+    pub in_key: bool,
+    #[serde(default = "d_tonic_c")]
+    pub keys: ClassSet,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default)]
+    pub cadence: Option<CadencePlan>,
+    /// In a key: start from the tonic (`tonic`) or any note of the scale (`random`).
+    #[serde(default)]
+    pub start: IntervalStart,
+    /// In a key: the sung note may leave the scale.
+    #[serde(default)]
+    pub chromatic: bool,
+    #[serde(default)]
+    pub labels: DegreeLabels,
     #[serde(flatten)]
     pub sung: SungOptions,
 }
@@ -1979,6 +2065,9 @@ pub struct IdentifyTrial {
     /// Played as soon as the result is shown, e.g. a scale degree walking to the tonic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_answer: Option<Vec<SoundEvent>>,
+    /// Added to the result, e.g. the two notes of an interval in a key ("sol → si").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explain: Option<String>,
     /// Which answer each MIDI note stands for, so the answer lights up while it sounds (a
     /// degree walking to the tonic).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2034,6 +2123,7 @@ impl IdentifyTrial {
             cue: None,
             answer_after_ms: None,
             after_answer: None,
+            explain: None,
             note_choices: Vec::new(),
             choice_sounds: Vec::new(),
             pace_ms: None,

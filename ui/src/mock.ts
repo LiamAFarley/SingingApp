@@ -1062,7 +1062,17 @@ export function mockBackend(): Backend {
     libraryPlay: async () => 4000,
     stopPreview: async () => {},
     apDashboard: async () => mockDashboard(),
-    previewDailySet: async () => mockDailySet(),
+    previewDailySet: async (category?: string) =>
+      category === "Relative pitch"
+        ? {
+            spec: {},
+            items: [
+              { course: "rp_degrees", title: "Scale degrees: level 2 (1 to 5)", level: 2, minutes: 8, reason: "Level 2 of 8. 1 of 2 checks in a row at 90% or more (last: 94%).", test: false },
+              { course: "rp_intervals_key", title: "Intervals in a key: level 1 (P5 and P8 up)", level: 1, minutes: 8, reason: "Level 1 of 11. Needs 2 checks in a row at 90% or more.", test: false },
+            ],
+            minutes: 16,
+          }
+        : mockDailySet(),
     saveDailyPlan: async (plan) => {
       apPlan = plan;
     },
@@ -1126,10 +1136,12 @@ let apPlan: DailyPlan = {
   courses: [
     { course: "ap_naming", minutes: 15, active: true },
     { course: "ap_brady", minutes: 10, active: true },
+    { course: "rp_degrees", minutes: 8, active: true },
+    { course: "rp_intervals_key", minutes: 8, active: true },
   ],
   test_day: 6,
 };
-const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1 };
+const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1, rp_degrees: 2, rp_intervals_key: 1 };
 const daysAgo = (d: number) => new Date(Date.now() - d * 86400_000).toISOString();
 
 function mockCourses(): CourseStatus[] {
@@ -1142,6 +1154,7 @@ function mockCourses(): CourseStatus[] {
       id,
       title,
       short,
+      category: id.startsWith("rp_") ? "Relative pitch" : "Absolute pitch",
       description,
       kind: "ladder",
       level,
@@ -1163,6 +1176,7 @@ function mockCourses(): CourseStatus[] {
     id,
     title,
     short,
+    category: "Absolute pitch",
     description,
     kind: "recurring",
     level: 1,
@@ -1203,6 +1217,10 @@ function mockCourses(): CourseStatus[] {
     test("ap_transfer", "Transfer test", "Transfer", "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.", false, "Next from 3 Dec.", daysAgo(23)),
     test("ap_ucsf_style", "UCSF-style test", "UCSF-style test", "36 piano and 36 sine tones over five octaves, no feedback, scored as the UCSF test is: a point for an exact answer, three quarters for a semitone off. Not the UCSF test itself.", false, "Next on the Sunday test day from 15 Nov.", daysAgo(14)),
     test("ap_maintenance", "Maintenance", "Maintenance", "Five minutes of all twelve notes over four octaves and several timbres, twice a week, once note naming is complete.", false, "Starts once note naming is complete.", null),
+    ladder("rp_degrees", "Scale degrees", "Degrees", "A cadence sets the key, a note plays, you name it; it then walks to the tonic.", ["1 2 3", "1 to 5", "All seven", "All seven, new keys", "Minor", "Major and minor", "Chromatic", "Chromatic, new keys"], "Degrees 1 to 5 and the upper do, in one key.", "1 of 2 checks in a row at 90% or more (last: 94%)."),
+    ladder("rp_intervals_key", "Intervals in a key", "In a key", "Intervals heard against a key: first up from do, two at a time, then all of them, then down, then in changing keys and from any note of the scale.", ["P5 and P8 up", "M3 and P5 up", "P4 and P5 up", "M2 and M3 up", "M6 and M7 up", "All up", "All down", "Up and down, new keys", "From any note", "From any note, new keys", "Together"], "Up from do to sol or the upper do. One key for the session.", "Needs 2 checks in a row at 90% or more."),
+    ladder("rp_intervals_chromatic", "Chromatic intervals in a key", "Chromatic", "Intervals from the tonic that leave the major scale, each set against the diatonic one beside it.", ["m3 and M3", "m6 and M6", "m7 and M7", "m2 and M2", "TT, P4 and P5", "All twelve up", "All twelve down", "All twelve, new keys"], "Up from do to me or mi. One key for the session.", "Needs 2 checks in a row at 90% or more."),
+    ladder("rp_sing", "Singing intervals", "Sing", "Hear the key and the first note, then sing the second.", ["Do to sol and do", "Do to mi and sol", "Do up the scale", "Do down the scale", "From any note", "Without a key"], "From do, sing sol or the upper do.", "Needs 2 checks in a row at 90% or more."),
   ];
 }
 

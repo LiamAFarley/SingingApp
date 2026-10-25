@@ -63,7 +63,8 @@ export interface Backend {
   libraryPlay(id: string, part: number | null): Promise<number>;
   stopPreview(): Promise<void>;
   apDashboard(): Promise<ApDashboard>;
-  previewDailySet(): Promise<DailySet>;
+  /** Today's set for `category` (absolute pitch when omitted). */
+  previewDailySet(category?: string): Promise<DailySet>;
   saveDailyPlan(plan: DailyPlan): Promise<void>;
   setCourseLevel(course: string, level: number): Promise<void>;
   apPrefs(): Promise<ApPrefs>;
@@ -117,7 +118,7 @@ async function tauriBackend(): Promise<Backend> {
     libraryPlay: (id, part) => call("library_play", { id, part }),
     stopPreview: () => call("stop_preview"),
     apDashboard: () => call("ap_dashboard"),
-    previewDailySet: () => call("preview_daily_set"),
+    previewDailySet: (category) => call("preview_daily_set", { category: category ?? null }),
     saveDailyPlan: (plan) => call("save_daily_plan", { plan }),
     setCourseLevel: (course, level) => call("set_course_level", { course, level }),
     apPrefs: () => call("ap_prefs"),

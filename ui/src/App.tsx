@@ -4,6 +4,7 @@ import type { AudioView } from "./bindings/AudioView";
 import type { RunnerState } from "./bindings/RunnerState";
 import { live } from "./live";
 import { ApPage } from "./views/ApPage";
+import { RpPage } from "./views/RpPage";
 import { AudioPage } from "./views/AudioPage";
 import { LibraryPage } from "./views/LibraryPage";
 import { PracticeView } from "./views/PracticeView";
@@ -12,7 +13,7 @@ import { SessionView } from "./views/SessionView";
 import { SettingsPage } from "./views/SettingsPage";
 import { TunerView } from "./views/TunerView";
 
-type View = "practice" | "ap" | "session" | "library" | "tuner" | "results" | "audio" | "settings";
+type View = "practice" | "ap" | "rp" | "session" | "library" | "tuner" | "results" | "audio" | "settings";
 
 // Browser-only renderer check page; never part of the desktop app.
 const NotationGallery = lazy(() => import("./views/NotationGallery").then((m) => ({ default: m.NotationGallery })));
@@ -21,6 +22,7 @@ const galleryMode = !isTauri && typeof location !== "undefined" && new URLSearch
 const NAV: [View, string][] = [
   ["practice", "Practice"],
   ["ap", "Absolute pitch"],
+  ["rp", "Relative pitch"],
   ["library", "Library"],
   ["tuner", "Tuner"],
   ["results", "Results"],
@@ -109,6 +111,7 @@ export function App() {
           <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} />
         )}
         {view === "ap" && <ApPage sessionActive={active} onOpenSession={() => setView("session")} />}
+        {view === "rp" && <RpPage sessionActive={active} onOpenSession={() => setView("session")} />}
         {view === "library" && <LibraryPage sessionActive={active} onOpenSession={() => setView("session")} />}
         {view === "tuner" && <TunerView a4={a4} />}
         {view === "results" && (

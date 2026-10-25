@@ -63,6 +63,14 @@ the true result but shows no error mark; it is the default on early colour, chor
 gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \
 treat a block without feedback as passed if the tones were within an octave of each other or a named note was heard in the \
 previous few minutes without the clearing sound.\n\
+- Relative pitch has its own courses and its own \"Today's set\" (category \"Relative pitch\"; preview_daily_set with \
+category \"Relative pitch\"; set_daily_plan and set_course_level work the same): rp_degrees (scale degrees, 3 degrees in one \
+key to all 12 in changing keys), rp_intervals_key (from do, pairs then all, up then down, then changing keys and any scale \
+note), rp_intervals_chromatic (non-diatonic intervals from do against their diatonic neighbours), rp_intervals (no key, \
+random roots), rp_compare (interval comparison, shared first note to nothing shared) and rp_sing (sing from do in a key, \
+then any note, then without a key). Each level is practice with feedback then a check without; two checks at 90% pass. \
+For custom drills use interval_id's start (random, tonic, fixed), start_octaves, chromatic and other_rate, \
+interval_comparison's shared, and sing_interval's in_key (see list_exercise_types); docs/RELATIVE_PITCH.md.\n\
 - Other graded courses are built-in presets: degrees_01–08 (scale degrees in the style of Functional Ear Trainer) and \
 harmony_01–08. Suggest the next level after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
@@ -99,6 +107,13 @@ fn tool_error(msg: impl Into<String>) -> Result<CallToolResult, ErrorData> {
 fn session_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
     let v = reports::session_schema();
     schemars::Schema::try_from(v).unwrap_or_else(|_| schemars::json_schema!({"type": "object"}))
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct DailySetRequest {
+    /// `Absolute pitch` (default) or `Relative pitch`.
+    #[serde(default)]
+    category: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -493,12 +508,18 @@ impl TrainerServer {
     }
 
     #[tool(
-        description = "Today's absolute-pitch set as the app would compose it now: tests that are due first, then each active course at its current level fitted to its minutes, with the reason for each item and the full session spec."
+        description = "Today's set for a category (`Absolute pitch`, the default, or `Relative pitch`) as the app would compose it now: tests that are due first (absolute pitch), then each active course of that category at its current level fitted to its minutes, with the reason for each item and the full session spec."
     )]
-    async fn preview_daily_set(&self) -> Result<CallToolResult, ErrorData> {
+    async fn preview_daily_set(
+        &self,
+        Parameters(req): Parameters<DailySetRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let category = req
+            .category
+            .unwrap_or_else(|| courses::ABSOLUTE_PITCH.to_string());
         match self.with_db(|db| {
             let ctx = db.gen_context()?;
-            courses::compose_daily_set(db, &ctx, chrono::Utc::now())
+            courses::compose_daily_set(db, &ctx, chrono::Utc::now(), &category)
         }) {
             Ok(v) => text(&v),
             Err(e) => tool_error(e),

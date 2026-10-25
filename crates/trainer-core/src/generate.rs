@@ -996,6 +996,7 @@ fn gen_chord_color(
             cue: None,
             answer_after_ms: None,
             after_answer: None,
+            explain: None,
             note_choices: Vec::new(),
             choice_sounds,
             pace_ms: None,
@@ -1045,6 +1046,7 @@ fn gen_chord_color(
                 cue: None,
                 answer_after_ms: None,
                 after_answer: None,
+                explain: None,
                 note_choices: Vec::new(),
                 choice_sounds: sounds,
                 pace_ms: None,
@@ -1467,6 +1469,43 @@ fn gen_tonal_center(
 // Relative pitch
 // ---------------------------------------------------------------------------------------------
 
+/// When a cadence is due under `plan`, the older `cadence_each_trial` and the key plan.
+fn cadence_plan(plan: Option<CadencePlan>, each: Option<bool>, change: KeyChange) -> CadencePlan {
+    plan.unwrap_or(match (each, change) {
+        (Some(true), _) => CadencePlan::Every,
+        (_, KeyChange::PerTrial) => CadencePlan::KeyChange,
+        (_, KeyChange::PerBlock) => CadencePlan::Start,
+    })
+}
+
+fn cadence_due(plan: CadencePlan, i: usize, key_changed: bool) -> bool {
+    match plan {
+        CadencePlan::Every => true,
+        CadencePlan::Start => i == 0,
+        CadencePlan::KeyChange => i == 0 || key_changed,
+    }
+}
+
+/// The name of the note `rel` semitones above the tonic, as `labels` names notes in a key.
+fn note_in_key(labels: DegreeLabels, tonic: PitchClass, mode: KeyMode, rel: i32) -> String {
+    let rel = rel.rem_euclid(12);
+    match labels {
+        DegreeLabels::Numbers => DEGREE_NUMBERS[rel as usize].into(),
+        DegreeLabels::Solfege => DEGREE_SOLFEGE[rel as usize].into(),
+        DegreeLabels::FixedDo => {
+            fixed_do(tonic, mode, rel, degree_number(DEGREE_IDS[rel as usize]))
+        }
+    }
+}
+
+/// The lower and upper note of an interval of `s` semitones whose first note heard is `first`.
+fn from_first(first: i32, s: i32, dir: IntervalDirection) -> (i32, i32) {
+    match dir {
+        IntervalDirection::Descending => (first - s, first),
+        _ => (first, first + s),
+    }
+}
+
 fn gen_interval_id(
     p: &IntervalIdParams,
     n: usize,
@@ -1475,46 +1514,122 @@ fn gen_interval_id(
     if p.intervals.is_empty() || p.directions.is_empty() {
         return err("intervals and directions must not be empty");
     }
+    if !(0.0..=0.5).contains(&p.other_rate) {
+        return err("other_rate must be between 0 and 0.5");
+    }
+    if p.start_octaves.is_empty() || p.start_octaves.iter().any(|o| o.abs() > 2) {
+        return err("start_octaves must be between -2 and 2");
+    }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 72));
     let mut bag = BalancedBag::allowing_repeats(p.intervals.clone());
     let mut choice_ivs = p.intervals.clone();
     choice_ivs.sort();
     choice_ivs.dedup();
-    let choices: Vec<Choice> = choice_ivs
+    let others: Vec<Interval> = if p.other_intervals.is_empty() {
+        Interval::ALL
+            .iter()
+            .copied()
+            .filter(|i| (1..=12).contains(&i.semitones()) && !choice_ivs.contains(i))
+            .collect()
+    } else {
+        p.other_intervals
+            .iter()
+            .copied()
+            .filter(|i| !choice_ivs.contains(i))
+            .collect()
+    };
+    let use_other = p.other_rate > 0.0 && !others.is_empty();
+    let mut choices: Vec<Choice> = choice_ivs
         .iter()
         .map(|i| Choice::new(i.id(), i.long_name()))
         .collect();
+    if use_other {
+        choices.push(Choice::new(OTHER, "Other"));
+    }
+    if choices.len() < 2 {
+        return err("one interval alone is not a question: add another, or set other_rate");
+    }
     let note = p.note_ms.max(200) as f64;
     let keys = if p.in_key {
         key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?
     } else {
         Vec::new()
     };
-    let beat = 60_000.0 / 100.0;
+    let plan = cadence_plan(p.cadence, p.cadence_each_trial, p.key_change);
+    let cadence_bpm = p.cadence_bpm.unwrap_or(100.0);
+    if !(40.0..=220.0).contains(&cadence_bpm) {
+        return err("cadence_bpm must be 40–220");
+    }
+    let beat = 60_000.0 / cadence_bpm as f64;
+    let start_note = p.start_note.map(|n| n.0).unwrap_or(60);
     let mut prev_key = None;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
     for i in 0..n {
-        let iv: Interval = bag.draw(rng).unwrap();
-        let dir = *rng.choose(&p.directions).unwrap();
+        let out_of_set = use_other && rng.chance(p.other_rate as f64);
+        let mut dir = *rng.choose(&p.directions).unwrap();
         let timbre = pick_timbre(&p.timbres, rng)?;
-        // In a key: a cadence (when due), then two notes of the scale.
+        let octave = *rng.choose(&p.start_octaves).unwrap();
+        // In a key: a cadence (when due), then two notes placed by `start` and `chromatic`.
         let mut lead = Vec::new();
         let mut t0 = 0.0;
-        let mut key_info = serde_json::Value::Null;
-        let low = if p.in_key {
+        let key_info: serde_json::Value;
+        let mut explain = None;
+        let (iv, low) = if p.in_key {
             let (tonic, mode) = keys[i];
             let r = cadence_chords(tonic, mode)[0].1[0];
             let steps = mode_steps(mode);
             let in_scale = |m: i32| steps.contains(&(m - r).rem_euclid(12));
-            let s = iv.semitones();
-            let cands: Vec<i32> = (r - 5..=r + 12)
-                .filter(|m| in_scale(*m) && in_scale(*m + s) && *m + s <= r + 19)
-                .collect();
+            // Where an interval can go here: its lower notes, with the first note heard where
+            // `start` puts it and both notes in the scale unless chromatic.
+            let placements = |iv: Interval, dir: IntervalDirection| -> Vec<i32> {
+                let s = iv.semitones();
+                let firsts: Vec<i32> = match p.start {
+                    IntervalStart::Tonic => vec![r + 12 * octave],
+                    IntervalStart::Fixed => vec![start_note + 12 * octave],
+                    IntervalStart::Random => (r - 5..=r + 12)
+                        .filter(|m| in_scale(*m))
+                        .map(|m| m + 12 * octave)
+                        .collect(),
+                };
+                firsts
+                    .into_iter()
+                    .map(|f| from_first(f, s, dir).0)
+                    .filter(|&lo| p.chromatic || (in_scale(lo) && in_scale(lo + s)))
+                    .collect()
+            };
+            let iv = if out_of_set {
+                let fits: Vec<Interval> = others
+                    .iter()
+                    .copied()
+                    .filter(|o| !placements(*o, dir).is_empty())
+                    .collect();
+                rng.choose(&fits).copied()
+            } else {
+                None
+            };
+            let out_of_set = iv.is_some();
+            let iv = iv.unwrap_or_else(|| bag.draw(rng).unwrap());
+            // Some intervals fit the key only one way from do (m2 down, not up, in major).
+            if placements(iv, dir).is_empty() {
+                if let Some(&d) = p
+                    .directions
+                    .iter()
+                    .find(|d| !placements(iv, **d).is_empty())
+                {
+                    dir = d;
+                }
+            }
+            let cands = placements(iv, dir);
             let Some(&low) = rng.choose(&cands) else {
                 return err(format!(
-                    "{} does not occur between two notes of a {} scale",
+                    "{} does not occur {} in a {} scale; set chromatic for notes outside it",
                     iv.long_name().to_lowercase(),
+                    if p.start == IntervalStart::Tonic {
+                        "from the tonic"
+                    } else {
+                        "between two notes"
+                    },
                     if mode == KeyMode::Major {
                         "major"
                     } else {
@@ -1522,22 +1637,48 @@ fn gen_interval_id(
                     }
                 ));
             };
-            let cadence = p.cadence_each_trial || prev_key != Some((tonic, mode)) || i % 8 == 0;
+            let changed = prev_key != Some((tonic, mode));
+            let cadence = cadence_due(plan, i, changed);
             prev_key = Some((tonic, mode));
             if cadence {
-                lead = cadence_events(tonic, mode, 100.0, &timbre, 0.0);
+                lead = cadence_events(tonic, mode, cadence_bpm, &timbre, 0.0);
                 t0 = 6.0 * beat;
             }
+            let s = iv.semitones();
+            let (a, b) = match dir {
+                IntervalDirection::Descending => (low + s, low),
+                _ => (low, low + s),
+            };
+            explain = Some(format!(
+                "{} → {}",
+                note_in_key(p.labels, tonic, mode, a - r),
+                note_in_key(p.labels, tonic, mode, b - r)
+            ));
             key_info = json!({
                 "key": tonic.name(),
                 "mode": mode,
                 "degrees": format!("{}-{}", DEGREE_IDS[(low - r).rem_euclid(12) as usize], DEGREE_IDS[(low + s - r).rem_euclid(12) as usize]),
                 "cadence": cadence,
+                "diatonic": in_scale(low) && in_scale(low + s),
+                "out_of_set": out_of_set,
             });
-            low
+            (iv, low)
         } else {
-            pick_note(range, &mut last, rng)
+            let iv = if out_of_set {
+                *rng.choose(&others).unwrap()
+            } else {
+                bag.draw(rng).unwrap()
+            };
+            let low = match p.start {
+                IntervalStart::Random => pick_note(range, &mut last, rng),
+                IntervalStart::Tonic | IntervalStart::Fixed => {
+                    from_first(start_note + 12 * octave, iv.semitones(), dir).0
+                }
+            };
+            key_info = json!({ "out_of_set": out_of_set });
+            (iv, low)
         };
+        let out_of_set = key_info["out_of_set"].as_bool().unwrap_or(false);
         let high = low + iv.semitones();
         let mut events = lead;
         events.extend(interval_events(low, high, dir, note, t0, &timbre));
@@ -1548,15 +1689,35 @@ fn gen_interval_id(
             "low_midi": low,
             "timbre": timbre,
             "in_key": p.in_key,
+            "start": p.start,
         });
         if let serde_json::Value::Object(k) = key_info {
             stimulus.as_object_mut().unwrap().extend(k);
         }
+        let first_heard = if dir == IntervalDirection::Descending {
+            high
+        } else {
+            low
+        };
+        let mut choice_sounds: Vec<ChoiceSound> = choice_ivs
+            .iter()
+            .map(|c| {
+                // Every interval from the note heard first.
+                let (l, h) = from_first(first_heard, c.semitones(), dir);
+                ChoiceSound {
+                    id: c.id().into(),
+                    events: interval_events(l, h, dir, note, 0.0, &timbre),
+                }
+            })
+            .collect();
+        if use_other {
+            choice_sounds.push(ChoiceSound {
+                id: OTHER.into(),
+                events: interval_events(low, high, dir, note, 0.0, &timbre),
+            });
+        }
         out.push(TrialSpec::Identify(IdentifyTrial {
             answer_after_ms: (t0 > 0.0).then_some(t0),
-            after_answer: None,
-            cue: None,
-            pace_ms: None,
             exercise: ExerciseKind::IntervalId,
             prompt: if p.in_key {
                 "Which interval? (in the key)".into()
@@ -1566,27 +1727,20 @@ fn gen_interval_id(
             events,
             mask_before: Mask::None,
             choices: choices.clone(),
-            correct: iv.id().into(),
-            deadline_ms: None,
-            reference: None,
+            correct: if out_of_set {
+                OTHER.into()
+            } else {
+                iv.id().into()
+            },
+            explain: explain.map(|x| {
+                if out_of_set {
+                    format!("{}, {x}", iv.long_name().to_lowercase())
+                } else {
+                    x
+                }
+            }),
             stimulus,
-            // Every interval from the note heard first.
-            choice_sounds: choice_ivs
-                .iter()
-                .map(|c| {
-                    let s = c.semitones();
-                    let (l, h) = if dir == IntervalDirection::Descending {
-                        (high - s, high)
-                    } else {
-                        (low, low + s)
-                    };
-                    ChoiceSound {
-                        id: c.id().into(),
-                        events: interval_events(l, h, dir, note, 0.0, &timbre),
-                    }
-                })
-                .collect(),
-
+            choice_sounds,
             ..IdentifyTrial::skeleton()
         }));
     }
@@ -2012,8 +2166,33 @@ fn gen_interval_comparison(
         let (first, second) = if rng.chance(0.5) { (a, b) } else { (b, a) };
         let dir = *rng.choose(&p.directions).unwrap();
         let timbre = pick_timbre(&p.timbres, rng)?;
+        if p.shared.is_empty() {
+            return err("shared must not be empty");
+        }
         let r1 = pick_note(range, &mut last, rng);
-        let r2 = pick_note(range, &mut last, rng);
+        // The second interval's first note heard, or its last, tied to the first interval's.
+        let shared = *rng.choose(&p.shared).unwrap();
+        let descending = dir == IntervalDirection::Descending;
+        let (f1, l1) = if descending {
+            (r1 + first, r1)
+        } else {
+            (r1, r1 + first)
+        };
+        let r2 = match shared {
+            SharedNote::None => pick_note(range, &mut last, rng),
+            SharedNote::First => from_first(f1, second, dir).0,
+            SharedNote::Second => {
+                if descending {
+                    l1
+                } else {
+                    l1 - second
+                }
+            }
+            SharedNote::Near => {
+                let d = rng.range_i32(1, 3) * if rng.chance(0.5) { 1 } else { -1 };
+                from_first(f1 + d, second, dir).0
+            }
+        };
         let span = if dir == IntervalDirection::Harmonic {
             note * 1.6
         } else {
@@ -2052,6 +2231,7 @@ fn gen_interval_comparison(
                 "difference": (first - second).abs(),
                 "direction": dir,
                 "timbre": timbre,
+                "shared": shared,
             }),
             cue: None,
             pace_ms: None,
@@ -2460,9 +2640,16 @@ fn gen_sing_interval(
     let range = sung_range(p.range, ctx);
     let reference = p.sung.reference.unwrap_or(ReferenceMode::FirstNote);
     let mut bag = BalancedBag::allowing_repeats(p.intervals.clone());
+    let keys = if p.in_key {
+        key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?
+    } else {
+        Vec::new()
+    };
+    let plan = cadence_plan(p.cadence, None, p.key_change);
+    let mut prev_key = None;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
-    for _ in 0..n {
+    for i in 0..n {
         let iv: Interval = bag.draw(rng).unwrap();
         let dir = *rng.choose(&p.directions).unwrap();
         let s = iv.semitones();
@@ -2474,23 +2661,67 @@ fn gen_sing_interval(
                 range.high
             ));
         }
-        let first = match dir {
-            SingDirection::Up => pick_note(
-                NoteRange::new(range.low.0, range.high.0 - s),
-                &mut last,
-                rng,
-            ),
-            SingDirection::Down => pick_note(
-                NoteRange::new(range.low.0 + s, range.high.0),
-                &mut last,
-                rng,
-            ),
-        };
-        let second = if dir == SingDirection::Up {
-            first + s
+        let signed = if dir == SingDirection::Up { s } else { -s };
+        let mut key_cadence: Option<(PitchClass, KeyMode, bool)> = None;
+        let first = if p.in_key {
+            // In the singer's range: the tonic, or any scale note, with the sung note in the
+            // scale too unless chromatic.
+            let (tonic, mode) = keys[i];
+            let steps = mode_steps(mode);
+            let rel = |m: i32| (m - tonic.index() as i32).rem_euclid(12);
+            let fits = |range: NoteRange| -> Vec<i32> {
+                (range.low.0..=range.high.0)
+                    .filter(|m| range.contains(*m + signed))
+                    .filter(|m| match p.start {
+                        IntervalStart::Tonic => rel(*m) == 0,
+                        _ => steps.contains(&rel(*m)),
+                    })
+                    .filter(|m| p.chromatic || steps.contains(&rel(*m + signed)))
+                    .collect()
+            };
+            // When no octave of this key fits (an octave from A in a C3–G4 range), stretch the
+            // range by up to a fourth each way rather than fail.
+            let mut cands = fits(range);
+            if cands.is_empty() {
+                cands = fits(NoteRange::new(range.low.0 - 5, range.high.0 + 5));
+            }
+            let fresh: Vec<i32> = cands.iter().copied().filter(|m| Some(*m) != last).collect();
+            let Some(&f) = rng.choose(if fresh.is_empty() { &cands } else { &fresh }) else {
+                return err(format!(
+                    "{} {} does not fit {} in the range; widen the range or set chromatic",
+                    iv.long_name().to_lowercase(),
+                    if dir == SingDirection::Up {
+                        "up"
+                    } else {
+                        "down"
+                    },
+                    if p.start == IntervalStart::Tonic {
+                        "from the tonic"
+                    } else {
+                        "in the scale"
+                    }
+                ));
+            };
+            last = Some(f);
+            let changed = prev_key != Some((tonic, mode));
+            prev_key = Some((tonic, mode));
+            key_cadence = Some((tonic, mode, cadence_due(plan, i, changed)));
+            f
         } else {
-            first - s
+            match dir {
+                SingDirection::Up => pick_note(
+                    NoteRange::new(range.low.0, range.high.0 - s),
+                    &mut last,
+                    rng,
+                ),
+                SingDirection::Down => pick_note(
+                    NoteRange::new(range.low.0 + s, range.high.0),
+                    &mut last,
+                    rng,
+                ),
+            }
         };
+        let second = first + signed;
         let notes = vec![
             TargetNote {
                 midi: first,
@@ -2503,19 +2734,54 @@ fn gen_sing_interval(
                 beats: 2.0,
             },
         ];
-        let tl = timeline(&notes, &p.sung, reference);
+        let mut tl = timeline(&notes, &p.sung, reference);
+        // A cadence before the first note when one is due: four chords, then a beat's rest.
+        if let Some((tonic, mode, true)) = key_cadence {
+            const CADENCE_BEATS: f32 = 6.0;
+            for r in &mut tl.reference {
+                r.start_beat += CADENCE_BEATS;
+            }
+            tl.sing_start += CADENCE_BEATS;
+            tl.total += CADENCE_BEATS;
+            let mut chords = Vec::new();
+            for (k, (bass, upper)) in cadence_chords(tonic, mode).iter().enumerate() {
+                let beats = if k == 3 { 2.0 } else { 0.95 };
+                for &m in std::iter::once(bass).chain(upper.iter()) {
+                    chords.push(TargetNote {
+                        midi: m,
+                        start_beat: k as f32,
+                        beats,
+                    });
+                }
+            }
+            chords.append(&mut tl.reference);
+            tl.reference = chords;
+        }
         out.push(TrialSpec::Sung(SungTrial {
             exercise: ExerciseKind::SingInterval,
-            prompt: format!(
-                "Sing a {} {} from {}",
-                iv.long_name().to_lowercase(),
-                if dir == SingDirection::Up {
-                    "up"
-                } else {
-                    "down"
-                },
-                Note(first).display_name()
-            ),
+            prompt: match key_cadence {
+                Some((tonic, mode, _)) => format!(
+                    "From {}, sing {} (a {} {})",
+                    note_in_key(p.labels, tonic, mode, first - tonic.index() as i32),
+                    note_in_key(p.labels, tonic, mode, second - tonic.index() as i32),
+                    iv.long_name().to_lowercase(),
+                    if dir == SingDirection::Up {
+                        "up"
+                    } else {
+                        "down"
+                    }
+                ),
+                None => format!(
+                    "Sing a {} {} from {}",
+                    iv.long_name().to_lowercase(),
+                    if dir == SingDirection::Up {
+                        "up"
+                    } else {
+                        "down"
+                    },
+                    Note(first).display_name()
+                ),
+            },
             notes,
             tempo_bpm: p.sung.tempo_bpm.clamp(30.0, 240.0),
             beats_per_bar: p.sung.beats_per_bar.max(1),
@@ -2541,6 +2807,9 @@ fn gen_sing_interval(
                 "first_midi": first,
                 "reference": reference,
                 "backing": p.sung.backing,
+                "key": key_cadence.map(|k| k.0.name()),
+                "mode": key_cadence.map(|k| k.1),
+                "cadence": key_cadence.map(|k| k.2),
             }),
         }));
     }
@@ -4198,7 +4467,10 @@ mod tests {
             // In one key the cadence (16 notes) plays once, before the first question.
             let cadence = if i == 0 { 16 } else { 0 };
             assert_eq!(t.events.len(), cadence + 1, "trial {i}");
-            assert_eq!(t.answer_after_ms, Some(if i == 0 { 6.0 * 600.0 } else { 0.0 }));
+            assert_eq!(
+                t.answer_after_ms,
+                Some(if i == 0 { 6.0 * 600.0 } else { 0.0 })
+            );
             // Every note of the walk to the tonic lights its answer.
             for e in t.after_answer.as_ref().unwrap() {
                 assert!(t.note_choices.iter().any(|(m, _)| *m == e.midi));
@@ -4278,24 +4550,116 @@ mod tests {
     }
 
     #[test]
+    fn intervals_from_the_tonic_diatonic_or_chromatic() {
+        let ctx = GenContext::default();
+        // From the tonic of G major: m3 is not in the scale unless chromatic.
+        let diatonic = block(
+            r#"{"type": "interval_id", "count": 20, "params": {"in_key": true, "keys": ["G"], "start": "tonic", "intervals": ["M3", "m3"], "directions": ["ascending"]}}"#,
+        );
+        assert!(generate_block(&diatonic, 1, &ctx).is_err());
+        let chromatic = block(
+            r#"{"type": "interval_id", "count": 40, "params": {"in_key": true, "keys": ["G"], "start": "tonic", "chromatic": true, "start_octaves": [0, 1], "intervals": ["M3", "m3"], "directions": ["ascending"]}}"#,
+        );
+        let trials = generate_block(&chromatic, 1, &ctx).unwrap();
+        let mut seen_m3 = false;
+        for (i, t) in trials.iter().enumerate() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            // The cadence plays once, before the first question.
+            let lead = if i == 0 { 16 } else { 0 };
+            assert_eq!(t.events.len(), lead + 2);
+            assert_eq!(t.events[lead].midi.rem_euclid(12), 7, "starts on G");
+            let x = t.explain.as_deref().unwrap();
+            assert!(x.starts_with("sol → "), "{x}");
+            if t.correct == "m3" {
+                assert_eq!(x, "sol → si♭");
+                assert_eq!(t.stimulus["diatonic"], false);
+                seen_m3 = true;
+            }
+        }
+        assert!(seen_m3);
+    }
+
+    #[test]
+    fn one_interval_with_other() {
+        let ctx = GenContext::default();
+        let alone =
+            block(r#"{"type": "interval_id", "count": 5, "params": {"intervals": ["M3"]}}"#);
+        assert!(
+            generate_block(&alone, 1, &ctx).is_err(),
+            "one answer is not a question"
+        );
+        let b = block(
+            r#"{"type": "interval_id", "count": 200, "params": {"intervals": ["M3"], "other_rate": 0.3, "start": "fixed", "start_note": "D4", "start_octaves": [-1, 0, 1]}}"#,
+        );
+        let trials = generate_block(&b, 3, &ctx).unwrap();
+        let mut others = 0;
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert_eq!(t.choices.len(), 2);
+            let first = t.events[0].midi;
+            assert_eq!(first.rem_euclid(12), 2, "every interval starts on a D");
+            if t.correct == OTHER {
+                others += 1;
+                assert_ne!(t.stimulus["interval"], "M3");
+            }
+        }
+        assert!((40..=80).contains(&others), "{others}");
+    }
+
+    #[test]
+    fn compared_intervals_share_the_note_asked_for() {
+        let ctx = GenContext::default();
+        for (shared, check) in [("first", 0usize), ("second", 1)] {
+            let b = block(&format!(
+                r#"{{"type": "interval_comparison", "count": 30, "params": {{"directions": ["ascending"], "shared": ["{shared}"]}}}}"#
+            ));
+            for t in generate_block(&b, 2, &ctx).unwrap() {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                let e = &t.events;
+                // Ascending: notes 0,1 then 2,3.
+                assert_eq!(e[check].midi, e[2 + check].midi, "{shared}");
+            }
+        }
+    }
+
+    #[test]
+    fn singing_in_a_key_starts_with_a_cadence_and_names_the_notes() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "sing_interval", "count": 6, "params": {"in_key": true, "keys": ["G"], "start": "tonic", "intervals": ["M3", "P5"], "directions": ["up"]}}"#,
+        );
+        let trials = generate_block(&b, 1, &ctx).unwrap();
+        for (i, t) in trials.iter().enumerate() {
+            let TrialSpec::Sung(t) = t else { panic!() };
+            assert!(t.prompt.starts_with("From sol, sing "), "{}", t.prompt);
+            assert_eq!(t.notes[0].midi.rem_euclid(12), 7);
+            // Four chords of four notes, then the first note, on the first question only.
+            let expected = if i == 0 { 17 } else { 1 };
+            assert_eq!(t.reference_beats.len(), expected, "trial {i}");
+        }
+    }
+
+    #[test]
     fn intervals_in_a_key_stay_diatonic() {
         let b = block(
             r#"{"type": "interval_id", "count": 60, "params": {"in_key": true, "keys": ["D"], "intervals": ["m2", "M2", "m3", "M3", "P4", "TT", "P5", "m6", "M6", "m7", "M7", "P8"]}}"#,
         );
         let trials = generate_block(&b, 6, &GenContext::default()).unwrap();
         let d_major = [2, 4, 6, 7, 9, 11, 1];
-        for t in &trials {
+        for (i, t) in trials.iter().enumerate() {
             let TrialSpec::Identify(t) = t else { panic!() };
             assert_eq!(t.stimulus["key"], "D");
-            let notes: Vec<i32> = t.events.iter().skip(16).map(|e| e.midi).collect();
+            // One key: the cadence plays before the first question only.
+            let lead = if i == 0 { 16 } else { 0 };
+            let notes: Vec<i32> = t.events.iter().skip(lead).map(|e| e.midi).collect();
             assert_eq!(notes.len(), 2);
             for m in &notes {
                 assert!(d_major.contains(&m.rem_euclid(12)), "{m} not in D major");
             }
-            assert!(t.answer_after_ms.is_some());
+            assert_eq!(t.answer_after_ms.is_some(), i == 0);
         }
         let minor_tt = block(
-            r#"{"type": "interval_id", "count": 4, "params": {"in_key": true, "modes": ["minor"], "intervals": ["TT"]}}"#,
+            r#"{"type": "interval_id", "count": 4, "params": {"in_key": true, "modes": ["minor"], "intervals": ["TT", "P4"]}}"#,
         );
         assert!(generate_block(&minor_tt, 1, &GenContext::default()).is_ok());
         // Free-standing intervals have no cadence.
