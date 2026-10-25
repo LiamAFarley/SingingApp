@@ -476,6 +476,8 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
         }
         core.ensure_engine()
             .map_err(|e| format!("Audio is not available: {e:#}"))?;
+        // Before taking the database: building the context locks it too.
+        let daily_ctx = matches!(request, StartRequest::DailySet).then(|| core.gen_context());
         let db = core.db.lock();
         let (id, spec) = match request {
             StartRequest::Preset { id } => {
@@ -524,7 +526,7 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                 )
             }
             StartRequest::DailySet => {
-                let ctx = core.gen_context();
+                let ctx = daily_ctx.unwrap_or_default();
                 let set = courses::compose_daily_set(&db, &ctx, now()).map_err(anyhow_err)?;
                 (
                     db.start_new_session(&set.spec, "daily")
