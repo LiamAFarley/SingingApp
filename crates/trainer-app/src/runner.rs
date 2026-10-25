@@ -95,6 +95,7 @@ fn runner_main(core: Arc<Core>, rx: Receiver<RunnerMsg>, state: Arc<RwLock<Runne
             spec,
             last_labeled,
             stream_next: None,
+            hold_until: None,
         };
         let result = s.run();
         last_labeled = s.last_labeled;
@@ -184,6 +185,8 @@ struct SessionRun<'a> {
     session_id: String,
     spec: SessionSpec,
     last_labeled: Option<chrono::DateTime<chrono::Utc>>,
+    /// The next question waits for this frame: a resolution still playing, and a pause after it.
+    hold_until: Option<u64>,
     /// The output frame of the next tone in a paced stream.
     stream_next: Option<u64>,
 }
@@ -195,6 +198,33 @@ const SCRUB_WITHIN: Duration = Duration::from_secs(5 * 60);
 fn secs(engine: &AudioEngine, frame: u64) -> f64 {
     frame as f64 / engine.sample_rate() as f64
 }
+
+/// The answers to light while `events` play from master-clock time `start_s`.
+fn lit_marks(t: &IdentifyTrial, events: &[SoundEvent], start_s: f64) -> Vec<LitMark> {
+    events
+        .iter()
+        .filter_map(|e| {
+            let (_, id) = t.note_choices.iter().find(|(m, _)| *m == e.midi)?;
+            Some(LitMark {
+                id: id.clone(),
+                from_s: start_s + e.start_ms / 1000.0,
+                to_s: start_s + (e.start_ms + e.dur_ms) / 1000.0,
+            })
+        })
+        .collect()
+}
+
+/// When `events` played from `start` have finished, plus the pause before anything else.
+fn end_frame(engine: &AudioEngine, events: &[SoundEvent], start: u64) -> u64 {
+    let end_ms = events
+        .iter()
+        .map(|e| e.start_ms + e.dur_ms)
+        .fold(0.0, f64::max);
+    start + engine.frames_from_ms(end_ms + AFTER_SOUND_PAUSE_MS)
+}
+
+/// Silence after a resolution or other answer sound before the next question starts.
+const AFTER_SOUND_PAUSE_MS: f64 = 500.0;
 
 impl<'a> SessionRun<'a> {
     fn set(&self, f: impl FnOnce(&mut RunnerState)) {
@@ -534,6 +564,10 @@ impl<'a> SessionRun<'a> {
             .map(Arc::new);
         let sr = engine.sample_rate() as f64;
         let mut at = engine.frame_after_ms(80.0);
+        // Not over the end of the last answer's resolution.
+        if let Some(h) = self.hold_until.take() {
+            at = at.max(h);
+        }
         // A paced stream keeps its schedule: the next tone waits for its slot.
         if let (Some(_), Some(next)) = (t.pace_ms, self.stream_next) {
             at = at.max(next);
@@ -1259,7 +1293,21 @@ impl<'a> SessionRun<'a> {
         } else {
             None
         };
+        // A resolution plays after the answer: moving on waits for it and a short pause.
+        let after_ms = match trial {
+            TrialSpec::Identify(t) if show => t.after_answer.as_ref().map(|a| {
+                a.iter().map(|e| e.start_ms + e.dur_ms).fold(0.0, f64::max)
+                    + 250.0
+                    + AFTER_SOUND_PAUSE_MS
+            }),
+            _ => None,
+        };
+        let auto_ms = match (auto_ms, after_ms) {
+            (Some(a), Some(w)) => Some(a.max(w as u32)),
+            (a, _) => a,
+        };
         let fv = FeedbackView {
+            lit: Vec::new(),
             correct: shown.correct,
             summary: shown.summary.clone(),
             correct_choice: match trial {
@@ -1317,12 +1365,20 @@ impl<'a> SessionRun<'a> {
         if let TrialSpec::Identify(t) = trial {
             if let (true, Some(after)) = (show, &t.after_answer) {
                 engine.stop_bus(Bus::Prompt);
+                let at = engine.frame_after_ms(250.0);
                 engine.play(
                     Arc::new(renderer.render_events(after)),
-                    engine.frame_after_ms(250.0),
+                    at,
                     1.0,
                     Bus::Prompt,
                 )?;
+                self.hold_until = Some(end_frame(engine, after, at));
+                let lit = lit_marks(t, after, secs(engine, at));
+                self.set(|st| {
+                    if let Some(f) = st.feedback.as_mut() {
+                        f.lit = lit;
+                    }
+                });
             } else if shown.errorless {
                 if let Some(events) = t.choice_sound(&t.correct) {
                     engine.stop_bus(Bus::Prompt);
@@ -1388,11 +1444,18 @@ impl<'a> SessionRun<'a> {
                         TrialSpec::Identify(t) => {
                             if let Some(after) = &t.after_answer {
                                 engine.stop_bus(Bus::Prompt);
-                                engine.play_now(
+                                let (_, at) = engine.play_now(
                                     Arc::new(renderer.render_events(after)),
                                     1.0,
                                     Bus::Prompt,
                                 )?;
+                                self.hold_until = Some(end_frame(engine, after, at));
+                                let lit = lit_marks(t, after, secs(engine, at));
+                                self.set(|st| {
+                                    if let Some(f) = st.feedback.as_mut() {
+                                        f.lit = lit;
+                                    }
+                                });
                             }
                         }
                         _ => {}
@@ -1443,11 +1506,20 @@ impl<'a> SessionRun<'a> {
                     interacted = true;
                     if let Some(events) = trial_choice_sound(trial, &choice) {
                         engine.stop_bus(Bus::Prompt);
-                        engine.play_now(
+                        let (_, at) = engine.play_now(
                             Arc::new(renderer.render_events(events)),
                             1.0,
                             Bus::Prompt,
                         )?;
+                        self.hold_until = Some(end_frame(engine, events, at));
+                        if let TrialSpec::Identify(t) = trial {
+                            let lit = lit_marks(t, events, secs(engine, at));
+                            self.set(|st| {
+                                if let Some(f) = st.feedback.as_mut() {
+                                    f.lit = lit;
+                                }
+                            });
+                        }
                         // A named sound: it counts as exposure to a labelled reference.
                         self.last_labeled = Some(now());
                     }

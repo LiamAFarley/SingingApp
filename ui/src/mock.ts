@@ -356,7 +356,7 @@ function sightFeedback(): FeedbackView {
     cents: null,
     notes,
     trace,
-    can_retry: true,
+    lit: [], can_retry: true,
     can_sing_along: true,
     can_listen: true,
     can_show_answer: false,
@@ -438,7 +438,7 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
     cents: null,
     notes: [],
     trace: [],
-    can_retry: true,
+    lit: [], can_retry: true,
     can_sing_along: false,
     can_listen: true,
     can_show_answer: false,
@@ -490,12 +490,14 @@ function colorTrial(): TrialView {
 }
 
 function degreeTrial(): TrialView {
-  const ids = ["1", "2", "3", "4", "5", "6", "7"];
+  // G major in fixed do, 1–8.
+  const ids = ["1", "2", "3", "4", "5", "6", "7", "8"];
+  const fixedDo = ["sol", "la", "si", "do", "re", "mi", "fa♯", "sol"];
   return {
     kind: "scale_degree_id",
     interaction: "choice",
     prompt: "Which degree? (major key)",
-    choices: ids.map((id) => ({ id, label: id })),
+    choices: ids.map((id, i) => ({ id, label: fixedDo[i] })),
     layout: "degrees",
     deadline_ms: null,
     can_replay: true,
@@ -675,7 +677,7 @@ function sungFeedback(): FeedbackView {
     cents: null,
     notes,
     trace,
-    can_retry: true,
+    lit: [], can_retry: true,
     can_sing_along: true,
     can_listen: true,
     can_show_answer: false,
@@ -744,7 +746,7 @@ function startScenario() {
   if (scenario === "contrast" || scenario === "contrast-flash") {
     const base = { session_id: "demo", title: "Absolute pitch: today's set", block_index: 1, block_count: 3, block_title: "Contrast · Name the word", block_kind: "pitch_id" as const, trial_index: 7, trial_count: 20, done_in_block: 7, correct_in_block: 6, feedback_mode: "errorless" as const, outline: OUTLINE, trial: contrastTrial() };
     if (scenario === "contrast") emit({ phase: "answering", ...base });
-    else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57" } });
+    else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57" } });
   } else if (scenario === "pitch") {
     emit({ phase: "answering", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, block_title: "Name the note", block_kind: "pitch_id", trial_index: 6, trial_count: 60, done_in_block: 6, correct_in_block: 5, trial: choiceTrial() });
   } else if (scenario === "sung" || scenario === "sung-feedback") {
@@ -762,7 +764,7 @@ function startScenario() {
     emit({ phase: "recording", session_id: "demo", title: "Absolute pitch: stage 1", block_index: 1, block_count: 2, block_title: "Sing the note", block_kind: "sing_pitch", trial_index: 0, trial_count: 12, done_in_block: 1, correct_in_block: 0, feedback_mode: "after_trial", trial: { ...singPitchTrial(), prompt: "Sing A♭" } });
     emit({ phase: "feedback", feedback: {
       correct: false, summary: "Sang G3 (80 cents flat), did not settle", correct_choice: null, answered: null, cents: -80,
-      notes: [], trace: [], can_retry: false, can_sing_along: false, can_listen: true, can_show_answer: false,
+      notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: true, can_show_answer: false,
       can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null, errorless: false, flash_color: null,
       tuner: { pitch_class: 8, midi: null, name: "A♭", reference_midi: 56 },
     } });
@@ -800,6 +802,8 @@ function startScenario() {
           cents: null,
           notes: [],
           trace: [],
+          // 6 walking up to 8: 7 is sounding now.
+          lit: [{ id: "6", from_s: clock() - 1, to_s: clock() - 0.4 }, { id: "7", from_s: clock() - 0.4, to_s: clock() + 600 }],
           can_retry: false,
           can_sing_along: false,
           can_listen: true,
@@ -859,7 +863,7 @@ function runnerCommand(c: RunnerCommand) {
           cents: null,
           notes: [],
           trace: [],
-          can_retry: false,
+          lit: [], can_retry: false,
           can_sing_along: false,
           can_listen: false,
           can_show_answer: true,

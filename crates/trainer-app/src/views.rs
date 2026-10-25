@@ -156,6 +156,8 @@ pub struct TrialView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct FeedbackView {
+    /// Answers lit while their note sounds, e.g. each degree as it walks to the tonic.
+    pub lit: Vec<LitMark>,
     pub correct: Option<bool>,
     pub summary: String,
     pub correct_choice: Option<String>,
@@ -242,6 +244,14 @@ pub struct RunnerState {
     /// Increments on every change.
     #[ts(type = "number")]
     pub seq: u64,
+}
+
+/// An answer to light from `from_s` to `to_s` (master-clock seconds) while its note plays.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
+pub struct LitMark {
+    pub id: String,
+    pub from_s: f64,
+    pub to_s: f64,
 }
 
 /// One block of the running session, as the overview lists it.
@@ -366,8 +376,12 @@ pub enum RunnerCommand {
 #[serde(tag = "source", rename_all = "snake_case")]
 #[ts(export)]
 pub enum StartRequest {
+    #[ts(type = "{ source: \"preset\", id: string, params?: Record<string, unknown> }")]
     Preset {
         id: String,
+        /// Merged into every block's params, e.g. the label and cadence options of a card.
+        #[serde(default)]
+        params: Option<serde_json::Value>,
     },
     Queued {
         session_id: String,

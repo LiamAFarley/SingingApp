@@ -332,6 +332,11 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
     }
   };
   const states = keyStates(runner, picked);
+  // The answer whose note is sounding now (a degree walking to the tonic lights each step).
+  const marks = phase === "feedback" ? (fb?.lit ?? []) : [];
+  useAnimationFrame(marks.length > 0);
+  const now = live.now();
+  const lit = marks.find((m) => now >= m.from_s && now < m.to_s)?.id ?? null;
   const sub =
     phase === "preparing" || phase === "listening"
       ? "Listen…"
@@ -354,7 +359,7 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
       {trial.layout === "notes" && <NotesPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "list" && <ChoiceGrid choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
       {trial.layout === "colors" && <ColorTask trial={trial} enabled={enabled} states={states} onPick={pick} />}
-      {trial.layout === "degrees" && <DegreePad choices={trial.choices} enabled={enabled} states={states} onPick={pick} />}
+      {trial.layout === "degrees" && <DegreePad choices={trial.choices} enabled={enabled} states={states} onPick={pick} lit={lit} />}
       <Result runner={runner} />
       <div className="controls">
         {phase === "answering" && trial.can_replay && (

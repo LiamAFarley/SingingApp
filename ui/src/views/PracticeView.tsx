@@ -10,6 +10,8 @@ const CATEGORIES = ["Absolute pitch", "Ear training", "Singing", "Sight singing 
 
 /** Graded courses shown as one card with a stage picker. */
 interface Course {
+  /** Extra options shown on the card, sent as block params. */
+  options?: CardOption[];
   pattern: RegExp;
   title: string;
   description: string;
@@ -19,8 +21,56 @@ interface Course {
   label?: (p: PresetView) => string;
 }
 
+/** A select on a course card: each choice is a set of params merged into the blocks. */
+interface CardOption {
+  key: string;
+  label: string;
+  /** The choice used until one is picked; the first otherwise. */
+  default?: string;
+  choices: { value: string; label: string; params: Record<string, unknown> }[];
+}
+
+const DEGREE_OPTIONS: CardOption[] = [
+  {
+    key: "labels",
+    label: "Answers",
+    choices: [
+      { value: "fixed_do", label: "Fixed do (C is do)", params: { labels: "fixed_do" } },
+      { value: "solfege", label: "Movable do (tonic is do)", params: { labels: "solfege" } },
+      { value: "numbers", label: "Numbers 1–8", params: { labels: "numbers" } },
+    ],
+  },
+  {
+    key: "key",
+    label: "Key",
+    choices: [
+      { value: "level", label: "As the level sets it", params: {} },
+      { value: "c", label: "C", params: { keys: ["C"], key_change: "per_block" } },
+      { value: "random", label: "One random key for the session", params: { keys: "all", key_change: "per_block" } },
+      { value: "each", label: "A new key every question", params: { keys: "all", key_change: "per_trial" } },
+    ],
+  },
+  {
+    key: "cadence",
+    label: "Cadence",
+    choices: [
+      { value: "default", label: "Once, and when the key changes", params: {} },
+      { value: "start", label: "Once at the start", params: { cadence: "start" } },
+      { value: "key_change", label: "On every key change", params: { cadence: "key_change" } },
+      { value: "every", label: "Before every question", params: { cadence: "every" } },
+    ],
+  },
+  {
+    key: "cadence_bpm",
+    label: "Cadence tempo",
+    default: "100",
+    choices: [60, 80, 100, 120, 140].map((bpm) => ({ value: String(bpm), label: `${bpm} bpm`, params: { cadence_bpm: bpm } })),
+  },
+];
+
 const COURSES: Course[] = [
   {
+    options: DEGREE_OPTIONS,
     pattern: /^degrees_(\d+)$/,
     title: "Scale degrees",
     description: "A cadence sets the key, a note plays, you name its degree, and it walks to the tonic.",
@@ -202,7 +252,7 @@ export function PracticeView({
                   stages={stages}
                   disabled={active || starting != null}
                   starting={starting}
-                  onStart={(id) => start(id, { source: "preset", id })}
+                  onStart={(id, params) => start(id, { source: "preset", id, params })}
                 />
               ))}
               {items.map((p) => (
@@ -245,9 +295,21 @@ function StageCard({
   stages: PresetView[];
   disabled: boolean;
   starting: string | null;
-  onStart: (id: string) => void;
+  onStart: (id: string, params?: Record<string, unknown>) => void;
 }) {
   const sorted = [...stages].sort((a, b) => a.id.localeCompare(b.id));
+  const [picked, setPicked] = useState<Record<string, string>>(() => {
+    const out: Record<string, string> = {};
+    for (const o of course.options ?? []) {
+      const saved = remembered(`${course.storageKey}.${o.key}`);
+      out[o.key] = o.choices.some((c) => c.value === saved) ? saved! : (o.default ?? o.choices[0].value);
+    }
+    return out;
+  });
+  const params = Object.assign(
+    {},
+    ...(course.options ?? []).map((o) => o.choices.find((c) => c.value === picked[o.key])?.params ?? {}),
+  ) as Record<string, unknown>;
   const [id, setId] = useState(() => {
     const saved = remembered(course.storageKey);
     return sorted.some((p) => p.id === saved) ? saved! : sorted[0].id;
@@ -281,12 +343,35 @@ function StageCard({
         <div className="desc" style={{ marginTop: 6 }}>
           {p.description}
         </div>
+        {(course.options ?? []).map((o) => (
+          <label key={o.key} className="field card-option">
+            <span className="small muted">{o.label}</span>
+            <select
+              value={picked[o.key]}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPicked((x) => ({ ...x, [o.key]: v }));
+                try {
+                  localStorage.setItem(`${course.storageKey}.${o.key}`, v);
+                } catch {
+                  // Remembering the choice is only a convenience.
+                }
+              }}
+            >
+              {o.choices.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ))}
       </div>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <span className="small faint num">
           {p.trial_count} trials · about {Math.max(1, Math.round(p.estimated_minutes))} min
         </span>
-        <button className="btn small" disabled={disabled} onClick={() => onStart(p.id)}>
+        <button className="btn small" disabled={disabled} onClick={() => onStart(p.id, course.options ? params : undefined)}>
           {starting === p.id ? "Starting…" : "Start"}
         </button>
       </div>

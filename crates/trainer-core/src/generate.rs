@@ -996,6 +996,7 @@ fn gen_chord_color(
             cue: None,
             answer_after_ms: None,
             after_answer: None,
+            note_choices: Vec::new(),
             choice_sounds,
             pace_ms: None,
             flash_color: color,
@@ -1044,6 +1045,7 @@ fn gen_chord_color(
                 cue: None,
                 answer_after_ms: None,
                 after_answer: None,
+                note_choices: Vec::new(),
                 choice_sounds: sounds,
                 pace_ms: None,
                 flash_color: note_set
@@ -1751,19 +1753,35 @@ fn gen_scale_degree(
         v.sort();
         Some(v)
     };
+    let cadence_bpm = p.cadence_bpm.unwrap_or(p.tempo_bpm);
+    if !(40.0..=220.0).contains(&cadence_bpm) {
+        return err("cadence_bpm must be 40–220");
+    }
+    let plan = p
+        .cadence
+        .unwrap_or(match (p.cadence_each_trial, p.key_change) {
+            (Some(true), _) => CadencePlan::Every,
+            (_, KeyChange::PerTrial) => CadencePlan::KeyChange,
+            (_, KeyChange::PerBlock) => CadencePlan::Start,
+        });
     let keys = key_sequence(&p.keys, &p.modes, p.key_change, n, rng)?;
     let beat = 60_000.0 / p.tempo_bpm as f64;
+    let cadence_beat = 60_000.0 / cadence_bpm as f64;
     let step = beat * 0.6;
     let mut bags: Vec<(KeyMode, BalancedBag<i32>)> = Vec::new();
     let mut prev_key = None;
     let mut last_note: Option<i32> = None;
     let mut out = Vec::with_capacity(n);
     for (i, (tonic, mode)) in keys.into_iter().enumerate() {
-        let degrees: Vec<i32> = explicit
+        let mut degrees: Vec<i32> = explicit
             .clone()
             .unwrap_or_else(|| mode_steps(mode).to_vec());
         if degrees.len() < 2 {
             return err("degrees needs at least two degrees");
+        }
+        // 8: the tonic an octave above the cadence's, so answers name the octave too.
+        if p.upper_tonic && degrees.contains(&0) {
+            degrees.push(12);
         }
         let bag = match bags.iter().position(|(m, _)| *m == mode) {
             Some(k) => &mut bags[k].1,
@@ -1775,9 +1793,13 @@ fn gen_scale_degree(
         let semis = bag.draw(rng).unwrap();
         let timbre = pick_timbre(&p.timbres, rng)?;
         let r = cadence_chords(tonic, mode)[0].1[0];
-        let mut octave = *rng.choose(&p.octaves).unwrap();
+        let mut octave = if semis == 12 {
+            0
+        } else {
+            *rng.choose(&p.octaves).unwrap()
+        };
         // A repeated degree is played in another octave when there is one.
-        if last_note == Some(r + semis + 12 * octave) {
+        if semis != 12 && last_note == Some(r + semis + 12 * octave) {
             let others: Vec<i32> = p.octaves.iter().copied().filter(|o| *o != octave).collect();
             if let Some(&o) = rng.choose(&others) {
                 octave = o;
@@ -1785,14 +1807,27 @@ fn gen_scale_degree(
         }
         let note = r + semis + 12 * octave;
         last_note = Some(note);
-        let cadence = p.cadence_each_trial || prev_key != Some((tonic, mode)) || i % 8 == 0;
+        // The answer a note stands for: its degree, with the tonic above the cadence's as 8.
+        let id_of = |m: i32| -> &'static str {
+            let rel = (m - r).rem_euclid(12);
+            if rel == 0 && p.upper_tonic && m > r {
+                "8"
+            } else {
+                DEGREE_IDS[rel as usize]
+            }
+        };
+        let cadence = match plan {
+            CadencePlan::Every => true,
+            CadencePlan::Start => i == 0,
+            CadencePlan::KeyChange => prev_key != Some((tonic, mode)),
+        };
         prev_key = Some((tonic, mode));
         let mut events = if cadence {
-            cadence_events(tonic, mode, p.tempo_bpm, &timbre, 0.0)
+            cadence_events(tonic, mode, cadence_bpm, &timbre, 0.0)
         } else {
             Vec::new()
         };
-        let t0 = if cadence { 6.0 * beat } else { 0.0 };
+        let t0 = if cadence { 6.0 * cadence_beat } else { 0.0 };
         events.push(ev(note, t0, beat * 1.5, &timbre, -6.0));
         let route = route_to_tonic(note, tonic.index() as i32, mode, p.resolution);
         let walk = |from: usize, start: f64| -> Vec<SoundEvent> {
@@ -1814,13 +1849,21 @@ fn gen_scale_degree(
         if p.resolve_before_answer && route.len() > 1 {
             events.extend(walk(1, t0 + beat * 1.5));
         }
-        let label = |s: i32| match p.labels {
-            DegreeLabels::Numbers => DEGREE_NUMBERS[s as usize],
-            DegreeLabels::Solfege => DEGREE_SOLFEGE[s as usize],
+        let label = |s: i32| -> String {
+            let rel = s.rem_euclid(12);
+            match p.labels {
+                DegreeLabels::Numbers if s == 12 => "8".into(),
+                DegreeLabels::Numbers => DEGREE_NUMBERS[rel as usize].into(),
+                DegreeLabels::Solfege => DEGREE_SOLFEGE[rel as usize].into(),
+                DegreeLabels::FixedDo => {
+                    fixed_do(tonic, mode, rel, degree_number(DEGREE_IDS[rel as usize]))
+                }
+            }
         };
-        // Each degree in this key and octave, walking to the tonic.
+        // Each answer in this key, walking to the tonic: 8 from the upper tonic, the rest in
+        // this question's octave.
         let degree_sound = |s: i32| -> Vec<SoundEvent> {
-            let m = r + s + 12 * octave;
+            let m = if s == 12 { r + 12 } else { r + s + 12 * octave };
             let route = route_to_tonic(m, tonic.index() as i32, mode, p.resolution);
             let mut e = vec![ev(m, 0.0, beat * 1.5, &timbre, -6.0)];
             for (k, x) in route.iter().enumerate().skip(1) {
@@ -1839,6 +1882,30 @@ fn gen_scale_degree(
             }
             e
         };
+        let choice_id =
+            |s: i32| -> &'static str { if s == 12 { "8" } else { DEGREE_IDS[s as usize] } };
+        let choice_sounds: Vec<ChoiceSound> = degrees
+            .iter()
+            .map(|s| ChoiceSound {
+                id: choice_id(*s).into(),
+                events: degree_sound(*s),
+            })
+            .collect();
+        let after_answer = (p.resolution != Resolution::None).then(|| walk(0, 0.0));
+        // Every note these trials play that is one of the answers, so it lights up as it sounds.
+        let ids: Vec<&str> = degrees.iter().map(|s| choice_id(*s)).collect();
+        let mut note_choices: Vec<(i32, String)> = Vec::new();
+        for m in choice_sounds
+            .iter()
+            .flat_map(|c| c.events.iter())
+            .chain(after_answer.iter().flatten())
+            .map(|e| e.midi)
+        {
+            let id = id_of(m);
+            if ids.contains(&id) && !note_choices.iter().any(|(x, _)| *x == m) {
+                note_choices.push((m, id.to_string()));
+            }
+        }
         out.push(TrialSpec::Identify(IdentifyTrial {
             exercise: ExerciseKind::ScaleDegreeId,
             prompt: format!(
@@ -1853,15 +1920,15 @@ fn gen_scale_degree(
             mask_before: Mask::None,
             choices: degrees
                 .iter()
-                .map(|s| Choice::new(DEGREE_IDS[*s as usize], label(*s)))
+                .map(|s| Choice::new(choice_id(*s), label(*s)))
                 .collect(),
-            correct: DEGREE_IDS[semis as usize].into(),
+            correct: id_of(note).into(),
             deadline_ms: None,
             reference: None,
             stimulus: json!({
                 "key": tonic.name(),
                 "mode": mode,
-                "degree": DEGREE_IDS[semis as usize],
+                "degree": id_of(note),
                 "semitones": semis,
                 "midi": note,
                 "octave": octave,
@@ -1872,19 +1939,41 @@ fn gen_scale_degree(
             cue: None,
             pace_ms: None,
             answer_after_ms: Some(t0),
-            after_answer: (p.resolution != Resolution::None).then(|| walk(0, 0.0)),
-            choice_sounds: degrees
-                .iter()
-                .map(|s| ChoiceSound {
-                    id: DEGREE_IDS[*s as usize].into(),
-                    events: degree_sound(*s),
-                })
-                .collect(),
-
+            after_answer,
+            note_choices,
+            choice_sounds,
             ..IdentifyTrial::skeleton()
         }));
     }
     Ok(out)
+}
+
+/// The degree number (1–7) in a degree id such as "b3" or "#4".
+fn degree_number(id: &str) -> i32 {
+    id.trim_start_matches(['b', '#']).parse().unwrap_or(1)
+}
+
+/// The fixed-do name (C is do) of the note `semis` above `tonic`, spelt as the key writes it:
+/// degree `number` picks the letter, so in G major 7 is fa♯ and in F major 4 is si♭.
+fn fixed_do(tonic: PitchClass, mode: KeyMode, semis: i32, number: i32) -> String {
+    const SYLLABLES: [&str; 7] = ["do", "re", "mi", "fa", "sol", "la", "si"];
+    const NATURAL: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    // The tonic's letter as the key is usually written (D♭, E♭, F♯, A♭, B♭ major; C♯, E♭, F♯,
+    // G♯, B♭ minor).
+    let letters = match mode {
+        KeyMode::Major => [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6],
+        KeyMode::Minor => [0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6],
+    };
+    let letter = (letters[tonic.index() as usize] + number - 1).rem_euclid(7) as usize;
+    let target = (tonic.index() as i32 + semis).rem_euclid(12);
+    let accidental = match (target - NATURAL[letter] + 6).rem_euclid(12) - 6 {
+        -2 => "♭♭",
+        -1 => "♭",
+        1 => "♯",
+        2 => "♯♯",
+        _ => "",
+    };
+    format!("{}{accidental}", SYLLABLES[letter])
 }
 
 fn gen_interval_comparison(
@@ -4094,22 +4183,32 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for (i, t) in trials.iter().enumerate() {
             let TrialSpec::Identify(t) = t else { panic!() };
+            // 8 is the tonic an octave above the cadence's.
             assert_eq!(
                 t.choices.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
-                ["1", "2", "3"]
+                ["1", "2", "3", "8"]
             );
             let note = t.events.last().unwrap().midi;
-            let semis = parse_degree(&t.correct).unwrap();
+            let semis = if t.correct == "8" {
+                0
+            } else {
+                parse_degree(&t.correct).unwrap()
+            };
             assert_eq!((note - 0).rem_euclid(12), semis, "key of C");
-            // A cadence (16 notes) before every question by default.
-            assert_eq!(t.events.len(), 17, "trial {i}");
-            assert_eq!(t.answer_after_ms, Some(6.0 * 600.0));
+            // In one key the cadence (16 notes) plays once, before the first question.
+            let cadence = if i == 0 { 16 } else { 0 };
+            assert_eq!(t.events.len(), cadence + 1, "trial {i}");
+            assert_eq!(t.answer_after_ms, Some(if i == 0 { 6.0 * 600.0 } else { 0.0 }));
+            // Every note of the walk to the tonic lights its answer.
+            for e in t.after_answer.as_ref().unwrap() {
+                assert!(t.note_choices.iter().any(|(m, _)| *m == e.midi));
+            }
             let after = t.after_answer.as_ref().unwrap();
             assert_eq!(after[0].midi, note);
             assert_eq!(after.last().unwrap().midi.rem_euclid(12), 0);
             seen.insert(t.correct.clone());
         }
-        assert_eq!(seen.len(), 3);
+        assert_eq!(seen.len(), 4);
         // A new key per question, minor labels in solfege, the cadence only when due.
         let b = block(
             r#"{"type": "scale_degree_id", "count": 12, "params": {"keys": "all", "key_change": "per_trial", "modes": ["minor"], "labels": "solfege", "cadence_each_trial": false}}"#,
@@ -4123,7 +4222,7 @@ mod tests {
                 .iter()
                 .map(|c| c.label.as_str())
                 .collect::<Vec<_>>(),
-            ["do", "re", "me", "fa", "sol", "le", "te"]
+            ["do", "re", "me", "fa", "sol", "le", "te", "do"]
         );
         let keys: std::collections::HashSet<_> =
             trials.iter().map(|t| t.stimulus()["key"].clone()).collect();
@@ -4136,6 +4235,46 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn fixed_do_names_the_keys_notes_and_cadences_follow_the_plan() {
+        assert_eq!(
+            (0..12)
+                .filter(|s| mode_steps(KeyMode::Major).contains(s))
+                .map(|s| fixed_do(
+                    PitchClass::new(7),
+                    KeyMode::Major,
+                    s,
+                    degree_number(DEGREE_IDS[s as usize])
+                ))
+                .collect::<Vec<_>>(),
+            ["sol", "la", "si", "do", "re", "mi", "fa♯"]
+        );
+        assert_eq!(fixed_do(PitchClass::new(5), KeyMode::Major, 5, 4), "si♭");
+        assert_eq!(fixed_do(PitchClass::new(3), KeyMode::Minor, 3, 3), "sol♭");
+        // Fixed do is the default label; a key per question cadences on each change.
+        let b = block(
+            r#"{"type": "scale_degree_id", "count": 6, "params": {"keys": "all", "key_change": "per_trial"}}"#,
+        );
+        for t in generate_block(&b, 2, &GenContext::default()).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert_eq!(t.stimulus["cadence"], true);
+            assert!(t.choices.iter().any(|c| c.label.starts_with("do")
+                || c.label.starts_with("sol")
+                || c.label.starts_with("re")
+                || c.label.starts_with("mi")
+                || c.label.starts_with("fa")
+                || c.label.starts_with("la")
+                || c.label.starts_with("si")));
+        }
+        let every = block(
+            r#"{"type": "scale_degree_id", "count": 4, "params": {"cadence": "every", "cadence_bpm": 60}}"#,
+        );
+        for t in generate_block(&every, 2, &GenContext::default()).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert_eq!(t.answer_after_ms, Some(6.0 * 1000.0), "six beats at 60 bpm");
+        }
     }
 
     #[test]

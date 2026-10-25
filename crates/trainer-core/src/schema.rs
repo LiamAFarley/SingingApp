@@ -633,10 +633,25 @@ pub enum Resolution {
 #[serde(rename_all = "snake_case")]
 pub enum DegreeLabels {
     /// 1, 2, ♭3 … numbered against the major scale.
-    #[default]
     Numbers,
-    /// Movable do with do-based minor: do re me fa sol le te.
+    /// Movable do with do-based minor: the tonic is always do (do re me fa sol le te).
     Solfege,
+    /// Fixed do: C is always do, so the buttons name the key's actual notes (in G major: sol la
+    /// si do re mi fa♯ sol), with the degree number beside each.
+    #[default]
+    FixedDo,
+}
+
+/// When a scale-degree exercise plays its key-setting cadence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CadencePlan {
+    /// Once, before the first question.
+    Start,
+    /// Before the first question and whenever the key changes.
+    KeyChange,
+    /// Before every question.
+    Every,
 }
 
 fn d_degree_octaves() -> Vec<i32> {
@@ -662,12 +677,22 @@ pub struct ScaleDegreeParams {
     /// Default: the seven degrees of the mode. Fewer degrees make early levels.
     #[serde(default)]
     pub degrees: Vec<String>,
-    /// A cadence before every question; otherwise when the key changes and every eighth question.
-    #[serde(default = "d_true")]
-    pub cadence_each_trial: bool,
+    /// When the cadence plays. Default: once at the start in one key, on every key change when
+    /// the key changes.
+    #[serde(default)]
+    pub cadence: Option<CadencePlan>,
+    /// Older form of `cadence: every` (true) or the default (false).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cadence_each_trial: Option<bool>,
+    /// Cadence tempo; the question's own tempo (`tempo_bpm`) when not set.
+    #[serde(default)]
+    pub cadence_bpm: Option<f32>,
     /// Octaves of the note: 0 is the octave from the tonic up, -1 the one below.
     #[serde(default = "d_degree_octaves")]
     pub octaves: Vec<i32>,
+    /// Answers run 1–8: the tonic above the cadence's tonic is 8, so the octave is named too.
+    #[serde(default = "d_true")]
+    pub upper_tonic: bool,
     #[serde(default)]
     pub resolution: Resolution,
     /// Also play the resolution before answering (a learning aid for new degrees).
@@ -1954,6 +1979,10 @@ pub struct IdentifyTrial {
     /// Played as soon as the result is shown, e.g. a scale degree walking to the tonic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_answer: Option<Vec<SoundEvent>>,
+    /// Which answer each MIDI note stands for, so the answer lights up while it sounds (a
+    /// degree walking to the tonic).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub note_choices: Vec<(i32, String)>,
     /// What each answer sounds like in this trial's register and timbre, played when it is
     /// clicked after answering. Made with the trial and not stored.
     #[serde(skip)]
@@ -2005,6 +2034,7 @@ impl IdentifyTrial {
             cue: None,
             answer_after_ms: None,
             after_answer: None,
+            note_choices: Vec::new(),
             choice_sounds: Vec::new(),
             pace_ms: None,
             flash_color: None,

@@ -466,6 +466,21 @@ pub fn remove_queued(state: State<'_, AppState>, session_id: String) -> Res<bool
         .map_err(anyhow_err)
 }
 
+/// `spec` with `params` merged into every block's params (the options chosen on a card).
+fn with_params(spec: &SessionSpec, params: &serde_json::Value) -> Res<SessionSpec> {
+    let mut v = serde_json::to_value(spec).map_err(err)?;
+    if let (Some(blocks), Some(extra)) = (v["blocks"].as_array_mut(), params.as_object()) {
+        for b in blocks {
+            if let Some(p) = b["params"].as_object_mut() {
+                for (k, x) in extra {
+                    p.insert(k.clone(), x.clone());
+                }
+            }
+        }
+    }
+    SessionSpec::from_value(v).map_err(err)
+}
+
 #[tauri::command]
 pub async fn start_session(state: State<'_, AppState>, request: StartRequest) -> Res<String> {
     let core = state.core.clone();
@@ -480,7 +495,7 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
         let daily_ctx = matches!(request, StartRequest::DailySet).then(|| core.gen_context());
         let db = core.db.lock();
         let (id, spec) = match request {
-            StartRequest::Preset { id } => {
+            StartRequest::Preset { id, params } => {
                 let spec = find_builtin(&id)
                     .or_else(|| {
                         db.user_presets()
@@ -490,6 +505,10 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                             .map(|(_, s, _)| s)
                     })
                     .ok_or_else(|| format!("unknown preset {id}"))?;
+                let spec = match params {
+                    Some(p) => with_params(&spec, &p)?,
+                    None => spec,
+                };
                 (
                     db.start_new_session(&spec, "preset").map_err(anyhow_err)?,
                     spec,
