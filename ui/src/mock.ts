@@ -1190,7 +1190,7 @@ const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; descript
     title: "Core relative pitch",
     exercise: "resting_tone",
     description:
-      "The daily core, built on research into how relative pitch is learnt: tonality first (find home, scale degrees with a breath before answering), then a vocabulary of tonal patterns and working memory (echo, dialogue, N-back), then inner hearing and lines (silent bars, flash scores, melodic updating, bass and guide tones), then structure and single-pass error detection. Each session mixes three or four short parts.",
+      "The daily core, built on research into how relative pitch is learnt: tonality first (find home, scale degrees), then a vocabulary of tonal patterns and working memory (echo, dialogue, N-back), then inner hearing and lines (silent bars, flash scores, melodic updating, bass and guide tones), then structure and single-pass error detection. Each session mixes three or four short parts.",
     modules: [
       ["Tonal context", tierSessions(["Home and degrees in C", "Any key", "Changing keys"])],
       ["Patterns and working memory", tierSessions(["Tonic and dominant", "Solfège and the first note", "Dialogue and canon"])],

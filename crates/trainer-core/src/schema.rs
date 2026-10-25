@@ -775,8 +775,8 @@ pub struct ScaleDegreeParams {
     pub timbres: Vec<TimbreId>,
     #[serde(default = "d_degree_tempo")]
     pub tempo_bpm: f32,
-    /// A silent pause after the note before the answers open, to audiate it (Gordon's breath).
-    /// A beat when not set; 0 turns it off.
+    /// A silent pause in ms after the note before the answers open, to audiate it (Gordon's
+    /// breath). Off when not set: the answers open as the note starts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub think_ms: Option<u32>,
     /// Ask more often for the degrees recently answered wrong (from the last few hundred answers).

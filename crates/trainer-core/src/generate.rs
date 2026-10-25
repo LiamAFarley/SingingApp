@@ -2032,11 +2032,10 @@ fn gen_scale_degree(
         };
         let t0 = if cadence { 6.0 * cadence_beat } else { 0.0 };
         events.push(ev(note, t0, beat * 1.5, &timbre, -6.0));
-        // The answers open after the note and a silent beat to audiate it.
+        // The answers open with the note, unless a pause to audiate it is asked for.
         let think = match p.think_ms {
-            Some(0) => 0.0,
+            Some(0) | None => 0.0,
             Some(ms) => beat * 1.5 + ms as f64,
-            None => beat * 2.5,
         };
         let route = route_to_tonic(note, tonic.index() as i32, mode, p.resolution);
         let walk = |from: usize, start: f64| -> Vec<SoundEvent> {
@@ -4901,7 +4900,7 @@ mod tests {
             // Answers open after the note and a beat's breath (2.5 beats at 100 bpm).
             assert_eq!(
                 t.answer_after_ms,
-                Some(if i == 0 { 6.0 * 600.0 } else { 0.0 } + 2.5 * 600.0)
+                Some(if i == 0 { 6.0 * 600.0 } else { 0.0 })
             );
             // Every note of the walk to the tonic lights its answer.
             for e in t.after_answer.as_ref().unwrap() {
@@ -4977,11 +4976,7 @@ mod tests {
         );
         for t in generate_block(&every, 2, &GenContext::default()).unwrap() {
             let TrialSpec::Identify(t) = t else { panic!() };
-            assert_eq!(
-                t.answer_after_ms,
-                Some(6.0 * 1000.0 + 2.5 * 600.0),
-                "six beats at 60 bpm, then the note and a breath at 100"
-            );
+            assert_eq!(t.answer_after_ms, Some(6.0 * 1000.0), "six beats at 60 bpm");
         }
     }
 

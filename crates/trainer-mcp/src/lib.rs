@@ -65,7 +65,7 @@ treat a block without feedback as passed if the tones were within an octave of e
 previous few minutes without the clearing sound.\n\
 - Relative pitch starts from rp_core, the daily core (on in the plan by default): twelve short mixed sessions in four \
 tiers, built on the aural-skills research in docs/RELATIVE_PITCH.md: tonal context (find home: sing or name the resting \
-tone of a phrase that stops; scale degrees with a silent breath before the answers; same/different and probe memory), \
+tone of a phrase that stops; scale degrees; same/different and probe memory), \
 tonal patterns and working memory (Gordon pattern echo with teaching and evaluation passes, the I–V dialogue, musical \
 N-back and canon, additive and complementary interval singing), inner hearing and lines (silent bars, flash scores, \
 melodic updating, bass and guide-tone singing), structure and error detection (single-pass score-against-sound, \
@@ -79,7 +79,7 @@ set_course_level work as for absolute pitch. To give the user a drill the lesson
 single-exercise activity (save_custom_level). New exercises: resting_tone, tonal_pattern, pattern_dialogue, n_back, \
 melodic_updating, pattern_memory, error_detection, syllable_check, cadence_id, bass_line; sight_sing's mode (read, \
 singback, flash) and silent (bars, strong_beats, weak_beats); sing_interval's scaffold (additive, complementary); \
-scale_degree_id's think_ms and adaptive (degrees missed lately come up more). See list_exercise_types.\n\
+scale_degree_id's think_ms (an optional pause before answering, off by default) and adaptive (degrees missed lately come up more). See list_exercise_types.\n\
 - Other graded courses are built-in presets: harmony_01–08 (degrees_01–08 is the older scale-degree ladder; prefer \
 rp_degrees). Suggest the next level after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \

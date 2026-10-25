@@ -11,7 +11,7 @@ Functional Ear Trainer's levels. Only the patterns are theirs; the material is t
 1. **Core relative pitch** (`rp_core`), every day, about 12 minutes. It is on in the plan by
    default and comes first in Today's set.
 2. **Scale degrees** (`rp_degrees`), about 8 minutes, also on by default: the functional
-   backbone, now with a silent beat before the answers and more questions on the degrees you have
+   backbone, now with more questions on the degrees you have
    been missing.
 3. Add a workshop to the set (tick **Daily** inside it) when something keeps failing, for a few
    weeks, then take it out again.
@@ -36,7 +36,7 @@ do not count.
 
 | Report | Here |
 | --- | --- |
-| Scale degrees: post-answer resolution, a 1-beat audiation pause | The resolution was already there; the answers now open a beat after the note (`think_ms`). Adaptive: a degree missed 20% of the time comes up twice as often, at 40% three times (`adaptive`). |
+| Scale degrees: post-answer resolution, a 1-beat audiation pause | The resolution was already there. The pause is available (`think_ms`) but off: the answers open as the note starts, so you can answer as soon as you know. Adaptive: a degree missed 20% of the time comes up twice as often, at 40% three times (`adaptive`). |
 | Resting tone drop-needle ("find home") | `resting_tone`: a phrase outlining the tonality without a cadence stops on a tendency tone; breathe and sing the resting tone, or name it. Eight tonalities with Gordon's resting syllables (do major, la minor and harmonic minor, re Dorian, mi Phrygian, fa Lydian, sol Mixolydian, ti Locrian). |
 | Tonal pattern echo with the breath gate and teaching/evaluation passes | `tonal_pattern`: tonic, dominant, subdominant and tendency-tone patterns of 2–5 notes on an even pulse; a silent "Breathe and audiate" beat; each pattern first with the tonic sounding, then alone; on "bum", in solfège, or heard on "bum" and echoed in solfège. |
 | I–V dialogue | `pattern_dialogue`: sing only the first note of a quick pattern; answer with a different pattern of the same function; answer with the other function. Free answers are graded on whether every note belongs to the asked function. |
@@ -204,5 +204,5 @@ Any of these can go into a custom level, a session (`queue_session`) or a saved 
 - **`sight_sing`**: `mode` (`read`, `singback`, `flash` with `flash_s`) and `silent` (`bars`
   with `silent_bars`, `strong_beats`, `weak_beats`).
 - **`sing_interval`** `scaffold`: `additive` or `complementary`.
-- **`scale_degree_id`**: `think_ms` (the breath before the answers; 0 turns it off) and
+- **`scale_degree_id`**: `think_ms` (an optional pause before the answers open; off by default) and
   `adaptive`.

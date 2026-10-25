@@ -985,8 +985,13 @@ impl<'a> SessionRun<'a> {
         let hi = t.notes.iter().map(|n| n.midi).max().unwrap_or(72);
         // When the octave does not count, the voice may be an octave or two from the target:
         // track the whole singing range (E2–C6), not just around the written notes.
-        let any_octave = !matches!(cfg.mode, trainer_core::schema::PitchRefMode::Absolute) || t.notes.is_empty();
-        let (lo, hi) = if any_octave { (lo.min(40 + 9), hi.max(84 - 9)) } else { (lo, hi) };
+        let any_octave =
+            !matches!(cfg.mode, trainer_core::schema::PitchRefMode::Absolute) || t.notes.is_empty();
+        let (lo, hi) = if any_octave {
+            (lo.min(40 + 9), hi.max(84 - 9))
+        } else {
+            (lo, hi)
+        };
         let fmin = (midi_to_hz(lo as f64 - 9.0, a4) as f32).max(55.0);
         let fmax = (midi_to_hz(hi as f64 + 9.0, a4) as f32).min(1600.0);
         let (samples, tr, calibrated) =

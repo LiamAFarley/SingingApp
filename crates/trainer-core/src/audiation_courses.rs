@@ -860,7 +860,7 @@ pub fn core_course() -> Course {
             vec![
                 (
                     "Home and degrees in C",
-                    "Find home in major and minor, scale degrees in C with a breath before answering, then same or different.",
+                    "Find home in major and minor, scale degrees in C, then same or different.",
                     vec![
                         part(
                             "resting_tone",
@@ -1244,7 +1244,7 @@ pub fn core_course() -> Course {
         title: "Core relative pitch".into(),
         short: "Core".into(),
         category: CATEGORY.into(),
-        description: "The daily core, built on research into how relative pitch is learnt: tonality first (find home, scale degrees with a breath before answering), then a vocabulary of tonal patterns and working memory (echo, dialogue, N-back), then inner hearing and lines (silent bars, flash scores, melodic updating, bass and guide tones), then structure and single-pass error detection. Each session mixes three or four short parts.".into(),
+        description: "The daily core, built on research into how relative pitch is learnt: tonality first (find home, scale degrees), then a vocabulary of tonal patterns and working memory (echo, dialogue, N-back), then inner hearing and lines (silent bars, flash scores, melodic updating, bass and guide tones), then structure and single-pass error detection. Each session mixes three or four short parts.".into(),
         schedule: Schedule::Ladder,
         levels,
     }

@@ -439,7 +439,8 @@ pub(super) fn gen_resting_tone(
                     events,
                     choices,
                     correct: kind.id().into(),
-                    answer_after_ms: Some(end + beat),
+                    // Open as the last note sounds: home can be known before it ends.
+                    answer_after_ms: Some(end - beat),
                     after_answer: Some(after),
                     explain: Some(reveal),
                     stimulus,
@@ -1254,7 +1255,8 @@ pub(super) fn gen_pattern_memory(
                     ],
                     if yes { "same" } else { "different" },
                     explain,
-                    after_first + len as f64 * beat,
+                    // Open as the second rendition starts.
+                    after_first,
                 )
             }
             MemoryTask::Probe => {
@@ -1283,7 +1285,7 @@ pub(super) fn gen_pattern_memory(
                         Some(k) => format!("{} was note {}.", name(semis(probe)), k + 1),
                         None => format!("{} was not in it.", name(semis(probe))),
                     },
-                    after_first + beat,
+                    after_first,
                 )
             }
         };
