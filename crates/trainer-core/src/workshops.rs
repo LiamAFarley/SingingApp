@@ -64,6 +64,8 @@ pub struct WorkshopView {
     pub current: u32,
     /// Every lesson is one block of the same exercise, so custom levels of it make sense.
     pub custom_levels: bool,
+    /// Every exercise the lessons use, in order of first use (for the settings panel).
+    pub exercises: Vec<String>,
     pub lessons: u32,
     pub passed: u32,
     pub pass_mark: f32,
@@ -266,6 +268,20 @@ pub fn workshop_view(db: &Db, course: &str) -> Result<WorkshopView> {
             .map(exercise_of)
             .unwrap_or_default(),
         current,
+        exercises: {
+            let mut v: Vec<String> = Vec::new();
+            for e in c
+                .levels
+                .iter()
+                .flat_map(|l| l.blocks.iter())
+                .map(exercise_of)
+            {
+                if !v.contains(&e) {
+                    v.push(e);
+                }
+            }
+            v
+        },
         custom_levels: c.levels.iter().all(|l| l.blocks.len() == 1)
             && c.levels
                 .iter()

@@ -548,13 +548,27 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
             StartRequest::DailySet { category } => {
                 let ctx = daily_ctx.unwrap_or_default();
                 let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());
-                let set =
+                let mut set =
                     courses::compose_daily_set(&db, &ctx, now(), &category).map_err(anyhow_err)?;
+                courses::apply_exercise_prefs(
+                    &mut set.spec,
+                    &courses::exercise_prefs(&db).map_err(anyhow_err)?,
+                );
                 (
                     db.start_new_session(&set.spec, "daily")
                         .map_err(anyhow_err)?,
                     set.spec,
                 )
+            }
+            StartRequest::Resume { session_id } => {
+                let (spec, block, done) = courses::resume_point(&db, &session_id)
+                    .map_err(anyhow_err)?
+                    .ok_or("that session has nothing left to do")?;
+                drop(db);
+                runner
+                    .start_from(session_id.clone(), spec, Some((block, done)))
+                    .map_err(anyhow_err)?;
+                return Ok(session_id);
             }
             StartRequest::Custom { level } => {
                 let spec = trainer_core::workshops::custom_session(&level).map_err(anyhow_err)?;
@@ -570,6 +584,10 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                 courses::apply_session_prefs(
                     &mut spec,
                     &courses::ap_prefs(&db).map_err(anyhow_err)?,
+                );
+                courses::apply_exercise_prefs(
+                    &mut spec,
+                    &courses::exercise_prefs(&db).map_err(anyhow_err)?,
                 );
                 (
                     db.start_new_session(&spec, "course").map_err(anyhow_err)?,
@@ -749,6 +767,35 @@ pub fn save_daily_plan(state: State<'_, AppState>, plan: DailyPlan) -> Res<()> {
 #[tauri::command]
 pub fn set_course_level(state: State<'_, AppState>, course: String, level: u32) -> Res<()> {
     courses::set_level(&state.core.db.lock(), &course, level).map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resumable_daily(
+    state: State<'_, AppState>,
+    category: Option<String>,
+) -> Res<Option<courses::Resumable>> {
+    let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());
+    courses::resumable_daily(&state.core.db.lock(), &category, now()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn exercise_prefs(
+    state: State<'_, AppState>,
+) -> Res<std::collections::BTreeMap<String, serde_json::Value>> {
+    courses::exercise_prefs(&state.core.db.lock()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_exercise_prefs(
+    state: State<'_, AppState>,
+    kind: String,
+    params: serde_json::Value,
+) -> Res<()> {
+    let ctx = state.core.gen_context();
+    courses::save_exercise_prefs(&state.core.db.lock(), &ctx, &kind, &params)
+        .map_err(anyhow_err)?;
     state.core.emit("courses-changed", ());
     Ok(())
 }

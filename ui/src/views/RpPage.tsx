@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { api, useBackendEvent } from "../api";
+import { TodayButton } from "../components/TodayButton";
 import type { CourseStatus } from "../bindings/CourseStatus";
 import type { DailyPlan } from "../bindings/DailyPlan";
 import type { DailySet } from "../bindings/DailySet";
@@ -233,9 +234,7 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
           </div>
           <div style={{ textAlign: "right" }}>
             {set && <div className="big-num num">{Math.round(set.minutes)} min</div>}
-            <button className="btn primary" disabled={busy || !set} onClick={() => start("daily", { source: "daily_set", category: CATEGORY })}>
-              {starting === "daily" ? "Starting…" : "Start today's set"}
-            </button>
+            <TodayButton category={CATEGORY} disabled={busy || !set} starting={starting} onStart={start} />
           </div>
         </div>
       </div>

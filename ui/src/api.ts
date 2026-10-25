@@ -29,6 +29,7 @@ import type { StatsRow } from "./bindings/StatsRow";
 import type { CustomLevel } from "./bindings/CustomLevel";
 import type { CustomLevelView } from "./bindings/CustomLevelView";
 import type { WorkshopView } from "./bindings/WorkshopView";
+import type { Resumable } from "./bindings/Resumable";
 
 export interface Backend {
   appInfo(): Promise<AppInfo>;
@@ -75,6 +76,11 @@ export interface Backend {
   customLevels(course: string): Promise<CustomLevelView[]>;
   saveCustomLevel(level: CustomLevel): Promise<CustomLevel>;
   deleteCustomLevel(id: string): Promise<void>;
+  /** Today's set for a category, if it was ended before it finished today. */
+  resumableDaily(category?: string): Promise<Resumable | null>;
+  /** Settings per exercise type applied to course lessons and today's set. */
+  exercisePrefs(): Promise<Record<string, Record<string, unknown>>>;
+  saveExercisePrefs(kind: string, params: Record<string, unknown>): Promise<void>;
   apPrefs(): Promise<ApPrefs>;
   saveApPrefs(prefs: ApPrefs): Promise<ApPrefs>;
   listLabelSets(): Promise<LabelSet[]>;
@@ -133,6 +139,9 @@ async function tauriBackend(): Promise<Backend> {
     customLevels: (course) => call("custom_levels", { course }),
     saveCustomLevel: (level) => call("save_custom_level", { level }),
     deleteCustomLevel: (id) => call("delete_custom_level", { id }),
+    resumableDaily: (category) => call("resumable_daily", { category: category ?? null }),
+    exercisePrefs: () => call("exercise_prefs"),
+    saveExercisePrefs: (kind, params) => call("save_exercise_prefs", { kind, params }),
     apPrefs: () => call("ap_prefs"),
     saveApPrefs: (prefs) => call("save_ap_prefs", { prefs }),
     listLabelSets: () => call("list_label_sets"),

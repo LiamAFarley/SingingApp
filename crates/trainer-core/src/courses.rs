@@ -1282,6 +1282,144 @@ fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockS
         .collect()
 }
 
+// ---------------------------------------------------------------------------------------------
+// Resuming a session ended early
+// ---------------------------------------------------------------------------------------------
+
+/// A session that was ended before its last part, which can carry on where it stopped.
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct Resumable {
+    pub session_id: String,
+    pub title: String,
+    pub started_at: Option<String>,
+    /// The part it carries on from (0-based) and how many parts there are.
+    pub block: u32,
+    pub blocks: u32,
+    /// Questions of that part already answered.
+    pub done: u32,
+}
+
+/// Where an ended session carries on: the block it stopped in and the questions answered there
+/// (the next block when that one was finished). `None` when nothing is left.
+pub fn resume_point(db: &Db, session_id: &str) -> Result<Option<(SessionSpec, usize, u32)>> {
+    let row = db
+        .get_session(session_id)?
+        .ok_or_else(|| anyhow!("session not found"))?;
+    let spec = row.spec()?;
+    let trials = db.query_trials(
+        &TrialFilter {
+            session_id: Some(session_id.into()),
+            assisted: Some(false),
+            ..Default::default()
+        },
+        20_000,
+        0,
+    )?;
+    let mut per_block: BTreeMap<u32, u32> = BTreeMap::new();
+    for t in trials.iter().filter(|t| t.attempt == 0) {
+        *per_block.entry(t.block_idx).or_default() += 1;
+    }
+    let (block, done) = match per_block.iter().next_back() {
+        None => (0, 0),
+        Some((&b, &n)) => {
+            let count = spec.blocks.get(b as usize).map(|x| x.count).unwrap_or(0);
+            if n >= count {
+                (b as usize + 1, 0)
+            } else {
+                (b as usize, n)
+            }
+        }
+    };
+    Ok((block < spec.blocks.len()).then_some((spec, block, done)))
+}
+
+/// Today's set for a category, if the last one today was ended before it finished.
+pub fn resumable_daily(db: &Db, category: &str, now: DateTime<Utc>) -> Result<Option<Resumable>> {
+    let title = format!("{category}: today's set");
+    let today = now.with_timezone(&Local).date_naive();
+    let Some(row) = db
+        .list_sessions(None, 40)?
+        .into_iter()
+        .find(|r| r.source == "daily" && r.title == title)
+    else {
+        return Ok(None);
+    };
+    let started_today = row
+        .started_at
+        .as_deref()
+        .and_then(parse_time)
+        .is_some_and(|t| t.with_timezone(&Local).date_naive() == today);
+    if row.status != SessionStatus::Abandoned || !started_today {
+        return Ok(None);
+    }
+    Ok(
+        resume_point(db, &row.id)?.map(|(spec, block, done)| Resumable {
+            session_id: row.id.clone(),
+            title: row.title.clone(),
+            started_at: row.started_at.clone(),
+            block: block as u32,
+            blocks: spec.blocks.len() as u32,
+            done,
+        }),
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Exercise settings for course and daily sessions
+// ---------------------------------------------------------------------------------------------
+
+const EXERCISE_PREFS_KEY: &str = "exercise_prefs";
+
+/// Settings the user chose per exercise type (`scale_degree_id` → `{"tempo_bpm": 80}`), merged
+/// into every block of that type in course lessons and today's set. Custom levels keep their own.
+pub fn exercise_prefs(db: &Db) -> Result<BTreeMap<String, Value>> {
+    Ok(db.get_setting(EXERCISE_PREFS_KEY)?.unwrap_or_default())
+}
+
+/// Saves one exercise type's settings (an empty object clears them), after checking that a block
+/// of that type generates with them.
+pub fn save_exercise_prefs(db: &Db, ctx: &GenContext, kind: &str, params: &Value) -> Result<()> {
+    let obj = params
+        .as_object()
+        .ok_or_else(|| anyhow!("settings must be an object"))?;
+    let mut all = exercise_prefs(db)?;
+    if obj.is_empty() {
+        all.remove(kind);
+    } else {
+        let b: BlockSpec =
+            serde_json::from_value(json!({ "type": kind, "count": 2, "params": params }))
+                .map_err(|e| anyhow!("those settings do not fit {kind}: {e}"))?;
+        generate_block(&b, 1, ctx).map_err(|e| anyhow!("{}", e.0))?;
+        all.insert(kind.into(), params.clone());
+    }
+    db.set_setting(EXERCISE_PREFS_KEY, &all)
+}
+
+/// Merges the saved settings into each block of their exercise type. A block whose params do not
+/// accept them is left as it was.
+pub fn apply_exercise_prefs(spec: &mut SessionSpec, prefs: &BTreeMap<String, Value>) {
+    if prefs.is_empty() {
+        return;
+    }
+    for b in &mut spec.blocks {
+        let Ok(mut v) = serde_json::to_value(&*b) else {
+            continue;
+        };
+        let Some(kind) = v.get("type").and_then(|t| t.as_str()).map(String::from) else {
+            continue;
+        };
+        let Some(Value::Object(extra)) = prefs.get(&kind) else {
+            continue;
+        };
+        if let Some(Value::Object(params)) = v.get_mut("params") {
+            params.extend(extra.clone());
+        }
+        if let Ok(nb) = serde_json::from_value::<BlockSpec>(v) {
+            *b = nb;
+        }
+    }
+}
+
 /// The categories with a daily set of their own.
 pub const ABSOLUTE_PITCH: &str = "Absolute pitch";
 
@@ -1658,6 +1796,58 @@ mod tests {
             t.started_at = (when + Duration::seconds(i as i64 * 3)).to_rfc3339();
             db.insert_trial(&t).unwrap();
         }
+    }
+
+    #[test]
+    fn exercise_settings_reach_course_sessions() {
+        let db = Db::open_in_memory().unwrap();
+        let ctx = GenContext::default();
+        assert!(
+            save_exercise_prefs(&db, &ctx, "scale_degree_id", &json!({ "tempo_bpm": 500 }))
+                .is_err()
+        );
+        save_exercise_prefs(
+            &db,
+            &ctx,
+            "scale_degree_id",
+            &json!({ "tempo_bpm": 70, "cadence_bpm": 60 }),
+        )
+        .unwrap();
+        let c = find_course(crate::rp_courses::RP_DEGREES).unwrap();
+        let mut spec = level_session(&c, 3).unwrap();
+        apply_exercise_prefs(&mut spec, &exercise_prefs(&db).unwrap());
+        let crate::schema::Exercise::ScaleDegreeId(p) = &spec.blocks[0].exercise else {
+            panic!()
+        };
+        assert_eq!((p.tempo_bpm, p.cadence_bpm), (70.0, Some(60.0)));
+        // The lesson's own settings stay.
+        assert_eq!(p.octaves, vec![0]);
+        save_exercise_prefs(&db, &ctx, "scale_degree_id", &json!({})).unwrap();
+        assert!(exercise_prefs(&db).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_ended_session_resumes_where_it_stopped() {
+        let db = Db::open_in_memory().unwrap();
+        let ctx = GenContext::default();
+        let set = compose_daily_set(&db, &ctx, Utc::now(), crate::rp_courses::CATEGORY).unwrap();
+        let id = db.start_new_session(&set.spec, "daily").unwrap();
+        for i in 0..3 {
+            let mut t = crate::storage::tests_support::sample_trial(&id, i, true);
+            t.block_idx = 1;
+            db.insert_trial(&t).unwrap();
+        }
+        db.finish_session(&id, SessionStatus::Abandoned, &json!({}))
+            .unwrap();
+        let r = resumable_daily(&db, crate::rp_courses::CATEGORY, Utc::now())
+            .unwrap()
+            .unwrap();
+        assert_eq!((r.block, r.done), (1, 3));
+        assert!(
+            resumable_daily(&db, ABSOLUTE_PITCH, Utc::now())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]

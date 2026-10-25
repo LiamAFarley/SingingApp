@@ -372,6 +372,8 @@ pub enum RunnerCommand {
     SingAlong,
     Retry,
     Skip,
+    /// Leave the current part (block) and go on to the next.
+    SkipPart,
     Abort,
     Close,
 }
@@ -407,6 +409,10 @@ pub enum StartRequest {
     CourseLevel {
         course: String,
         level: u32,
+    },
+    /// A session that was ended early, from where it stopped.
+    Resume {
+        session_id: String,
     },
     /// A custom level of a workshop, saved (its id set) or a one-off try.
     Custom {
@@ -574,6 +580,7 @@ mod export_more {
         trainer_core::labels::LabelSet::export_all(&cfg).unwrap();
         trainer_core::speech::SpeechReport::export_all(&cfg).unwrap();
         trainer_core::workshops::WorkshopView::export_all(&cfg).unwrap();
+        trainer_core::courses::Resumable::export_all(&cfg).unwrap();
         trainer_core::workshops::CustomLevelView::export_all(&cfg).unwrap();
         crate::views::RunnerState::export_all(&cfg).unwrap();
     }

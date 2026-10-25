@@ -155,6 +155,11 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
               Overview <span className="kbd">V</span>
             </button>
           )}
+          {runner.block_count > 1 && runner.block_index + 1 < runner.block_count && phase !== "session_summary" && phase !== "error" && !confirmEnd && (
+            <button className="btn quiet" onClick={() => command({ kind: "skip_part" })} title="Leave this part and go on to the next">
+              Skip part
+            </button>
+          )}
           {phase !== "session_summary" && !confirmEnd && (
             <button className="btn quiet" onClick={() => setConfirmEnd(true)}>
               End session <span className="kbd">Esc</span>
@@ -162,7 +167,7 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
           )}
           {confirmEnd && (
             <>
-              <span className="small muted">End this session? Trials so far are kept.</span>
+              <span className="small muted">End this session? Trials so far are kept, and today's set can be resumed.</span>
               <button className="btn" onClick={() => setConfirmEnd(false)}>
                 Keep going <span className="kbd">Esc</span>
               </button>

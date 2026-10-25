@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, useBackendEvent } from "../api";
+import { TodayButton } from "../components/TodayButton";
 import type { ApDashboard } from "../bindings/ApDashboard";
 import type { ClassProgress } from "../bindings/ClassProgress";
 import type { CourseStatus } from "../bindings/CourseStatus";
@@ -101,9 +102,7 @@ export function ApPage({ sessionActive, onOpenSession }: { sessionActive: boolea
           </div>
           <div style={{ textAlign: "right" }}>
             {set && <div className="big-num num">{Math.round(set.minutes)} min</div>}
-            <button className="btn primary" disabled={busy || !set} onClick={() => start("daily", { source: "daily_set" })}>
-              {starting === "daily" ? "Starting…" : "Start today's set"}
-            </button>
+            <TodayButton disabled={busy || !set} starting={starting} onStart={start} />
           </div>
         </div>
       </div>

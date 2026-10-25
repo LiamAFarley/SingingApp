@@ -13,4 +13,8 @@ current: number,
 /**
  * Every lesson is one block of the same exercise, so custom levels of it make sense.
  */
-custom_levels: boolean, lessons: number, passed: number, pass_mark: number, modules: Array<ModuleView>, };
+custom_levels: boolean, 
+/**
+ * Every exercise the lessons use, in order of first use (for the settings panel).
+ */
+exercises: Array<string>, lessons: number, passed: number, pass_mark: number, modules: Array<ModuleView>, };

@@ -1095,6 +1095,15 @@ export function mockBackend(): Backend {
       mockCustom = [...mockCustom.filter((c) => c.id !== saved.id), saved];
       return saved;
     },
+    resumableDaily: async (category) =>
+      category === "Relative pitch"
+        ? { session_id: "s-daily", title: "Relative pitch: today's set", started_at: daysAgo(0), block: 1, blocks: 4, done: 5 }
+        : null,
+    exercisePrefs: async () => mockPrefs,
+    saveExercisePrefs: async (kind, params) => {
+      mockPrefs = { ...mockPrefs, [kind]: params };
+      if (Object.keys(params).length === 0) delete mockPrefs[kind];
+    },
     deleteCustomLevel: async (id) => {
       mockCustom = mockCustom.filter((c) => c.id !== id);
     },
@@ -1257,6 +1266,7 @@ const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; descript
   rp_dictation: { title: "Melodic dictation", exercise: "melodic_dictation", description: "Hear a melody and write it on the staff.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { melody: { generate: { keys: ["C"], degrees: [1, 2], notes: 3 } } }]]]] },
 };
 
+let mockPrefs: Record<string, Record<string, unknown>> = { scale_degree_id: { tempo_bpm: 84 } };
 let mockCustom: CustomLevel[] = [
   { id: "c1", course: "rp_degrees", title: "Low register in G", count: 20, params: { keys: ["G"], octaves: [-1], degrees: ["1", "2", "3", "4", "5"] } },
 ];
@@ -1297,6 +1307,7 @@ function mockWorkshop(course: string): WorkshopView {
     description: w.description,
     exercise: w.exercise,
     current,
+    exercises: course === "rp_core" ? ["resting_tone", "scale_degree_id", "pattern_memory", "tonal_pattern", "n_back"] : [w.exercise],
     custom_levels: !["rp_core", "rp_patterns", "rp_memory", "rp_harmony", "rp_errors"].includes(course),
     lessons: level,
     passed: modules.reduce((a, m) => a + m.passed, 0),

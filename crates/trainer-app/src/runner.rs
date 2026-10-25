@@ -29,6 +29,8 @@ pub enum RunnerMsg {
     Start {
         session_id: String,
         spec: SessionSpec,
+        /// Resume at this block, with this many of its questions already answered.
+        from: Option<(usize, u32)>,
     },
     Cmd(RunnerCommand),
 }
@@ -59,11 +61,25 @@ impl Runner {
     }
 
     pub fn start(&self, session_id: String, spec: SessionSpec) -> Result<()> {
+        self.start_from(session_id, spec, None)
+    }
+
+    /// Starts a session, or resumes one at a block with some of its questions done.
+    pub fn start_from(
+        &self,
+        session_id: String,
+        spec: SessionSpec,
+        from: Option<(usize, u32)>,
+    ) -> Result<()> {
         if self.is_active() {
             return Err(anyhow!("a session is already running"));
         }
         self.tx
-            .send(RunnerMsg::Start { session_id, spec })
+            .send(RunnerMsg::Start {
+                session_id,
+                spec,
+                from,
+            })
             .map_err(|_| anyhow!("runner stopped"))
     }
 
@@ -83,7 +99,12 @@ fn runner_main(core: Arc<Core>, rx: Receiver<RunnerMsg>, state: Arc<RwLock<Runne
     let mut last_labeled = db.last_labeled_reference_at().ok().flatten();
     loop {
         let Ok(msg) = rx.recv() else { return };
-        let RunnerMsg::Start { session_id, spec } = msg else {
+        let RunnerMsg::Start {
+            session_id,
+            spec,
+            from,
+        } = msg
+        else {
             continue;
         };
         let mut s = SessionRun {
@@ -96,6 +117,8 @@ fn runner_main(core: Arc<Core>, rx: Receiver<RunnerMsg>, state: Arc<RwLock<Runne
             last_labeled,
             stream_next: None,
             hold_until: None,
+            from,
+            skip_part: std::cell::Cell::new(false),
         };
         let result = s.run();
         last_labeled = s.last_labeled;
@@ -111,6 +134,11 @@ fn runner_main(core: Arc<Core>, rx: Receiver<RunnerMsg>, state: Arc<RwLock<Runne
                     .map(|r| session_summary(&r))
                     .unwrap_or_default();
                 let _ = db.finish_session(&s.session_id, SessionStatus::Abandoned, &summary);
+                // Progress may have moved, and today's set can now be resumed.
+                if let Err(e) = trainer_core::courses::refresh_progress(&db) {
+                    tracing::warn!("course progress: {e:#}");
+                }
+                core.emit("courses-changed", ());
                 s.set(|st| {
                     *st = RunnerState {
                         seq: st.seq,
@@ -189,6 +217,10 @@ struct SessionRun<'a> {
     hold_until: Option<u64>,
     /// The output frame of the next tone in a paced stream.
     stream_next: Option<u64>,
+    /// Resuming: the block to start at and how many of its questions were answered.
+    from: Option<(usize, u32)>,
+    /// Skip part was pressed: the rest of the current block is left out.
+    skip_part: std::cell::Cell<bool>,
 }
 
 /// A block answered without help starts with the clearing sound if a named tone was heard this
@@ -254,6 +286,11 @@ impl<'a> SessionRun<'a> {
             };
             match msg {
                 RunnerMsg::Cmd(RunnerCommand::Abort) => return Err(Stop::Aborted),
+                // Leaving a part: whatever is waiting sees a skip, and the block ends.
+                RunnerMsg::Cmd(RunnerCommand::SkipPart) => {
+                    self.skip_part.set(true);
+                    return Ok(Some(RunnerCommand::Skip));
+                }
                 RunnerMsg::Cmd(c) => return Ok(Some(c)),
                 RunnerMsg::Start { .. } => {}
             }
@@ -300,9 +337,27 @@ impl<'a> SessionRun<'a> {
                 ..RunnerState::default()
             };
         });
+        let (from_block, done_before) = self.from.unwrap_or((0, 0));
         for (bi, block) in blocks.iter().enumerate() {
-            let trials = generate_block(block, block_seed(base_seed, bi, block), &ctx)
+            // Resuming: the blocks done before are passed over.
+            if bi < from_block {
+                self.set(|st| {
+                    if let Some(o) = st.outline.get_mut(bi) {
+                        o.status = "done".into();
+                    }
+                });
+                continue;
+            }
+            self.skip_part.set(false);
+            let mut trials = generate_block(block, block_seed(base_seed, bi, block), &ctx)
                 .map_err(|e| anyhow!("block {}: {e}", bi + 1))?;
+            // The questions answered before it stopped are not asked again.
+            let offset = if bi == from_block {
+                (done_before as usize).min(trials.len().saturating_sub(1))
+            } else {
+                0
+            };
+            trials.drain(..offset);
             let feedback = block.effective_feedback();
             self.set(|st| {
                 st.phase = Phase::BlockIntro;
@@ -331,7 +386,6 @@ impl<'a> SessionRun<'a> {
                 }
             }
             self.stream_next = None;
-            let mut trials = trials;
             let mut requeues: std::collections::BTreeMap<String, u32> =
                 std::collections::BTreeMap::new();
             let recent_label = self
@@ -363,7 +417,7 @@ impl<'a> SessionRun<'a> {
             self.pre_mask(&engine, scrub)?;
             let grading = |t: &TrialSpec| GradingConfig::resolve(&block.grading, default_mode(t));
             let mut ti = 0usize;
-            while ti < trials.len() {
+            while ti < trials.len() && !self.skip_part.get() {
                 let trial = trials[ti].clone();
                 let mut attempt = 0u32;
                 // Practice plays the answer along, like a sing-along retry.
@@ -395,7 +449,15 @@ impl<'a> SessionRun<'a> {
                     };
                     last_correct = outcome.correct;
                     let row = self.store(
-                        block, bi, ti, attempt, assisted, &trial, &outcome, &extras, feedback,
+                        block,
+                        bi,
+                        ti + offset,
+                        attempt,
+                        assisted,
+                        &trial,
+                        &outcome,
+                        &extras,
+                        feedback,
                     )?;
                     if !assisted {
                         self.set(|st| {
@@ -433,6 +495,15 @@ impl<'a> SessionRun<'a> {
                     }
                 }
                 ti += 1;
+            }
+            // A skipped part goes straight on to the next.
+            if self.skip_part.get() {
+                self.set(|st| {
+                    if let Some(o) = st.outline.get_mut(bi) {
+                        o.status = "skipped".into();
+                    }
+                });
+                continue;
             }
             let report = session_report(self.db, &self.session_id)?;
             let block_report = report.blocks.get(bi).cloned();

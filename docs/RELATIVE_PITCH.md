@@ -94,6 +94,14 @@ selected lesson.
 The core and Scale degrees are ticked at first. There is no clearing glissando and
 there are no tests here; those are for absolute pitch.
 
+**Settings** (on every activity page) sets tempos, the cadence tempo, note names and the like for
+each exercise. They apply to every lesson and to today's set; an empty field keeps the lesson's own
+value, and custom levels keep theirs. The core's page lists every exercise it uses.
+
+**Skip part** in a session leaves the current part and goes on to the next. A today's set ended
+before it finished shows **Resume** on its page for the rest of the day, carrying on in the part and
+at the question where it stopped; **Start over** composes a new one.
+
 The Practice page no longer lists ear-training presets; it points here.
 
 ## The workshops

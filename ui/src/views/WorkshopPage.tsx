@@ -6,6 +6,7 @@ import type { DailyPlan } from "../bindings/DailyPlan";
 import type { LessonView } from "../bindings/LessonView";
 import type { WorkshopView } from "../bindings/WorkshopView";
 import { LevelForm } from "../components/LevelForm";
+import { ExerciseSettings } from "../components/ExerciseSettings";
 import { fmtDate } from "../music";
 
 const pct = (x: number | null | undefined) => (x == null ? "–" : `${Math.round(x * 100)}%`);
@@ -56,6 +57,7 @@ export function WorkshopPage({
   const [selected, setSelected] = useState<number | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CustomLevel | null>(null);
+  const [settings, setSettings] = useState(false);
 
   const refresh = useCallback(() => {
     api("workshopView", course)
@@ -178,7 +180,13 @@ export function WorkshopPage({
             Custom levels{custom.length > 0 ? ` (${custom.length})` : ""}
           </button>
         )}
+        <span className="grow" />
+        <button className={settings ? "on" : ""} onClick={() => setSettings((x) => !x)} title="Tempo and other settings for every lesson and today's set">
+          Settings
+        </button>
       </div>
+
+      {settings && <ExerciseSettings kinds={view.exercises} onClose={() => setSettings(false)} />}
 
       {editing ? (
         <div className="card level-editor">
