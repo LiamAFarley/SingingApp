@@ -1894,6 +1894,13 @@ fn gen_scale_degree(
     } else {
         let mut v = Vec::new();
         for d in &p.degrees {
+            // 8: the tonic above, asked on its own (a top-half level without the lower 1).
+            if d.trim() == "8" {
+                if !v.contains(&12) {
+                    v.push(12);
+                }
+                continue;
+            }
             match parse_degree(d) {
                 Some(s) if !v.contains(&s) => v.push(s),
                 Some(_) => {}
@@ -1934,9 +1941,10 @@ fn gen_scale_degree(
             return err("degrees needs at least two degrees");
         }
         // 8: the tonic an octave above the cadence's, so answers name the octave too.
-        if p.upper_tonic && degrees.contains(&0) {
+        if p.upper_tonic && degrees.contains(&0) && !degrees.contains(&12) {
             degrees.push(12);
         }
+        let upper_tonic = p.upper_tonic || degrees.contains(&12);
         let bag = match bags.iter().position(|(m, _)| *m == mode) {
             Some(k) => &mut bags[k].1,
             None => {
@@ -1964,7 +1972,7 @@ fn gen_scale_degree(
         // The answer a note stands for: its degree, with the tonic above the cadence's as 8.
         let id_of = |m: i32| -> &'static str {
             let rel = (m - r).rem_euclid(12);
-            if rel == 0 && p.upper_tonic && m > r {
+            if rel == 0 && upper_tonic && m > r {
                 "8"
             } else {
                 DEGREE_IDS[rel as usize]
@@ -2143,7 +2151,17 @@ fn gen_interval_comparison(
     }
     let range = p.root_range.unwrap_or(NoteRange::new(48, 72));
     let note = p.note_ms.max(200) as f64;
-    let same = p.differences.contains(&0);
+    let same = !p.pairs_from_pool && p.differences.contains(&0);
+    if p.pairs_from_pool
+        && p.intervals
+            .iter()
+            .map(|i| i.semitones())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            < 2
+    {
+        return err("pairs_from_pool needs at least two different intervals");
+    }
     let mut choices = vec![
         Choice::new("first", "First is larger"),
         Choice::new("second", "Second is larger"),
@@ -2157,12 +2175,22 @@ fn gen_interval_comparison(
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         let a = bag.draw(rng).unwrap().semitones();
-        let d = diffs.draw(rng).unwrap() as i32;
-        let options: Vec<i32> = [a + d, a - d]
-            .into_iter()
-            .filter(|b| (1..=24).contains(b))
-            .collect();
-        let b = *rng.choose(&options).unwrap_or(&a);
+        let b = if p.pairs_from_pool {
+            let others: Vec<i32> = p
+                .intervals
+                .iter()
+                .map(|i| i.semitones())
+                .filter(|s| *s != a)
+                .collect();
+            *rng.choose(&others).unwrap()
+        } else {
+            let d = diffs.draw(rng).unwrap() as i32;
+            let options: Vec<i32> = [a + d, a - d]
+                .into_iter()
+                .filter(|b| (1..=24).contains(b))
+                .collect();
+            *rng.choose(&options).unwrap_or(&a)
+        };
         let (first, second) = if rng.chance(0.5) { (a, b) } else { (b, a) };
         let dir = *rng.choose(&p.directions).unwrap();
         let timbre = pick_timbre(&p.timbres, rng)?;
@@ -2276,47 +2304,102 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
     } else {
         p.inversions.clone()
     };
+    let styles: Vec<ChordStyle> = if p.styles.is_empty() {
+        vec![p.style]
+    } else {
+        p.styles.clone()
+    };
+    // The inversions a quality is asked in: none to name for the augmented triad and the
+    // diminished seventh, whose inversions are the same notes.
+    let inversions_of = |q: ChordQuality| -> Vec<u8> {
+        if p.answer_inversion && q.symmetric() {
+            return vec![0];
+        }
+        inversions
+            .iter()
+            .copied()
+            .filter(|&i| (i as usize) < q.intervals().len())
+            .collect()
+    };
+    let answer_id = |q: ChordQuality, inv: u8| -> String {
+        if p.answer_inversion {
+            format!("{}/{}", q.id(), inv)
+        } else {
+            q.id().to_string()
+        }
+    };
     let range = p.root_range.unwrap_or(NoteRange::new(48, 67));
     let mut choices = Vec::new();
     for q in &p.qualities {
         if p.answer_inversion {
-            for &inv in &inversions {
-                if (inv as usize) < q.intervals().len() {
-                    choices.push(Choice::new(
-                        format!("{}/{}", q.id(), inv),
-                        format!("{}, {}", q.long_name(), inversion_label(inv)),
-                    ));
+            for inv in inversions_of(*q) {
+                let label = if q.symmetric() {
+                    q.long_name().to_string()
+                } else {
+                    format!("{}, {}", q.long_name(), inversion_label(inv))
+                };
+                if !choices.iter().any(|c: &Choice| c.id == answer_id(*q, inv)) {
+                    choices.push(Choice::new(answer_id(*q, inv), label));
                 }
             }
         } else if !choices.iter().any(|c: &Choice| c.id == q.id()) {
             choices.push(Choice::new(q.id(), q.long_name()));
         }
     }
-    let mut bag = BalancedBag::allowing_repeats(p.qualities.clone());
+    if p.answer_inversion && choices.len() < 2 {
+        return err("the chords and inversions leave only one answer");
+    }
+    // With inversions asked, every (chord, inversion) answer comes up about equally often.
+    let answers: Vec<(ChordQuality, u8)> = p
+        .qualities
+        .iter()
+        .flat_map(|q| {
+            let invs = if p.answer_inversion {
+                inversions_of(*q)
+            } else {
+                vec![u8::MAX]
+            };
+            invs.into_iter().map(move |i| (*q, i))
+        })
+        .collect();
+    let mut bag = BalancedBag::allowing_repeats(answers);
     let dur = p.duration_ms.max(300) as f64;
     let mut out = Vec::with_capacity(n);
     let mut last = None;
     for _ in 0..n {
-        let q: ChordQuality = bag.draw(rng).unwrap();
-        let valid: Vec<u8> = inversions
-            .iter()
-            .copied()
-            .filter(|&i| (i as usize) < q.intervals().len())
-            .collect();
-        let inv = *rng.choose(&valid).unwrap_or(&0);
+        let (q, asked): (ChordQuality, u8) = bag.draw(rng).unwrap();
+        let inv = if asked != u8::MAX && !q.symmetric() {
+            asked
+        } else {
+            let valid: Vec<u8> = inversions
+                .iter()
+                .copied()
+                .filter(|&i| (i as usize) < q.intervals().len())
+                .collect();
+            *rng.choose(&valid).unwrap_or(&0)
+        };
+        let style = *rng.choose(&styles).unwrap();
         let root = pick_note(range, &mut last, rng);
         let timbre = pick_timbre(&p.timbres, rng)?;
-        let events = chord_events(&q.voicing(root, inv as usize), p.style, dur, &timbre);
+        let events = chord_events(&q.voicing(root, inv as usize), style, dur, &timbre);
         // Every answer on the same root (in the inversion heard when inversions are not asked).
         let mut choice_sounds: Vec<ChoiceSound> = Vec::new();
         for cq in &p.qualities {
             let size = cq.intervals().len();
             if p.answer_inversion {
-                for &ci in inversions.iter().filter(|i| (**i as usize) < size) {
-                    choice_sounds.push(ChoiceSound {
-                        id: format!("{}/{}", cq.id(), ci),
-                        events: chord_events(&cq.voicing(root, ci as usize), p.style, dur, &timbre),
-                    });
+                for ci in inversions_of(*cq) {
+                    let id = answer_id(*cq, ci);
+                    if !choice_sounds.iter().any(|c| c.id == id) {
+                        choice_sounds.push(ChoiceSound {
+                            id,
+                            events: chord_events(
+                                &cq.voicing(root, ci as usize),
+                                style,
+                                dur,
+                                &timbre,
+                            ),
+                        });
+                    }
                 }
             } else if !choice_sounds.iter().any(|c| c.id == cq.id()) {
                 let ci = if (inv as usize) < size {
@@ -2326,15 +2409,11 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
                 };
                 choice_sounds.push(ChoiceSound {
                     id: cq.id().into(),
-                    events: chord_events(&cq.voicing(root, ci), p.style, dur, &timbre),
+                    events: chord_events(&cq.voicing(root, ci), style, dur, &timbre),
                 });
             }
         }
-        let correct = if p.answer_inversion {
-            format!("{}/{}", q.id(), inv)
-        } else {
-            q.id().to_string()
-        };
+        let correct = answer_id(q, if q.symmetric() { 0 } else { inv });
         out.push(TrialSpec::Identify(IdentifyTrial {
             answer_after_ms: None,
             after_answer: None,
@@ -2357,7 +2436,7 @@ fn gen_chord_id(p: &ChordIdParams, n: usize, rng: &mut Rng) -> Result<Vec<TrialS
                 "inversion": inv,
                 "root_midi": root,
                 "timbre": timbre,
-                "style": p.style,
+                "style": style,
             }),
             choice_sounds,
 
@@ -2379,6 +2458,11 @@ fn chord_events(notes: &[i32], style: ChordStyle, dur: f64, timbre: &str) -> Vec
         }
         ChordStyle::Arpeggio => {
             for (i, &m) in notes.iter().enumerate() {
+                events.push(ev(m, i as f64 * step, dur, timbre, -9.0));
+            }
+        }
+        ChordStyle::ArpeggioDown => {
+            for (i, &m) in notes.iter().rev().enumerate() {
                 events.push(ev(m, i as f64 * step, dur, timbre, -9.0));
             }
         }
@@ -2651,7 +2735,7 @@ fn gen_sing_interval(
     let mut last = None;
     for i in 0..n {
         let iv: Interval = bag.draw(rng).unwrap();
-        let dir = *rng.choose(&p.directions).unwrap();
+        let mut dir = *rng.choose(&p.directions).unwrap();
         let s = iv.semitones();
         if s > range.span() {
             return err(format!(
@@ -2661,7 +2745,7 @@ fn gen_sing_interval(
                 range.high
             ));
         }
-        let signed = if dir == SingDirection::Up { s } else { -s };
+        let mut signed = if dir == SingDirection::Up { s } else { -s };
         let mut key_cadence: Option<(PitchClass, KeyMode, bool)> = None;
         let first = if p.in_key {
             // In the singer's range: the tonic, or any scale note, with the sung note in the
@@ -2669,7 +2753,7 @@ fn gen_sing_interval(
             let (tonic, mode) = keys[i];
             let steps = mode_steps(mode);
             let rel = |m: i32| (m - tonic.index() as i32).rem_euclid(12);
-            let fits = |range: NoteRange| -> Vec<i32> {
+            let fits = |range: NoteRange, signed: i32| -> Vec<i32> {
                 (range.low.0..=range.high.0)
                     .filter(|m| range.contains(*m + signed))
                     .filter(|m| match p.start {
@@ -2680,10 +2764,23 @@ fn gen_sing_interval(
                     .collect()
             };
             // When no octave of this key fits (an octave from A in a C3–G4 range), stretch the
-            // range by up to a fourth each way rather than fail.
-            let mut cands = fits(range);
-            if cands.is_empty() {
-                cands = fits(NoteRange::new(range.low.0 - 5, range.high.0 + 5));
+            // range by up to a fourth each way rather than fail. An interval that leaves the key
+            // one way is sung the other way when that is allowed (a major second up from do, a
+            // minor seventh down: complementary intervals).
+            let mut order = vec![dir];
+            order.extend(p.directions.iter().copied().filter(|d| *d != dir));
+            let mut cands = Vec::new();
+            for d in order {
+                let sg = if d == SingDirection::Up { s } else { -s };
+                cands = fits(range, sg);
+                if cands.is_empty() {
+                    cands = fits(NoteRange::new(range.low.0 - 5, range.high.0 + 5), sg);
+                }
+                if !cands.is_empty() {
+                    dir = d;
+                    signed = sg;
+                    break;
+                }
             }
             let fresh: Vec<i32> = cands.iter().copied().filter(|m| Some(*m) != last).collect();
             let Some(&f) = rng.choose(if fresh.is_empty() { &cands } else { &fresh }) else {
@@ -3929,6 +4026,96 @@ mod tests {
                     && ctx.comfortable.contains(t.notes[1].midi)
             );
             assert_eq!(default_mode(&TrialSpec::Sung(t)), PitchRefMode::AnyOctave);
+        }
+    }
+
+    #[test]
+    fn chord_drills_mix_styles_and_skip_symmetric_inversions() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "chord_id", "count": 60, "params": {"qualities": ["major", "augmented", "diminished7"],
+                "answer_inversion": true, "inversions": [0, 1, 2, 3], "styles": ["arpeggio", "arpeggio_down", "block"]}}"#,
+        );
+        let mut styles = BTreeSet::new();
+        for t in generate_block(&b, 4, &ctx).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            // Major in three positions; the augmented triad and diminished seventh only once.
+            assert_eq!(t.choices.len(), 5, "{:?}", t.choices);
+            assert!(t.choices.iter().any(|c| c.id == t.correct));
+            if t.correct.starts_with("augmented") || t.correct.starts_with("diminished7") {
+                assert!(t.correct.ends_with("/0"));
+            }
+            styles.insert(t.stimulus["style"].as_str().unwrap().to_string());
+            // A descending arpeggio starts on its top note.
+            if t.stimulus["style"] == "arpeggio_down" {
+                let first = t
+                    .events
+                    .iter()
+                    .min_by(|a, b| a.start_ms.total_cmp(&b.start_ms))
+                    .unwrap();
+                assert_eq!(first.midi, t.events.iter().map(|e| e.midi).max().unwrap());
+            }
+        }
+        assert_eq!(styles.len(), 3);
+    }
+
+    #[test]
+    fn comparison_pairs_come_from_the_pool() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "interval_comparison", "count": 40, "params": {"intervals": ["P4", "P5", "P8"], "pairs_from_pool": true}}"#,
+        );
+        for t in generate_block(&b, 2, &ctx).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert!(!t.choices.iter().any(|c| c.id == "same"));
+            let (a, b) = (
+                t.stimulus["first"].as_str().unwrap(),
+                t.stimulus["second"].as_str().unwrap(),
+            );
+            assert_ne!(a, b);
+            assert!(["P4", "P5", "P8"].contains(&a) && ["P4", "P5", "P8"].contains(&b));
+        }
+    }
+
+    #[test]
+    fn the_top_half_of_the_scale_asks_eight_without_one() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "scale_degree_id", "count": 24, "params": {"degrees": ["5", "6", "7", "8"]}}"#,
+        );
+        let mut seen = BTreeSet::new();
+        for t in generate_block(&b, 5, &ctx).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            let ids: Vec<&str> = t.choices.iter().map(|c| c.id.as_str()).collect();
+            assert_eq!(ids, ["5", "6", "7", "8"]);
+            seen.insert(t.correct.clone());
+        }
+        assert_eq!(seen.len(), 4);
+        let low = block(
+            r#"{"type": "scale_degree_id", "count": 8, "params": {"degrees": ["1", "2", "3", "4"], "upper_tonic": false}}"#,
+        );
+        let TrialSpec::Identify(t) = &generate_block(&low, 5, &ctx).unwrap()[0] else {
+            panic!()
+        };
+        assert_eq!(t.choices.len(), 4);
+    }
+
+    #[test]
+    fn complementary_intervals_are_sung_the_way_that_stays_in_the_key() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "sing_interval", "count": 30, "params": {"in_key": true, "start": "tonic",
+                "intervals": ["M2", "m7"], "directions": ["up", "down"]}}"#,
+        );
+        for t in generate_block(&b, 6, &ctx).unwrap() {
+            let TrialSpec::Sung(t) = t else { panic!() };
+            let way = (
+                t.stimulus["interval"].as_str().unwrap(),
+                t.stimulus["direction"].as_str().unwrap(),
+            );
+            assert!(way == ("M2", "up") || way == ("m7", "down"), "{way:?}");
+            // Re, either way.
+            assert_eq!((t.notes[1].midi - t.notes[0].midi).rem_euclid(12), 2);
         }
     }
 

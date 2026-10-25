@@ -677,6 +677,10 @@ pub struct IntervalComparisonParams {
     /// makes the comparison easier; `none` is the hardest.
     #[serde(default = "d_shared_none")]
     pub shared: Vec<SharedNote>,
+    /// Draw both intervals from `intervals`, always two different ones, instead of the second
+    /// from `differences` (as EarMaster's comparison lessons do). There is then no Same answer.
+    #[serde(default)]
+    pub pairs_from_pool: bool,
 }
 
 fn d_shared_none() -> Vec<SharedNote> {
@@ -776,9 +780,13 @@ pub struct ScaleDegreeParams {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ChordStyle {
+    /// All notes together (harmonic).
     #[default]
     Block,
+    /// Ascending, one note after another.
     Arpeggio,
+    /// Descending, top note first.
+    ArpeggioDown,
     BlockThenArpeggio,
 }
 
@@ -805,6 +813,10 @@ pub struct ChordIdParams {
     pub timbres: Vec<TimbreId>,
     #[serde(default)]
     pub style: ChordStyle,
+    /// Styles to mix, one picked per question; overrides `style` when set. EarMaster's
+    /// "Harmonic, Ascending & Descending" is `["block", "arpeggio", "arpeggio_down"]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub styles: Vec<ChordStyle>,
     #[serde(default = "d_ms_1500")]
     pub duration_ms: u32,
 }

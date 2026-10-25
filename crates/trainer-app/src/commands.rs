@@ -556,6 +556,13 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                     set.spec,
                 )
             }
+            StartRequest::Custom { level } => {
+                let spec = trainer_core::workshops::custom_session(&level).map_err(anyhow_err)?;
+                (
+                    db.start_new_session(&spec, "custom").map_err(anyhow_err)?,
+                    spec,
+                )
+            }
             StartRequest::CourseLevel { course, level } => {
                 let c = courses::find_course(&course)
                     .ok_or_else(|| format!("unknown course {course}"))?;
@@ -742,6 +749,43 @@ pub fn save_daily_plan(state: State<'_, AppState>, plan: DailyPlan) -> Res<()> {
 #[tauri::command]
 pub fn set_course_level(state: State<'_, AppState>, course: String, level: u32) -> Res<()> {
     courses::set_level(&state.core.db.lock(), &course, level).map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn workshop_view(
+    state: State<'_, AppState>,
+    course: String,
+) -> Res<trainer_core::workshops::WorkshopView> {
+    let db = state.core.db.lock();
+    courses::refresh_progress(&db).map_err(anyhow_err)?;
+    trainer_core::workshops::workshop_view(&db, &course).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn custom_levels(
+    state: State<'_, AppState>,
+    course: String,
+) -> Res<Vec<trainer_core::workshops::CustomLevelView>> {
+    trainer_core::workshops::custom_levels(&state.core.db.lock(), &course).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_custom_level(
+    state: State<'_, AppState>,
+    level: trainer_core::workshops::CustomLevel,
+) -> Res<trainer_core::workshops::CustomLevel> {
+    let ctx = state.core.gen_context();
+    let saved = trainer_core::workshops::save_custom_level(&state.core.db.lock(), &ctx, &level)
+        .map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn delete_custom_level(state: State<'_, AppState>, id: String) -> Res<()> {
+    trainer_core::workshops::delete_custom_level(&state.core.db.lock(), &id).map_err(anyhow_err)?;
     state.core.emit("courses-changed", ());
     Ok(())
 }

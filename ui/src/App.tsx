@@ -105,10 +105,10 @@ export function App() {
         )}
         {view === "session" && runner && active && <SessionView runner={runner} onClose={() => setView("practice")} />}
         {view === "session" && !active && (
-          <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} />
+          <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} onOpenRp={() => setView("rp")} />
         )}
         {view === "practice" && !galleryMode && (
-          <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} />
+          <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} onOpenRp={() => setView("rp")} />
         )}
         {view === "ap" && <ApPage sessionActive={active} onOpenSession={() => setView("session")} />}
         {view === "rp" && <RpPage sessionActive={active} onOpenSession={() => setView("session")} />}

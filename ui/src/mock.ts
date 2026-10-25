@@ -17,6 +17,8 @@ import type { AppSettings } from "./bindings/AppSettings";
 import type { Anchor } from "./bindings/Anchor";
 import type { ApDashboard } from "./bindings/ApDashboard";
 import type { CourseStatus } from "./bindings/CourseStatus";
+import type { CustomLevel } from "./bindings/CustomLevel";
+import type { WorkshopView } from "./bindings/WorkshopView";
 import type { DailyPlan } from "./bindings/DailyPlan";
 import type { DailySet } from "./bindings/DailySet";
 import type { LibraryEntry } from "./bindings/LibraryEntry";
@@ -1067,8 +1069,8 @@ export function mockBackend(): Backend {
         ? {
             spec: {},
             items: [
-              { course: "rp_degrees", title: "Scale degrees: level 2 (1 to 5)", level: 2, minutes: 8, reason: "Level 2 of 8. 1 of 2 checks in a row at 90% or more (last: 94%).", test: false },
-              { course: "rp_intervals_key", title: "Intervals in a key: level 1 (P5 and P8 up)", level: 1, minutes: 8, reason: "Level 1 of 11. Needs 2 checks in a row at 90% or more.", test: false },
+              { course: "rp_degrees", title: "Scale degrees: Major scale – C major · one octave", level: 3, minutes: 8, reason: "Lesson 3 of 32. Best so far 82%; 90% passes it.", test: false },
+              { course: "rp_intervals_key", title: "Intervals in a key: Up from the tonic – Sol and the upper do", level: 1, minutes: 8, reason: "Lesson 1 of 26. Needs 1 check at 90% or more.", test: false },
             ],
             minutes: 16,
           }
@@ -1078,6 +1080,17 @@ export function mockBackend(): Backend {
     },
     setCourseLevel: async (course, level) => {
       courseLevels[course] = level;
+    },
+    workshopView: async (course) => mockWorkshop(course),
+    customLevels: async (course) =>
+      mockCustom.filter((c) => c.course === course).map((level, i) => ({ level, runs: 2 - i, best: 0.85, last: 0.8, last_at: daysAgo(2) })),
+    saveCustomLevel: async (level) => {
+      const saved = { ...level, id: level.id || `c${Date.now()}` };
+      mockCustom = [...mockCustom.filter((c) => c.id !== saved.id), saved];
+      return saved;
+    },
+    deleteCustomLevel: async (id) => {
+      mockCustom = mockCustom.filter((c) => c.id !== id);
     },
     apPrefs: async () => ({ errorless_early: true, contrast_labels: "gervain_names" }),
     saveApPrefs: async (prefs) => prefs,
@@ -1141,7 +1154,124 @@ let apPlan: DailyPlan = {
   ],
   test_day: 6,
 };
-const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1, rp_degrees: 2, rp_intervals_key: 1 };
+const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1, rp_degrees: 3, rp_intervals_key: 1, rp_intervals: 6 };
+
+type MockLesson = [title: string, params: Record<string, unknown>];
+const drills = (pool: string[]): MockLesson[] =>
+  [["Ascending", ["ascending"]], ["Descending", ["descending"]], ["Harmonic", ["harmonic"]], ["Ascending, descending and harmonic", ["ascending", "descending", "harmonic"]]].map(
+    ([t, d]) => [t as string, { intervals: pool, directions: d }],
+  );
+const fet = (mode: string, low: string[], high: string[]): MockLesson[] => {
+  const tonic = mode === "minor" ? "C minor" : "C major";
+  const other = mode === "minor" ? "Not C minor" : "Not C major";
+  const random = mode === "minor" ? "Random minor" : "Random major";
+  return [
+    [`${tonic} · bottom half`, { modes: [mode], keys: ["C"], degrees: low, octaves: [0], upper_tonic: false }],
+    [`${tonic} · top half`, { modes: [mode], keys: ["C"], degrees: high, octaves: [0] }],
+    [`${tonic} · one octave`, { modes: [mode], keys: ["C"], octaves: [0] }],
+    [`${tonic} · many octaves`, { modes: [mode], keys: ["C"], octaves: [-1, 0, 1] }],
+    [`${other} · one octave`, { modes: [mode], keys: ["D", "E", "F", "G", "A", "B"], octaves: [0] }],
+    [`${other} · many octaves`, { modes: [mode], keys: ["D", "E", "F", "G", "A", "B"], octaves: [-1, 0, 1] }],
+    [`${random} · one octave`, { modes: [mode], keys: "all", key_change: "per_trial", cadence: "every", octaves: [0] }],
+    [`${random} · many octaves`, { modes: [mode], keys: "all", key_change: "per_trial", cadence: "every", octaves: [-1, 0, 1] }],
+  ];
+};
+const CHROM_LOW = ["1", "b2", "2", "b3", "3", "4"];
+const CHROM_HIGH = ["#4", "5", "b6", "6", "b7", "7", "8"];
+const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; description: string; modules: [string, MockLesson[]][] }> = {
+  rp_degrees: {
+    title: "Scale degrees",
+    exercise: "scale_degree_id",
+    description: "A I–IV–V–I cadence sets the key, a note plays, you name its degree; the note then walks to the tonic. Each scale climbs from half an octave in C to every degree in a new key each question.",
+    modules: [
+      ["Major scale", fet("major", ["1", "2", "3", "4"], ["5", "6", "7", "8"])],
+      ["Chromatics in major", fet("major", CHROM_LOW, CHROM_HIGH)],
+      ["Minor scale", fet("minor", ["1", "2", "b3", "4"], ["5", "b6", "b7", "8"])],
+      ["Chromatics in minor", fet("minor", CHROM_LOW, CHROM_HIGH)],
+    ],
+  },
+  rp_compare: {
+    title: "Interval comparison",
+    exercise: "interval_comparison",
+    description: "Two different intervals from a pool: which is larger? Five pools, each first with the two starting on the same note, then sharing either note, then starting near each other, then unrelated.",
+    modules: [
+      ["Same first note: perfect intervals", [["4th and 5th", { intervals: ["P4", "P5"], pairs_from_pool: true, shared: ["first"] }], ["5th and octave", {}], ["4th, 5th and octave", {}], ["Test: all, up and down", {}]]],
+      ["Same first note: 3rds and 6ths", [["Minor 3rd and minor 6th", {}], ["All four", {}], ["Test: all, up and down", {}]]],
+    ],
+  },
+  rp_intervals: {
+    title: "Interval identification",
+    exercise: "interval_id",
+    description: "Intervals on random notes, no key. Each module is one set of intervals heard ascending, descending, harmonic, then all three mixed; pairs first, then larger sets, then practice modules.",
+    modules: [
+      ["Minor and major 2nds", drills(["m2", "M2"])],
+      ["Minor and major 3rds", drills(["m3", "M3"])],
+      ["2nds and 3rds", drills(["m2", "M2", "m3", "M3"])],
+      ["Perfect 4th and tritone", drills(["P4", "TT"])],
+      ["Tritone and perfect 5th", drills(["TT", "P5"])],
+      ["Practice: perfect intervals", drills(["P1", "P4", "P5", "P8"])],
+    ],
+  },
+  rp_intervals_key: {
+    title: "Intervals in a key",
+    exercise: "interval_id",
+    description: "Intervals heard against a cadence: up and down from do, then between any two notes of the key, then intervals that leave the scale.",
+    modules: [["Up from the tonic", [["Sol and the upper do", { in_key: true, start: "tonic", intervals: ["P5", "P8"], directions: ["ascending"] }], ["Mi and sol", {}], ["The whole scale up", {}]]]],
+  },
+  rp_sing: { title: "Interval singing", exercise: "sing_interval", description: "Hear the key and do, then sing the other note.", modules: [["Up from do", [["1 → 2 (major 2nd)", { in_key: true, start: "tonic", intervals: ["M2"], directions: ["up"] }]]]] },
+  rp_chords: {
+    title: "Chord identification",
+    exercise: "chord_id",
+    description: "Name the chord: triads in contrasting pairs, then all triads, then sevenths.",
+    modules: [["Major and minor", drills([]).map(([t]) => [t, { qualities: ["major", "minor"], styles: ["arpeggio"] }] as MockLesson)]],
+  },
+  rp_inversions: { title: "Chord inversions", exercise: "chord_id", description: "Name the chord and its inversion.", modules: [["Major", [["Ascending", { qualities: ["major"], answer_inversion: true, inversions: [0, 1, 2] }]]]] },
+  rp_scales: { title: "Scale identification", exercise: "scale_id", description: "Name the scale or mode.", modules: [["Modes", [["Starting with two whole tones", { scales: ["major", "lydian", "mixolydian"] }]]]] },
+  rp_sight: { title: "Melodic sight singing", exercise: "sight_sing", description: "Sing a melody from the staff after its key.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { melody: { generate: { keys: ["C"], degrees: [1, 2], notes: 3 } } }]]]] },
+  rp_dictation: { title: "Melodic dictation", exercise: "melodic_dictation", description: "Hear a melody and write it on the staff.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { melody: { generate: { keys: ["C"], degrees: [1, 2], notes: 3 } } }]]]] },
+};
+
+let mockCustom: CustomLevel[] = [
+  { id: "c1", course: "rp_degrees", title: "Low register in G", count: 20, params: { keys: ["G"], octaves: [-1], degrees: ["1", "2", "3", "4", "5"] } },
+];
+
+function mockWorkshop(course: string): WorkshopView {
+  const w = MOCK_WORKSHOPS[course];
+  const current = courseLevels[course] ?? 1;
+  let level = 0;
+  const modules = w.modules.map(([title, ls]) => {
+    const lessons = ls.map(([t, params]) => {
+      level += 1;
+      const done = level < current;
+      const best = done ? 0.9 + ((level * 7) % 10) / 100 : level === current ? 0.82 : null;
+      return {
+        level,
+        title: t,
+        summary: "",
+        test: t.startsWith("Test"),
+        questions: 20,
+        runs: best == null ? 0 : 1 + (level % 3),
+        best,
+        last: best,
+        last_at: best == null ? null : daysAgo(level % 4),
+        passed: done,
+        params,
+      };
+    });
+    return { title, lessons, passed: lessons.filter((l) => l.passed).length };
+  });
+  return {
+    id: course,
+    title: w.title,
+    description: w.description,
+    exercise: w.exercise,
+    current,
+    lessons: level,
+    passed: modules.reduce((a, m) => a + m.passed, 0),
+    pass_mark: 0.9,
+    modules,
+  };
+}
 const daysAgo = (d: number) => new Date(Date.now() - d * 86400_000).toISOString();
 
 function mockCourses(): CourseStatus[] {
@@ -1217,10 +1347,10 @@ function mockCourses(): CourseStatus[] {
     test("ap_transfer", "Transfer test", "Transfer", "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.", false, "Next from 3 Dec.", daysAgo(23)),
     test("ap_ucsf_style", "UCSF-style test", "UCSF-style test", "36 piano and 36 sine tones over five octaves, no feedback, scored as the UCSF test is: a point for an exact answer, three quarters for a semitone off. Not the UCSF test itself.", false, "Next on the Sunday test day from 15 Nov.", daysAgo(14)),
     test("ap_maintenance", "Maintenance", "Maintenance", "Five minutes of all twelve notes over four octaves and several timbres, twice a week, once note naming is complete.", false, "Starts once note naming is complete.", null),
-    ladder("rp_degrees", "Scale degrees", "Degrees", "A cadence sets the key, a note plays, you name it; it then walks to the tonic.", ["1 2 3", "1 to 5", "All seven", "All seven, new keys", "Minor", "Major and minor", "Chromatic", "Chromatic, new keys"], "Degrees 1 to 5 and the upper do, in one key.", "1 of 2 checks in a row at 90% or more (last: 94%)."),
-    ladder("rp_intervals_key", "Intervals in a key", "In a key", "Intervals heard against a key: first up from do, two at a time, then all of them, then down, then in changing keys and from any note of the scale.", ["P5 and P8 up", "M3 and P5 up", "P4 and P5 up", "M2 and M3 up", "M6 and M7 up", "All up", "All down", "Up and down, new keys", "From any note", "From any note, new keys", "Together"], "Up from do to sol or the upper do. One key for the session.", "Needs 2 checks in a row at 90% or more."),
-    ladder("rp_intervals_chromatic", "Chromatic intervals in a key", "Chromatic", "Intervals from the tonic that leave the major scale, each set against the diatonic one beside it.", ["m3 and M3", "m6 and M6", "m7 and M7", "m2 and M2", "TT, P4 and P5", "All twelve up", "All twelve down", "All twelve, new keys"], "Up from do to me or mi. One key for the session.", "Needs 2 checks in a row at 90% or more."),
-    ladder("rp_sing", "Singing intervals", "Sing", "Hear the key and the first note, then sing the second.", ["Do to sol and do", "Do to mi and sol", "Do up the scale", "Do down the scale", "From any note", "Without a key"], "From do, sing sol or the upper do.", "Needs 2 checks in a row at 90% or more."),
+    ...Object.entries(MOCK_WORKSHOPS).map(([id, w]) => {
+      const titles = w.modules.flatMap(([, ls]) => ls.map((l) => l[0]));
+      return ladder(id, w.title, w.title, w.description, titles, "", "Needs 1 check at 90% or more.");
+    }),
   ];
 }
 

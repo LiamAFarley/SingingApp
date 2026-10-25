@@ -71,6 +71,14 @@ pub struct MelodyParams {
     pub range: Option<NoteRange>,
     #[serde(default)]
     pub clef: ClefChoice,
+    /// The notes the melody may use, as degrees from the tonic up, 1–8 (8 is the tonic above).
+    /// Empty: every degree inside the range. `[1, 2]` gives melodies of do and re only.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub degrees: Vec<u8>,
+    /// A fixed number of notes, a quarter note each with the last held to the end of its bar;
+    /// `bars` and `rhythms` are then ignored. For pitch-only early lessons (x/4 meters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<u32>,
 }
 
 impl Default for MelodyParams {
@@ -345,21 +353,81 @@ pub fn generate_melody(
     if range.high.0 - range.low.0 < 7 {
         return Err("the range must span at least a fifth".into());
     }
+    if p.degrees.iter().any(|d| !(1..=8).contains(d)) {
+        return Err("degrees must be 1–8".into());
+    }
     let octave = tonic_octave(&key, range);
-    let allowed: Vec<i32> = (-14..=21)
-        .filter(|d| {
-            let m = key.degree(*d, octave).midi();
-            m >= range.low.0 && m <= range.high.0
-        })
-        .collect();
-    if allowed.len() < 5 {
+    let in_range = |d: &i32| {
+        let m = key.degree(*d, octave).midi();
+        m >= range.low.0 && m <= range.high.0
+    };
+    let allowed: Vec<i32> = if p.degrees.is_empty() {
+        (-14..=21).filter(in_range).collect()
+    } else {
+        // Degrees from the tonic up when they fit the range; otherwise the same degrees placed
+        // around the tonic (sol la ti below do), and only then a range stretched by a fourth.
+        let classes: Vec<i32> = p.degrees.iter().map(|d| (*d as i32 - 1) % 7).collect();
+        let span = if p.degrees.contains(&8) { 7 } else { 6 };
+        let placed = |lo: i32| -> Vec<i32> {
+            (lo..=lo + span)
+                .filter(|d| classes.contains(&d.rem_euclid(7)))
+                .collect()
+        };
+        let fits = |set: &[i32], slack: i32| {
+            set.iter().all(|d| {
+                let m = key.degree(*d, octave).midi();
+                m >= range.low.0 - slack && m <= range.high.0 + slack
+            })
+        };
+        let mut choices: Vec<Vec<i32>> = vec![placed(0)];
+        for lo in [-7, 7, -1, -2, -3, -4, -5, -6, 1, 2, 3, 4, 5, 6] {
+            let set = placed(lo);
+            // Every tonic of the set must stay in it, so melodies can end on do.
+            if set.iter().any(|d| d.rem_euclid(7) == 0) {
+                choices.push(set);
+            }
+        }
+        [0, 5]
+            .into_iter()
+            .find_map(|slack| choices.iter().find(|c| fits(c, slack)).cloned())
+            .ok_or_else(|| {
+                format!(
+                    "the range {}–{} does not hold those degrees in {key}",
+                    range.low, range.high
+                )
+            })?
+    };
+    if allowed.len() < if p.degrees.is_empty() { 5 } else { 2 } {
         return Err(format!(
             "the range {}–{} leaves too few notes in {key}",
             range.low, range.high
         ));
     }
 
-    let bars = rhythm(p.bars, meter, &p.rhythms, rng);
+    let (bars_n, bars) = match p.notes {
+        Some(k) => {
+            if !(1..=16).contains(&k) {
+                return Err("notes must be 1–16".into());
+            }
+            if meter.unit != 4 {
+                return Err("notes needs an x/4 meter".into());
+            }
+            let per_bar = meter.beats;
+            let q = TICKS_PER_QUARTER;
+            let n_bars = k.div_ceil(per_bar);
+            let mut out = Vec::new();
+            let mut left = k;
+            for _ in 0..n_bars {
+                let here = left.min(per_bar);
+                let mut bar = vec![q; here as usize];
+                *bar.last_mut().unwrap() += (per_bar - here) * q;
+                out.push(bar);
+                left -= here;
+            }
+            (n_bars, out)
+        }
+        None => (p.bars, rhythm(p.bars, meter, &p.rhythms, rng)),
+    };
     let durations: Vec<u32> = bars.iter().flatten().copied().collect();
     let n = durations.len();
 
@@ -402,7 +470,7 @@ pub fn generate_melody(
         time: meter,
         clef: crate::score::Clef::Treble,
         tempo_bpm,
-        bars: p.bars,
+        bars: bars_n,
         notes,
         title: None,
     };
@@ -463,7 +531,7 @@ fn walk(
     let lo = *allowed.first().unwrap();
     let hi = *allowed.last().unwrap();
     let mid = (lo + hi) / 2;
-    let inside = |d: i32| d >= lo && d <= hi;
+    let inside = |d: i32| allowed.contains(&d);
     let max_leap = p.max_leap as i32;
     let tritone = |a: i32, b: i32| (midi_of(a) - midi_of(b)).abs() == 6;
     let leap_ok =
@@ -489,6 +557,27 @@ fn walk(
     if n == 1 && p.end_on_tonic {
         let t = *tonics.iter().min_by_key(|t| (*t - mid).abs()).unwrap();
         return Ok(vec![t]);
+    }
+    if n == 2 && p.end_on_tonic {
+        // Two notes: a start other than the tonic it moves to (a start degree when one fits).
+        let t = *tonics.iter().min_by_key(|t| (*t - mid).abs()).unwrap();
+        let fits: Vec<i32> = allowed
+            .iter()
+            .copied()
+            .filter(|d| *d != t && leap_ok(*d, t))
+            .collect();
+        let preferred: Vec<i32> = fits
+            .iter()
+            .copied()
+            .filter(|d| starts.contains(d))
+            .collect();
+        if let Some(&first) = rng.choose(if preferred.is_empty() {
+            &fits
+        } else {
+            &preferred
+        }) {
+            return Ok(vec![first, t]);
+        }
     }
 
     // Notes before the ending: all of them, or all but the approach and the final tonic.
@@ -727,6 +816,53 @@ mod tests {
             assert_eq!(s.bar_ticks(), 12);
             let end = s.notes.last().map(|n| n.start + n.dur).unwrap();
             assert_eq!(end, s.total_ticks());
+        }
+    }
+
+    #[test]
+    fn degree_sets_and_note_counts_shape_early_melodies() {
+        for seed in 0..30 {
+            let p = MelodyParams {
+                keys: vec!["C".into()],
+                degrees: vec![1, 2],
+                notes: Some(3),
+                ..MelodyParams::default()
+            };
+            let s = make(&p, seed);
+            let pitches: Vec<i32> = s
+                .notes
+                .iter()
+                .filter_map(|n| n.pitch.map(|p| p.midi() % 12))
+                .collect();
+            assert_eq!(pitches.len(), 3);
+            assert!(pitches.iter().all(|m| *m == 0 || *m == 2), "{pitches:?}");
+            assert_eq!(*pitches.last().unwrap(), 0);
+            // Two notes still move from re to do.
+            let two = make(
+                &MelodyParams {
+                    notes: Some(2),
+                    ..p.clone()
+                },
+                seed,
+            );
+            let ps: Vec<i32> = two
+                .notes
+                .iter()
+                .filter_map(|n| n.pitch.map(|p| p.midi() % 12))
+                .collect();
+            assert_eq!(ps, [2, 0]);
+        }
+        // All seven degrees in a key whose octave from the tonic does not fit: placed around it.
+        let p = MelodyParams {
+            keys: vec!["Bb".into()],
+            degrees: (1..=7).collect(),
+            bars: 2,
+            ..MelodyParams::default()
+        };
+        for seed in 0..10 {
+            let s = make(&p, seed);
+            let (lo, hi) = s.range().unwrap();
+            assert!(lo >= 48 && hi <= 67, "{lo}–{hi}");
         }
     }
 

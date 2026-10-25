@@ -453,6 +453,22 @@ pub enum ChordQuality {
     MinorMajor7,
     Major6,
     Minor6,
+    #[serde(rename = "major_b5")]
+    MajorFlat5,
+    #[serde(rename = "dominant7_b5")]
+    Dominant7Flat5,
+    #[serde(rename = "dominant7_s5")]
+    Dominant7Sharp5,
+    Dominant7Sus4,
+    Dominant7Sus2,
+    #[serde(rename = "minor_major7_b5")]
+    MinorMajor7Flat5,
+    #[serde(rename = "major7_b5")]
+    Major7Flat5,
+    #[serde(rename = "major7_s5")]
+    Major7Sharp5,
+    Major7Sus4,
+    Major7Sus2,
 }
 
 impl ChordQuality {
@@ -463,7 +479,7 @@ impl ChordQuality {
         ChordQuality::Augmented,
     ];
 
-    pub const ALL: [ChordQuality; 14] = [
+    pub const ALL: [ChordQuality; 24] = [
         ChordQuality::Major,
         ChordQuality::Minor,
         ChordQuality::Diminished,
@@ -478,7 +494,22 @@ impl ChordQuality {
         ChordQuality::MinorMajor7,
         ChordQuality::Major6,
         ChordQuality::Minor6,
+        ChordQuality::MajorFlat5,
+        ChordQuality::Dominant7Flat5,
+        ChordQuality::Dominant7Sharp5,
+        ChordQuality::Dominant7Sus4,
+        ChordQuality::Dominant7Sus2,
+        ChordQuality::MinorMajor7Flat5,
+        ChordQuality::Major7Flat5,
+        ChordQuality::Major7Sharp5,
+        ChordQuality::Major7Sus4,
+        ChordQuality::Major7Sus2,
     ];
+
+    /// Every inversion of these is the same set of notes, so they have no inversions to name.
+    pub fn symmetric(self) -> bool {
+        matches!(self, ChordQuality::Augmented | ChordQuality::Diminished7)
+    }
 
     /// Semitones above the root, in root position.
     pub fn intervals(self) -> &'static [i32] {
@@ -497,6 +528,16 @@ impl ChordQuality {
             ChordQuality::MinorMajor7 => &[0, 3, 7, 11],
             ChordQuality::Major6 => &[0, 4, 7, 9],
             ChordQuality::Minor6 => &[0, 3, 7, 9],
+            ChordQuality::MajorFlat5 => &[0, 4, 6],
+            ChordQuality::Dominant7Flat5 => &[0, 4, 6, 10],
+            ChordQuality::Dominant7Sharp5 => &[0, 4, 8, 10],
+            ChordQuality::Dominant7Sus4 => &[0, 5, 7, 10],
+            ChordQuality::Dominant7Sus2 => &[0, 2, 7, 10],
+            ChordQuality::MinorMajor7Flat5 => &[0, 3, 6, 11],
+            ChordQuality::Major7Flat5 => &[0, 4, 6, 11],
+            ChordQuality::Major7Sharp5 => &[0, 4, 8, 11],
+            ChordQuality::Major7Sus4 => &[0, 5, 7, 11],
+            ChordQuality::Major7Sus2 => &[0, 2, 7, 11],
         }
     }
 
@@ -516,6 +557,16 @@ impl ChordQuality {
             ChordQuality::MinorMajor7 => "minor_major7",
             ChordQuality::Major6 => "major6",
             ChordQuality::Minor6 => "minor6",
+            ChordQuality::MajorFlat5 => "major_b5",
+            ChordQuality::Dominant7Flat5 => "dominant7_b5",
+            ChordQuality::Dominant7Sharp5 => "dominant7_s5",
+            ChordQuality::Dominant7Sus4 => "dominant7_sus4",
+            ChordQuality::Dominant7Sus2 => "dominant7_sus2",
+            ChordQuality::MinorMajor7Flat5 => "minor_major7_b5",
+            ChordQuality::Major7Flat5 => "major7_b5",
+            ChordQuality::Major7Sharp5 => "major7_s5",
+            ChordQuality::Major7Sus4 => "major7_sus4",
+            ChordQuality::Major7Sus2 => "major7_sus2",
         }
     }
 
@@ -535,6 +586,16 @@ impl ChordQuality {
             ChordQuality::MinorMajor7 => "Minor-major 7th",
             ChordQuality::Major6 => "Major 6th",
             ChordQuality::Minor6 => "Minor 6th",
+            ChordQuality::MajorFlat5 => "Major ♭5",
+            ChordQuality::Dominant7Flat5 => "7th ♭5",
+            ChordQuality::Dominant7Sharp5 => "7th ♯5",
+            ChordQuality::Dominant7Sus4 => "7th sus4",
+            ChordQuality::Dominant7Sus2 => "7th sus2",
+            ChordQuality::MinorMajor7Flat5 => "Minor-major 7th ♭5",
+            ChordQuality::Major7Flat5 => "Major 7th ♭5",
+            ChordQuality::Major7Sharp5 => "Major 7th ♯5",
+            ChordQuality::Major7Sus4 => "Major 7th sus4",
+            ChordQuality::Major7Sus2 => "Major 7th sus2",
         }
     }
 
@@ -570,10 +631,31 @@ pub enum ScaleKind {
     Blues,
     WholeTone,
     Chromatic,
+    #[serde(rename = "locrian_s6")]
+    LocrianNat6,
+    #[serde(rename = "ionian_s5")]
+    IonianSharp5,
+    #[serde(rename = "dorian_s4")]
+    DorianSharp4,
+    PhrygianDominant,
+    #[serde(rename = "lydian_s2")]
+    LydianSharp2,
+    UltraLocrian,
+    #[serde(rename = "dorian_b2")]
+    DorianFlat2,
+    LydianAugmented,
+    LydianDominant,
+    #[serde(rename = "mixolydian_b6")]
+    MixolydianFlat6,
+    #[serde(rename = "locrian_s2")]
+    LocrianNat2,
+    Altered,
+    DiminishedWholeHalf,
+    DiminishedHalfWhole,
 }
 
 impl ScaleKind {
-    pub const ALL: [ScaleKind; 14] = [
+    pub const ALL: [ScaleKind; 28] = [
         ScaleKind::Major,
         ScaleKind::NaturalMinor,
         ScaleKind::HarmonicMinor,
@@ -588,6 +670,20 @@ impl ScaleKind {
         ScaleKind::Blues,
         ScaleKind::WholeTone,
         ScaleKind::Chromatic,
+        ScaleKind::LocrianNat6,
+        ScaleKind::IonianSharp5,
+        ScaleKind::DorianSharp4,
+        ScaleKind::PhrygianDominant,
+        ScaleKind::LydianSharp2,
+        ScaleKind::UltraLocrian,
+        ScaleKind::DorianFlat2,
+        ScaleKind::LydianAugmented,
+        ScaleKind::LydianDominant,
+        ScaleKind::MixolydianFlat6,
+        ScaleKind::LocrianNat2,
+        ScaleKind::Altered,
+        ScaleKind::DiminishedWholeHalf,
+        ScaleKind::DiminishedHalfWhole,
     ];
 
     /// Ascending semitone offsets within one octave, starting at 0.
@@ -607,6 +703,20 @@ impl ScaleKind {
             ScaleKind::Blues => &[0, 3, 5, 6, 7, 10],
             ScaleKind::WholeTone => &[0, 2, 4, 6, 8, 10],
             ScaleKind::Chromatic => &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            ScaleKind::LocrianNat6 => &[0, 1, 3, 5, 6, 9, 10],
+            ScaleKind::IonianSharp5 => &[0, 2, 4, 5, 8, 9, 11],
+            ScaleKind::DorianSharp4 => &[0, 2, 3, 6, 7, 9, 10],
+            ScaleKind::PhrygianDominant => &[0, 1, 4, 5, 7, 8, 10],
+            ScaleKind::LydianSharp2 => &[0, 3, 4, 6, 7, 9, 11],
+            ScaleKind::UltraLocrian => &[0, 1, 3, 4, 6, 8, 9],
+            ScaleKind::DorianFlat2 => &[0, 1, 3, 5, 7, 9, 10],
+            ScaleKind::LydianAugmented => &[0, 2, 4, 6, 8, 9, 11],
+            ScaleKind::LydianDominant => &[0, 2, 4, 6, 7, 9, 10],
+            ScaleKind::MixolydianFlat6 => &[0, 2, 4, 5, 7, 8, 10],
+            ScaleKind::LocrianNat2 => &[0, 2, 3, 5, 6, 8, 10],
+            ScaleKind::Altered => &[0, 1, 3, 4, 6, 8, 10],
+            ScaleKind::DiminishedWholeHalf => &[0, 2, 3, 5, 6, 8, 9, 11],
+            ScaleKind::DiminishedHalfWhole => &[0, 1, 3, 4, 6, 7, 9, 10],
         }
     }
 
@@ -626,6 +736,20 @@ impl ScaleKind {
             ScaleKind::Blues => "blues",
             ScaleKind::WholeTone => "whole_tone",
             ScaleKind::Chromatic => "chromatic",
+            ScaleKind::LocrianNat6 => "locrian_s6",
+            ScaleKind::IonianSharp5 => "ionian_s5",
+            ScaleKind::DorianSharp4 => "dorian_s4",
+            ScaleKind::PhrygianDominant => "phrygian_dominant",
+            ScaleKind::LydianSharp2 => "lydian_s2",
+            ScaleKind::UltraLocrian => "ultra_locrian",
+            ScaleKind::DorianFlat2 => "dorian_b2",
+            ScaleKind::LydianAugmented => "lydian_augmented",
+            ScaleKind::LydianDominant => "lydian_dominant",
+            ScaleKind::MixolydianFlat6 => "mixolydian_b6",
+            ScaleKind::LocrianNat2 => "locrian_s2",
+            ScaleKind::Altered => "altered",
+            ScaleKind::DiminishedWholeHalf => "diminished_whole_half",
+            ScaleKind::DiminishedHalfWhole => "diminished_half_whole",
         }
     }
 
@@ -645,6 +769,20 @@ impl ScaleKind {
             ScaleKind::Blues => "Blues",
             ScaleKind::WholeTone => "Whole tone",
             ScaleKind::Chromatic => "Chromatic",
+            ScaleKind::LocrianNat6 => "Locrian ♯6",
+            ScaleKind::IonianSharp5 => "Ionian ♯5",
+            ScaleKind::DorianSharp4 => "Dorian ♯4",
+            ScaleKind::PhrygianDominant => "Mixolydian ♭9 ♭13 (Phrygian dominant)",
+            ScaleKind::LydianSharp2 => "Lydian ♯2",
+            ScaleKind::UltraLocrian => "Altered ♭♭7",
+            ScaleKind::DorianFlat2 => "Phrygian ♯6 (Dorian ♭2)",
+            ScaleKind::LydianAugmented => "Lydian ♯5",
+            ScaleKind::LydianDominant => "Lydian ♭7",
+            ScaleKind::MixolydianFlat6 => "Mixolydian ♭13",
+            ScaleKind::LocrianNat2 => "Locrian ♯2",
+            ScaleKind::Altered => "Altered",
+            ScaleKind::DiminishedWholeHalf => "Diminished (whole–half)",
+            ScaleKind::DiminishedHalfWhole => "Diminished (half–whole)",
         }
     }
 

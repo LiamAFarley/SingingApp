@@ -410,13 +410,13 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::ChordId,
-            "A chord (block or arpeggio); name the quality, optionally the inversion.",
+            "A chord; name the quality, optionally the inversion (answer_inversion with inversions; the augmented triad and diminished seventh have none to name). style, or styles mixed per question: block (harmonic), arpeggio (ascending), arpeggio_down (descending). 24 qualities, among them major_b5, dominant7_b5, dominant7_s5, dominant7_sus4, dominant7_sus2, minor_major7_b5, major7_b5, major7_s5, major7_sus4, major7_sus2.",
             schema_of::<ChordIdParams>(),
             json!({"type": "chord_id", "count": 20, "params": {"qualities": ["major", "minor", "diminished", "augmented"]}}),
         ),
         entry(
             ExerciseKind::ScaleId,
-            "A scale or mode; name it.",
+            "A scale or mode; name it. 28 scales: the church modes, harmonic and melodic minor and their modes (dorian_b2, lydian_augmented, lydian_dominant, mixolydian_b6, locrian_s2, altered; locrian_s6, ionian_s5, dorian_s4, phrygian_dominant, lydian_s2, ultra_locrian), whole tone, both diminished scales, pentatonics, blues, chromatic.",
             schema_of::<ScaleIdParams>(),
             json!({"type": "scale_id", "count": 20, "params": {"scales": ["major", "dorian", "mixolydian"]}}),
         ),
@@ -446,7 +446,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::SightSing,
-            "Sight singing from staff notation (no piano roll, so durations are read, not seen). The score is shown, the key is established (cadence and/or first note, per `start`), one bar is counted in and the melody is sung with the click; graded note by note for pitch and timing, in any octave (a line sung an octave down is graded on its notes; grading.mode absolute requires the written octave). melody: {\"generate\": {keys, modes, meters, bars, rhythms, max_leap, step_rate, rest_rate, start_degrees, range, clef}} or {\"given\": [melodies you write]} where a melody is {key: \"Eb major\", time: \"4/4\", notes: [{note: \"Eb4\", beats: 1}, {rest: 0.5}, ...]} (spelling is kept). start: key_and_first_note (default), key_only, first_note, none (graded relative to the first sung note unless grading.mode is set). After each attempt the user can listen, sing along with the melody or retry.",
+            "Sight singing from staff notation (no piano roll, so durations are read, not seen). The score is shown, the key is established (cadence and/or first note, per `start`), one bar is counted in and the melody is sung with the click; graded note by note for pitch and timing, in any octave (a line sung an octave down is graded on its notes; grading.mode absolute requires the written octave). melody: {\"generate\": {keys, modes, meters, bars, rhythms, max_leap, step_rate, rest_rate, start_degrees, range, clef, degrees (the notes used, 1–8 from the tonic), notes (a fixed count of quarter notes, no rhythm)}} or {\"given\": [melodies you write]} where a melody is {key: \"Eb major\", time: \"4/4\", notes: [{note: \"Eb4\", beats: 1}, {rest: 0.5}, ...]} (spelling is kept). start: key_and_first_note (default), key_only, first_note, none (graded relative to the first sung note unless grading.mode is set). After each attempt the user can listen, sing along with the melody or retry.",
             schema_of::<SightSingParams>(),
             json!({"type": "sight_sing", "count": 6, "feedback": "after_trial", "params": {"melody": {"generate": {"keys": ["C", "G", "F"], "bars": 4, "rhythms": ["half", "quarter"], "max_leap": 2}}, "tempo_bpm": 72}}),
         ),
@@ -476,7 +476,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::IntervalComparison,
-            "Two intervals play one after the other (melodic or harmonic); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder). `shared` picks per question which note they share: first (same starting note, easiest), second (same last note), near (starts a semitone to a minor third apart) or none (hardest).",
+            "Two intervals play one after the other (melodic or harmonic); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder). `shared` picks per question which note they share: first (same starting note, easiest), second (same last note), near (starts a semitone to a minor third apart) or none (hardest). pairs_from_pool: both intervals come from `intervals`, always two different ones, and there is no Same answer.",
             schema_of::<IntervalComparisonParams>(),
             json!({"type": "interval_comparison", "count": 24, "params": {"differences": [0, 1, 2], "directions": ["ascending"]}}),
         ),

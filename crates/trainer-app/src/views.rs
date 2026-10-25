@@ -404,6 +404,10 @@ pub enum StartRequest {
         course: String,
         level: u32,
     },
+    /// A custom level of a workshop, saved (its id set) or a one-off try.
+    Custom {
+        level: trainer_core::workshops::CustomLevel,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -565,6 +569,8 @@ mod export_more {
         trainer_core::courses::ApPrefs::export_all(&cfg).unwrap();
         trainer_core::labels::LabelSet::export_all(&cfg).unwrap();
         trainer_core::speech::SpeechReport::export_all(&cfg).unwrap();
+        trainer_core::workshops::WorkshopView::export_all(&cfg).unwrap();
+        trainer_core::workshops::CustomLevelView::export_all(&cfg).unwrap();
         crate::views::RunnerState::export_all(&cfg).unwrap();
     }
 }

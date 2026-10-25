@@ -63,6 +63,11 @@ pub enum Schedule {
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct Level {
+    /// The module a lesson belongs to, in a workshop course (EarMaster's course → workshop →
+    /// module → lesson); lessons of one module share their material and change the drill.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub module: Option<String>,
     pub title: String,
     pub summary: String,
     pub pass: PassRule,
@@ -151,6 +156,7 @@ fn naming_course() -> Course {
             let train = params.clone();
             let check = params;
             Level {
+                module: None,
                 title: if all { "All twelve notes".into() } else { format!("{} notes", classes.len()) },
                 summary: format!(
                     "{names}{}, over four octaves, answered within {:.1} s.",
@@ -211,6 +217,7 @@ fn brady_course() -> Course {
                 params["class_weights"] = json!({ "C": c });
             }
             Level {
+                module: None,
                 title: if uniform { "Even, 1.4 s apart".into() } else { format!("C {:.0}%, {:.1} s apart", c * 100.0, ioi as f32 / 1000.0) },
                 summary: format!(
                     "All twelve notes over four octaves, a tone every {:.1} s{}. Keep C in your mind's ear and judge each note against it.",
@@ -259,6 +266,7 @@ fn benchmark_course() -> Course {
         description: "The repeatable measure of where you are: twelve notes sung from memory before hearing anything, then sixty piano notes over four octaves with no feedback and 5 s to answer. Every two weeks, first thing, before any named note that day.".into(),
         schedule: Schedule::Recurring { days: 14.0, on_test_day: false, after: None },
         levels: vec![Level {
+            module: None,
             title: "Sing, then name".into(),
             summary: "12 notes sung from memory, then 60 piano notes over four octaves, no feedback.".into(),
             pass: PassRule::None,
@@ -306,6 +314,7 @@ fn transfer_course() -> Course {
         description: "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.".into(),
         schedule: Schedule::Recurring { days: 28.0, on_test_day: false, after: None },
         levels: vec![Level {
+            module: None,
             title: "New instruments and Shepard tones".into(),
             summary: "60 notes on untrained instruments, then 24 Shepard tones, no feedback.".into(),
             pass: PassRule::None,
@@ -341,6 +350,7 @@ fn weekly_course() -> Course {
         description: "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback and 5 s per note, after the pitch-memory clearing sound.".into(),
         schedule: Schedule::Recurring { days: 7.0, on_test_day: true, after: None },
         levels: vec![Level {
+            module: None,
             title: "Five timbres".into(),
             summary: "120 notes, five timbres, three octaves, no feedback.".into(),
             pass: PassRule::None,
@@ -375,6 +385,7 @@ fn ucsf_course() -> Course {
         description: "36 piano and 36 sine tones over five octaves, no feedback, scored as the UCSF test is: a point for an exact answer, three quarters for a semitone off. Not the UCSF test itself.".into(),
         schedule: Schedule::Recurring { days: 28.0, on_test_day: true, after: None },
         levels: vec![Level {
+            module: None,
             title: "Piano and sine".into(),
             summary: "36 piano and 36 sine tones, five octaves, no feedback.".into(),
             pass: PassRule::None,
@@ -395,6 +406,7 @@ fn maintenance_course() -> Course {
         description: "Five minutes of all twelve notes over four octaves and several timbres, twice a week, once note naming is complete.".into(),
         schedule: Schedule::Recurring { days: 3.5, on_test_day: false, after: Some(AP_NAMING.into()) },
         levels: vec![Level {
+            module: None,
             title: "All twelve notes".into(),
             summary: "All twelve notes, four octaves, 2 s to answer.".into(),
             pass: PassRule::None,
@@ -407,7 +419,13 @@ fn maintenance_course() -> Course {
     }
 }
 
+/// Every built-in course, built once (the workshops have about a thousand lessons).
 pub fn builtin_courses() -> Vec<Course> {
+    static COURSES: std::sync::OnceLock<Vec<Course>> = std::sync::OnceLock::new();
+    COURSES.get_or_init(build_courses).clone()
+}
+
+fn build_courses() -> Vec<Course> {
     let mut courses = vec![naming_course(), brady_course()];
     courses.extend(crate::ap_courses::courses());
     courses.extend(crate::rp_courses::courses());
@@ -423,7 +441,12 @@ pub fn builtin_courses() -> Vec<Course> {
 }
 
 pub fn find_course(id: &str) -> Option<Course> {
-    builtin_courses().into_iter().find(|c| c.id == id)
+    static COURSES: std::sync::OnceLock<Vec<Course>> = std::sync::OnceLock::new();
+    COURSES
+        .get_or_init(build_courses)
+        .iter()
+        .find(|c| c.id == id)
+        .cloned()
 }
 
 /// The session for one level of a course, as started from the course page.
@@ -436,7 +459,9 @@ pub fn level_session(course: &Course, level: u32) -> Result<SessionSpec> {
                 .ok_or_else(|| anyhow!("levels start at 1"))? as usize,
         )
         .ok_or_else(|| anyhow!("{} has {} levels", course.id, course.levels.len()))?;
-    let title = if course.levels.len() > 1 {
+    let title = if let Some(m) = &l.module {
+        format!("{}: {m} – {}", course.title, l.title)
+    } else if course.levels.len() > 1 {
         format!("{}: level {level} ({})", course.title, l.title)
     } else {
         course.title.clone()
@@ -868,7 +893,7 @@ fn suggested_minutes(id: &str) -> f32 {
         AP_NOTE_COLORS => 8.0,
         AP_CONTRAST => 6.0,
         crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY => 8.0,
-        crate::rp_courses::RP_SING => 6.0,
+        crate::rp_courses::RP_SING | crate::rp_courses::RP_SIGHT => 6.0,
         id if id.starts_with("rp_") => 6.0,
         _ => 10.0,
     }
@@ -944,6 +969,8 @@ const PLAN_KEY: &str = "ap_daily_plan";
 
 pub fn daily_plan(db: &Db) -> Result<DailyPlan> {
     let mut plan: DailyPlan = db.get_setting(PLAN_KEY)?.unwrap_or_default();
+    // Courses that no longer exist (renamed or merged) drop out.
+    plan.courses.retain(|p| find_course(&p.course).is_some());
     // Ladder courses added since the plan was saved start inactive, except the first two
     // relative-pitch courses, so that set has something in it from the start.
     for c in builtin_courses() {

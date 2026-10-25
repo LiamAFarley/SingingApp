@@ -63,16 +63,24 @@ the true result but shows no error mark; it is the default on early colour, chor
 gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \
 treat a block without feedback as passed if the tones were within an octave of each other or a named note was heard in the \
 previous few minutes without the clearing sound.\n\
-- Relative pitch has its own courses and its own \"Today's set\" (category \"Relative pitch\"; preview_daily_set with \
-category \"Relative pitch\"; set_daily_plan and set_course_level work the same): rp_degrees (scale degrees, 3 degrees in one \
-key to all 12 in changing keys), rp_intervals_key (from do, pairs then all, up then down, then changing keys and any scale \
-note), rp_intervals_chromatic (non-diatonic intervals from do against their diatonic neighbours), rp_intervals (no key, \
-random roots), rp_compare (interval comparison, shared first note to nothing shared) and rp_sing (sing from do in a key, \
-then any note, then without a key). Each level is practice with feedback then a check without; two checks at 90% pass. \
-For custom drills use interval_id's start (random, tonic, fixed), start_octaves, chromatic and other_rate, \
-interval_comparison's shared, and sing_interval's in_key (see list_exercise_types); docs/RELATIVE_PITCH.md.\n\
-- Other graded courses are built-in presets: degrees_01–08 (scale degrees in the style of Functional Ear Trainer) and \
-harmony_01–08. Suggest the next level after at least 90% over two sessions.\n\
+- Relative pitch is a set of workshops, one course per activity, after EarMaster's general workshops and Functional Ear \
+Trainer: rp_degrees (scale degrees: major, chromatics in major, minor, chromatics in minor, each from half an octave in C to \
+a new key every question), rp_intervals (interval identification without a key: pairs, then sets, each ascending, \
+descending, harmonic, then all three), rp_intervals_key (intervals against a cadence: from do, any two notes of the key, \
+chromatic), rp_compare (which of two intervals is larger: five pools, each with a shared first note, either note, nearby \
+starts, nothing shared), rp_sing (sing from do: up, down, complementary), rp_chords (22 modules of chord types), \
+rp_inversions, rp_scales (modes and the melodic and harmonic minor families), rp_dictation and rp_sight (melodies: do and re \
+first, a degree more each lesson, then rhythm, keys, minor). A course's levels are lessons grouped into modules \
+(get_workshop shows them with scores); one run at 90% passes a lesson and the course moves to the next. \
+The category has its own \"Today's set\" (preview_daily_set with category \"Relative pitch\"); set_daily_plan and \
+set_course_level work as for absolute pitch. To give the user a drill the lessons lack, save it as a custom level of \
+the activity (save_custom_level): it appears on that activity's Custom levels tab with its own scores. Exercise controls: \
+interval_id's start, start_octaves, chromatic and other_rate; interval_comparison's shared and pairs_from_pool; \
+sing_interval's in_key; chord_id's styles (arpeggio, arpeggio_down, block) and answer_inversion; scale_degree_id's \
+degrees (1–8, with b and #), cadence and labels; generated melodies' degrees (1–8) and notes (see list_exercise_types); \
+docs/RELATIVE_PITCH.md.\n\
+- Other graded courses are built-in presets: harmony_01–08 (degrees_01–08 is the older scale-degree ladder; prefer \
+rp_degrees). Suggest the next level after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
 ({\"given\": [{key, time, notes: [{note, beats}]}]}), or taken from the melody library ({\"library\": {collection | ids | tags}}). \
 Transcribe the user's books into the library with add_library_pieces (or MIDI files with import_library_files) and reuse them. \
@@ -190,6 +198,26 @@ pub struct CourseLevelRequest {
     pub course: String,
     /// 1-based. For set_course_level, one past the last level marks the course complete.
     pub level: u32,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct WorkshopRequest {
+    /// A relative-pitch course id, e.g. `rp_degrees`.
+    pub course: String,
+    /// Include each lesson's exercise params (large).
+    #[serde(default)]
+    pub include_params: bool,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct CourseRequest {
+    /// A relative-pitch course id, e.g. `rp_intervals`.
+    pub course: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteCustomLevelRequest {
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -554,6 +582,70 @@ impl TrainerServer {
             courses::course_statuses(db, chrono::Utc::now())
         }) {
             Ok(v) => text(&v.into_iter().find(|s| s.id == req.course)),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "A workshop course's lessons by module, with each lesson's runs, best and last score and whether it passed, and the lesson the course is on."
+    )]
+    async fn get_workshop(
+        &self,
+        Parameters(req): Parameters<WorkshopRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| {
+            courses::refresh_progress(db)?;
+            trainer_core::workshops::workshop_view(db, &req.course)
+        }) {
+            Ok(mut v) => {
+                if !req.include_params {
+                    for m in &mut v.modules {
+                        for l in &mut m.lessons {
+                            l.params = serde_json::Value::Null;
+                        }
+                    }
+                }
+                text(&v)
+            }
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(description = "The user's custom levels of a workshop course, with their scores.")]
+    async fn list_custom_levels(
+        &self,
+        Parameters(req): Parameters<CourseRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| trainer_core::workshops::custom_levels(db, &req.course)) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Save a custom level for a workshop course: a title, a question count and the params of the course's exercise (scale_degree_id for rp_degrees, interval_id for rp_intervals …). Leave id empty for a new level; give an existing id to replace it. It is checked by generating it, and appears on the activity's Custom levels tab."
+    )]
+    async fn save_custom_level(
+        &self,
+        Parameters(level): Parameters<trainer_core::workshops::CustomLevel>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let ctx = match self.gen_context() {
+            Ok(c) => c,
+            Err(e) => return tool_error(e),
+        };
+        match self.with_db(|db| trainer_core::workshops::save_custom_level(db, &ctx, &level)) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(description = "Delete a custom level by id.")]
+    async fn delete_custom_level(
+        &self,
+        Parameters(req): Parameters<DeleteCustomLevelRequest>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| trainer_core::workshops::delete_custom_level(db, &req.id)) {
+            Ok(()) => text(&"deleted"),
             Err(e) => tool_error(e),
         }
     }

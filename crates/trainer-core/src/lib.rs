@@ -14,8 +14,8 @@ pub mod metrics;
 pub mod pitch;
 pub mod presets;
 pub mod reports;
-pub mod rp_courses;
 pub mod rng;
+pub mod rp_courses;
 pub mod schema;
 pub mod score;
 pub mod speech;
@@ -24,6 +24,7 @@ pub mod storage;
 pub mod theory;
 pub mod timbre;
 pub mod validate;
+pub mod workshops;
 
 pub use generate::{GenContext, block_seed, default_mode, generate_block};
 pub use grade::{GradingConfig, TrialOutcome};

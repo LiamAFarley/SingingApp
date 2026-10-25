@@ -1,13 +1,117 @@
-import { useCallback, useEffect, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { api, useBackendEvent } from "../api";
 import type { CourseStatus } from "../bindings/CourseStatus";
 import type { DailyPlan } from "../bindings/DailyPlan";
 import type { DailySet } from "../bindings/DailySet";
-import { LadderCard } from "./ApPage";
+import { WorkshopPage } from "./WorkshopPage";
 
 const CATEGORY = "Relative pitch";
 
-/** Relative pitch: its own daily set and the course ladders it is built from. */
+type Glyph = "ear" | "compare" | "voice" | "eye" | "pencil" | "hand" | "search";
+
+interface Activity {
+  /** The workshop course; none for activities not built yet. */
+  course?: string;
+  title: string;
+  desc: string;
+  glyph: Glyph;
+}
+
+interface Section {
+  title: string;
+  accent: string;
+  activities: Activity[];
+}
+
+const SECTIONS: Section[] = [
+  {
+    title: "Scale degrees",
+    accent: "#d9822b",
+    activities: [{ course: "rp_degrees", title: "Scale degrees", desc: "Name each note's degree in a key, after a cadence", glyph: "ear" }],
+  },
+  {
+    title: "Intervals",
+    accent: "#2d6cdf",
+    activities: [
+      { course: "rp_compare", title: "Interval comparison", desc: "Which of two intervals is larger", glyph: "compare" },
+      { course: "rp_intervals", title: "Interval identification", desc: "Name intervals on random notes, no key", glyph: "ear" },
+      { course: "rp_intervals_key", title: "Intervals in a key", desc: "Diatonic and chromatic intervals against a cadence", glyph: "ear" },
+      { course: "rp_sing", title: "Interval singing", desc: "Sing a degree from do, up or down", glyph: "voice" },
+    ],
+  },
+  {
+    title: "Chords",
+    accent: "#b88a00",
+    activities: [
+      { course: "rp_chords", title: "Chord identification", desc: "Name triads and seventh chords", glyph: "ear" },
+      { course: "rp_inversions", title: "Chord inversions", desc: "Name the chord and its inversion", glyph: "ear" },
+      { title: "Chord progressions", desc: "Cadences and progressions by ear", glyph: "ear" },
+    ],
+  },
+  {
+    title: "Scales",
+    accent: "#c2417f",
+    activities: [{ course: "rp_scales", title: "Scale identification", desc: "Name scales and modes by ear", glyph: "ear" }],
+  },
+  {
+    title: "Rhythm",
+    accent: "#3f8f29",
+    activities: [
+      { title: "Rhythmic sight-reading", desc: "Tap a rhythm from the staff", glyph: "eye" },
+      { title: "Rhythm clapback", desc: "Tap back a rhythm you hear", glyph: "hand" },
+      { title: "Rhythmic dictation", desc: "Write down a rhythm", glyph: "pencil" },
+      { title: "Rhythm error detection", desc: "Find what differs from the staff", glyph: "search" },
+    ],
+  },
+  {
+    title: "Melodies",
+    accent: "#7a4fd1",
+    activities: [
+      { course: "rp_sight", title: "Melodic sight singing", desc: "Sing a melody from the staff", glyph: "eye" },
+      { title: "Melody singback", desc: "Sing back a melody you hear", glyph: "voice" },
+      { course: "rp_dictation", title: "Melodic dictation", desc: "Write down a melody you hear", glyph: "pencil" },
+    ],
+  },
+];
+
+function Icon({ glyph }: { glyph: Glyph }) {
+  const common = { fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
+  const paths: Record<Glyph, ReactNode> = {
+    ear: (
+      <path {...common} d="M7 10a5 5 0 0 1 10 0c0 3-3 4-3 7a3 3 0 0 1-5 2M10 10a2 2 0 0 1 4 0c0 1.5-2 2-2 3.5" />
+    ),
+    compare: <path {...common} d="M12 4v16M5 20h14M4 9l3-5 3 5a3 3 0 0 1-6 0zM14 9l3-5 3 5a3 3 0 0 1-6 0zM7 4h10" />,
+    voice: <path {...common} d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />,
+    eye: <path {...common} d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+    pencil: <path {...common} d="M4 20l4-1 11-11-3-3L5 16l-1 4zM14 6l3 3M4 22h16" />,
+    hand: <path {...common} d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-3-4a1.5 1.5 0 0 1 2.3-2L8 14" />,
+    search: <path {...common} d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM16 16l5 5" />,
+  };
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true">
+      {paths[glyph]}
+    </svg>
+  );
+}
+
+function remembered(): string | null {
+  try {
+    return localStorage.getItem("rp.open");
+  } catch {
+    return null;
+  }
+}
+
+function remember(v: string | null) {
+  try {
+    if (v) localStorage.setItem("rp.open", v);
+    else localStorage.removeItem("rp.open");
+  } catch {
+    /* private window */
+  }
+}
+
+/** Relative pitch: today's set, and the activities it is drawn from, each opening its lessons. */
 export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolean; onOpenSession: () => void }) {
   const [courses, setCourses] = useState<CourseStatus[]>([]);
   const [plan, setPlan] = useState<DailyPlan | null>(null);
@@ -15,6 +119,11 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
   const [setProblem, setSetProblem] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
+  const [open, setOpenState] = useState<string | null>(remembered);
+  const setOpen = (v: string | null) => {
+    setOpenState(v);
+    remember(v);
+  };
 
   const refresh = useCallback(() => {
     api("apDashboard")
@@ -56,14 +165,29 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
   };
   const busy = sessionActive || starting != null;
 
+  const openSection = SECTIONS.find((s) => s.activities.some((a) => a.course === open));
+  if (open && openSection) {
+    return (
+      <WorkshopPage
+        course={open}
+        accent={openSection.accent}
+        plan={plan}
+        busy={busy}
+        onPlan={savePlan}
+        onBack={() => setOpen(null)}
+        onStart={start}
+      />
+    );
+  }
+
   return (
     <div className="page">
       <div className="page-head">
         <div>
           <h1>Relative pitch</h1>
           <div className="sub">
-            Scale degrees and intervals, in a key and without one, heard, compared and sung. Each course climbs a level at a
-            time: practice with feedback, then a check without it; two checks in a row at 90% move it on.
+            Ear training in workshops: each activity is a course of modules and lessons. A lesson passes at 90%, and the course
+            moves on to the next one. Tick Daily inside an activity to put its current lesson in today's set.
           </div>
         </div>
       </div>
@@ -91,43 +215,45 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
           </div>
           <div style={{ textAlign: "right" }}>
             {set && <div className="big-num num">{Math.round(set.minutes)} min</div>}
-            <button
-              className="btn primary"
-              disabled={busy || !set}
-              onClick={() => start("daily", { source: "daily_set", category: CATEGORY })}
-            >
+            <button className="btn primary" disabled={busy || !set} onClick={() => start("daily", { source: "daily_set", category: CATEGORY })}>
               {starting === "daily" ? "Starting…" : "Start today's set"}
             </button>
           </div>
         </div>
       </div>
 
-      {plan && (
-        <div className="section">
-          <div className="section-head">
-            <h2>Courses</h2>
-            <span className="small faint">Tick Daily to put a course in today's set</span>
-          </div>
-          <div className="grid cols-2">
-            {courses.map((c) => (
-              <LadderCard
-                key={c.id}
-                c={c}
-                plan={plan}
-                busy={busy}
-                starting={starting}
-                onPlan={savePlan}
-                onStart={(level) => start(`${c.id}-${level}`, { source: "course_level", course: c.id, level })}
-                onSetLevel={(level) =>
-                  api("setCourseLevel", c.id, level)
-                    .then(refresh)
-                    .catch((e) => setError(e.message))
-                }
-              />
-            ))}
+      {SECTIONS.map((s) => (
+        <div key={s.title} className="activity-section" style={{ ["--activity" as string]: s.accent }}>
+          <h2>{s.title}</h2>
+          <div className="activity-grid">
+            {s.activities.map((a) => {
+              const c = a.course ? courses.find((x) => x.id === a.course) : undefined;
+              const daily = plan?.courses.find((p) => p.course === a.course)?.active ?? false;
+              const lesson = c ? Math.min(c.level, c.levels) : 0;
+              return (
+                <button key={a.title} className={`activity${a.course ? "" : " soon"}`} disabled={!a.course} onClick={() => a.course && setOpen(a.course)}>
+                  <span className="activity-icon">
+                    <Icon glyph={a.glyph} />
+                  </span>
+                  <span className="activity-text">
+                    <span className="activity-title">{a.title}</span>
+                    <span className="activity-desc">{a.desc}</span>
+                    {c ? (
+                      <span className="activity-meta">
+                        {c.complete ? "Complete" : `Lesson ${lesson} of ${c.levels}`}
+                        {c.level_title && !c.complete ? ` · ${c.level_title}` : ""}
+                        {daily && <span className="badge accent">daily</span>}
+                      </span>
+                    ) : (
+                      !a.course && <span className="activity-meta">Not built yet</span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }

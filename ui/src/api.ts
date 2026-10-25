@@ -26,6 +26,9 @@ import type { SessionRow } from "./bindings/SessionRow";
 import type { StartRequest } from "./bindings/StartRequest";
 import type { StatsQuery } from "./bindings/StatsQuery";
 import type { StatsRow } from "./bindings/StatsRow";
+import type { CustomLevel } from "./bindings/CustomLevel";
+import type { CustomLevelView } from "./bindings/CustomLevelView";
+import type { WorkshopView } from "./bindings/WorkshopView";
 
 export interface Backend {
   appInfo(): Promise<AppInfo>;
@@ -67,6 +70,11 @@ export interface Backend {
   previewDailySet(category?: string): Promise<DailySet>;
   saveDailyPlan(plan: DailyPlan): Promise<void>;
   setCourseLevel(course: string, level: number): Promise<void>;
+  /** A workshop course's lessons by module, with scores. */
+  workshopView(course: string): Promise<WorkshopView>;
+  customLevels(course: string): Promise<CustomLevelView[]>;
+  saveCustomLevel(level: CustomLevel): Promise<CustomLevel>;
+  deleteCustomLevel(id: string): Promise<void>;
   apPrefs(): Promise<ApPrefs>;
   saveApPrefs(prefs: ApPrefs): Promise<ApPrefs>;
   listLabelSets(): Promise<LabelSet[]>;
@@ -121,6 +129,10 @@ async function tauriBackend(): Promise<Backend> {
     previewDailySet: (category) => call("preview_daily_set", { category: category ?? null }),
     saveDailyPlan: (plan) => call("save_daily_plan", { plan }),
     setCourseLevel: (course, level) => call("set_course_level", { course, level }),
+    workshopView: (course) => call("workshop_view", { course }),
+    customLevels: (course) => call("custom_levels", { course }),
+    saveCustomLevel: (level) => call("save_custom_level", { level }),
+    deleteCustomLevel: (id) => call("delete_custom_level", { id }),
     apPrefs: () => call("ap_prefs"),
     saveApPrefs: (prefs) => call("save_ap_prefs", { prefs }),
     listLabelSets: () => call("list_label_sets"),

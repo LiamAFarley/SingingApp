@@ -30,53 +30,7 @@ interface CardOption {
   choices: { value: string; label: string; params: Record<string, unknown> }[];
 }
 
-const DEGREE_OPTIONS: CardOption[] = [
-  {
-    key: "labels",
-    label: "Answers",
-    choices: [
-      { value: "fixed_do", label: "Fixed do (C is do)", params: { labels: "fixed_do" } },
-      { value: "solfege", label: "Movable do (tonic is do)", params: { labels: "solfege" } },
-      { value: "numbers", label: "Numbers 1–8", params: { labels: "numbers" } },
-    ],
-  },
-  {
-    key: "key",
-    label: "Key",
-    choices: [
-      { value: "level", label: "As the level sets it", params: {} },
-      { value: "c", label: "C", params: { keys: ["C"], key_change: "per_block" } },
-      { value: "random", label: "One random key for the session", params: { keys: "all", key_change: "per_block" } },
-      { value: "each", label: "A new key every question", params: { keys: "all", key_change: "per_trial" } },
-    ],
-  },
-  {
-    key: "cadence",
-    label: "Cadence",
-    choices: [
-      { value: "default", label: "Once, and when the key changes", params: {} },
-      { value: "start", label: "Once at the start", params: { cadence: "start" } },
-      { value: "key_change", label: "On every key change", params: { cadence: "key_change" } },
-      { value: "every", label: "Before every question", params: { cadence: "every" } },
-    ],
-  },
-  {
-    key: "cadence_bpm",
-    label: "Cadence tempo",
-    default: "100",
-    choices: [60, 80, 100, 120, 140].map((bpm) => ({ value: String(bpm), label: `${bpm} bpm`, params: { cadence_bpm: bpm } })),
-  },
-];
-
 const COURSES: Course[] = [
-  {
-    options: DEGREE_OPTIONS,
-    pattern: /^degrees_(\d+)$/,
-    title: "Scale degrees",
-    description: "A cadence sets the key, a note plays, you name its degree, and it walks to the tonic.",
-    unit: "Level",
-    storageKey: "practice.degreeLevel",
-  },
   {
     pattern: /^harmony_(\d+)$/,
     title: "Harmony intervals",
@@ -106,12 +60,14 @@ export function PracticeView({
   onOpenSession,
   onOpenAudio,
   onOpenAp,
+  onOpenRp,
 }: {
   runner: RunnerState | null;
   audio: AudioView | null;
   onOpenSession: () => void;
   onOpenAudio: () => void;
   onOpenAp: () => void;
+  onOpenRp: () => void;
 }) {
   const [presets, setPresets] = useState<PresetView[]>([]);
   const [queue, setQueue] = useState<SessionRow[]>([]);
@@ -212,6 +168,26 @@ export function PracticeView({
       </div>
 
       {CATEGORIES.map((cat) => {
+        // Ear training lives on the Relative pitch page, as workshops with lessons and custom levels.
+        if (cat === "Ear training") {
+          return (
+            <div className="section" key={cat}>
+              <h2>{cat}</h2>
+              <div className="card row" style={{ justifyContent: "space-between", gap: 16 }}>
+                <div>
+                  <div className="title">Relative pitch workshops</div>
+                  <div className="desc">
+                    Scale degrees, intervals, chords, scales and melodies, each a course of lessons, with your own custom levels
+                    and a daily set.
+                  </div>
+                </div>
+                <button className="btn primary" onClick={onOpenRp}>
+                  Open Relative pitch
+                </button>
+              </div>
+            </div>
+          );
+        }
         const items = presets.filter((p) => p.category === cat && !inCourse(p));
         const courses = COURSES.map((c) => ({
           course: c,

@@ -33,6 +33,7 @@ fn speed_course() -> Course {
         .map(|(i, window)| {
             let n = i as u32 + 1;
             Level {
+                module: None,
                 title: format!("Every {:.1} s", window as f32 / 1000.0),
                 summary: format!(
                     "The target note is named and sung, then sixteen tones, one every {:.1} s. Press when you hear the target, in any octave.",
@@ -94,6 +95,7 @@ fn note_colors_course() -> Course {
         let mut check = practice.clone();
         check["mask"] = json!("none");
         levels.push(Level {
+            module: None,
             title: if n == 12 { "All twelve, within 2 s".into() } else { "All twelve, four octaves".into() },
             summary: format!(
                 "All twelve colours over four octaves, each two octaves from the last, answered within {:.1} s. The check has no feedback.",
@@ -162,6 +164,7 @@ fn color_level(
 ) -> Level {
     let names = classes.join(" ");
     Level {
+        module: None,
         title: if classes.len() == 12 {
             "All twelve colours".into()
         } else {
@@ -253,6 +256,7 @@ fn chord_colors_course() -> Course {
         let n = i as u32;
         let chord = &labels::EGUCHI[i];
         levels.push(Level {
+            module: None,
             title: if i == 1 {
                 format!("{} and {}", labels::EGUCHI[0].word, chord.word)
             } else {
@@ -274,6 +278,7 @@ fn chord_colors_course() -> Course {
     let all: Vec<&str> = labels::EGUCHI.iter().map(|c| c.id).collect();
     let params = json!({ "chords": all, "single_note_after": true, "note_labels": TANEDA_COLORS });
     levels.push(Level {
+        module: None,
         title: "Notes from the chord".into(),
         summary: "After each chord, one note plays alone and is named by its colour.".into(),
         pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
@@ -335,6 +340,7 @@ fn contrast_course() -> Course {
     let mut spread_check = spread.clone();
     spread_check["mask"] = json!("none");
     levels.push(Level {
+        module: None,
         title: "Black keys, four octaves".into(),
         summary: "The five black keys over four octaves, each two octaves from the last. The check has no feedback.".into(),
         pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
@@ -355,6 +361,7 @@ fn contrast_course() -> Course {
     let mut all_check = all.clone();
     all_check["mask"] = json!("none");
     levels.push(Level {
+        module: None,
         title: "All twelve words".into(),
         summary: "All twelve names over four octaves, within 2 s. The check has no feedback."
             .into(),
@@ -438,6 +445,7 @@ fn contrast_level(
     where_: &str,
 ) -> Level {
     Level {
+        module: None,
         title: title.into(),
         summary: format!(
             "{title}, {where_}. Do not hum.{}",
