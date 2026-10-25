@@ -131,8 +131,12 @@ fn color_params(
         "color_flash": true,
         "hide_note_names": errorless,
         "requeue_misses": errorless,
-        "mask": "random_tones",
     });
+    // In one octave no jump rule is possible, so a short burst of random tones separates the
+    // notes; over more octaves the jump rule does.
+    if octaves.len() < 3 {
+        params["mask"] = json!("random_tones");
+    }
     if classes.len() < 12 {
         params["out_of_set_rate"] = json!(0.15);
     }
@@ -153,10 +157,9 @@ fn color_level(
     classes: &[&str],
     errorless: bool,
     train: Value,
-    mut check: Value,
+    check: Value,
     where_: &str,
 ) -> Level {
-    check["mask"] = json!("random_tones");
     let names = classes.join(" ");
     Level {
         title: if classes.len() == 12 {
@@ -403,8 +406,12 @@ fn contrast_params(
         "color_flash": true,
         "hide_note_names": true,
         "requeue_misses": errorless,
-        "mask": "random_tones",
     });
+    // In one octave no jump rule is possible, so a short burst of random tones separates the
+    // notes; over more octaves the jump rule does.
+    if octaves.len() < 3 {
+        params["mask"] = json!("random_tones");
+    }
     if classes.len() < 12 {
         params["out_of_set_rate"] = json!(0.15);
     }

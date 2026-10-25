@@ -147,10 +147,9 @@ fn naming_course() -> Course {
                 "classes": class_json, "octaves": SPREAD, "min_jump_semitones": 13,
                 "min_octave_step": STEP, "out_of_set_rate": other, "deadline_ms": deadline,
             });
-            let mut train = params.clone();
-            train["mask"] = json!("random_tones");
-            let mut check = params;
-            check["mask"] = json!("none");
+            // The jump rule and the answer limit guard against naming from the last tone.
+            let train = params.clone();
+            let check = params;
             Level {
                 title: if all { "All twelve notes".into() } else { format!("{} notes", classes.len()) },
                 summary: format!(
@@ -402,8 +401,7 @@ fn maintenance_course() -> Course {
             blocks: vec![block(AP_MAINTENANCE, 1, true, json!({
                 "type": "pitch_id", "title": "Maintenance", "count": 40, "tags": ["ap.maintenance"],
                 "params": { "classes": "all", "octaves": SPREAD, "min_jump_semitones": 13,
-                            "min_octave_step": STEP, "deadline_ms": 2000,
-                            "mask": "random_tones" },
+                            "min_octave_step": STEP, "deadline_ms": 2000 },
             }))],
         }],
     }

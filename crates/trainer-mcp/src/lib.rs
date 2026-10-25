@@ -55,7 +55,9 @@ id). Read them with get_ap_profile. The app moves a course to its next level whe
 switched off. Use set_course_level only to correct a level. The dashboard pools every method per note: mastered means at least \
 90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory with a block pre_mask \
 \"shepard_glissando\" and keep consecutive tones apart: min_jump_semitones 13 and, over four or more octaves, \
-min_octave_step 2 (each tone two octaves from the last, so its octave gives nothing away). feedback \"errorless\" stores \
+min_octave_step 2 (each tone two octaves from the last, so its octave gives nothing away). Masks between trials (mask, \
+pre_mask) are off by default: the jump rule and an answer limit do that job without the wait. Use random_tones (under a \
+second) only where no jump rule is possible, e.g. notes in one octave or Shepard tones. feedback \"errorless\" stores \
 the true result but shows no error mark; it is the default on early colour, chord and contrast levels unless the user turns \
 \"Errorless early levels\" off (set_ap_prefs). Label sets (list_label_sets, set_label_set) are note_names, taneda_colors, \
 gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \

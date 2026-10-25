@@ -264,7 +264,10 @@ mod tests {
             &ctx,
         );
         assert!(r.ok, "{:?}", r.errors);
-        assert_eq!(r.warnings.len(), 2, "{:?}", r.warnings);
+        // The pool misuse twice, and the holdout training block shows answers with no mask or
+        // jump rule.
+        assert_eq!(r.warnings.len(), 3, "{:?}", r.warnings);
+        assert!(r.warnings.iter().any(|w| w.path == "blocks[1].params.mask"));
         assert!(
             r.estimated_minutes > 2.0 && r.estimated_minutes < 6.0,
             "{}",

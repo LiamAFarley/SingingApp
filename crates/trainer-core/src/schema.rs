@@ -78,13 +78,17 @@ impl Pool {
     }
 }
 
-/// Sound played between trials so the next trial cannot be solved by relative pitch.
+/// Sound played between trials so the next trial cannot be solved by relative pitch. Off unless
+/// asked for: a 13-semitone jump rule and an answer limit guard against that without the wait.
+/// A burst of random tones still interferes with pitch memory (Deutsch 1970), so it stays where
+/// nothing else can, such as notes in one octave or Shepard tones.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Mask {
+    #[default]
     None,
     Noise,
-    #[default]
+    /// Six quick random tones, under a second.
     RandomTones,
     ChromaticCluster,
     /// A 20-second, endlessly descending Shepard–Risset glissando that clears echoic and tonal
@@ -108,7 +112,8 @@ impl Mask {
         match self {
             Mask::None => 0.0,
             Mask::ShepardGlissando => SHEPARD_GLISSANDO_S,
-            _ => 1.6,
+            Mask::RandomTones => 0.9,
+            _ => 1.5,
         }
     }
 }
@@ -2241,7 +2246,8 @@ mod tests {
             Exercise::PitchId(p) => {
                 assert_eq!(p.classes.classes().len(), 3);
                 assert_eq!(p.octaves, vec![3, 4, 5]);
-                assert_eq!(p.mask, Mask::RandomTones);
+                // Masks are off unless asked for.
+                assert_eq!(p.mask, Mask::None);
             }
             other => panic!("unexpected {other:?}"),
         }

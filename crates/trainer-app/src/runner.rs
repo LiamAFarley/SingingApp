@@ -528,7 +528,7 @@ impl<'a> SessionRun<'a> {
         }
         if let Some(m) = &mask {
             engine.play(m.clone(), at, 1.0, Bus::Prompt)?;
-            at += m.frames() as u64 + engine.frames_from_ms(400.0);
+            at += m.frames() as u64 + engine.frames_from_ms(150.0);
         }
         engine.play(stim.clone(), at, 1.0, Bus::Prompt)?;
         let onset_frame = at;
@@ -1319,7 +1319,13 @@ impl<'a> SessionRun<'a> {
             };
             match self.wait(timeout)? {
                 None => return Ok(After::Next),
-                Some(RunnerCommand::Next | RunnerCommand::Skip) => return Ok(After::Next),
+                Some(RunnerCommand::Next | RunnerCommand::Skip) => {
+                    // Moving on by hand in a paced stream plays the next tone now, not at its slot.
+                    if stream_ms.is_some() {
+                        self.stream_next = None;
+                    }
+                    return Ok(After::Next);
+                }
                 Some(RunnerCommand::Retry) if is_sung || is_dictation => {
                     return Ok(After::Retry { assisted: false });
                 }
