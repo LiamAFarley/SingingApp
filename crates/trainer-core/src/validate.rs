@@ -143,9 +143,8 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
         }
         if let Exercise::PitchId(p) = &b.exercise {
             // A stream is too fast to chain intervals, and a 13-semitone jump rule defeats it.
-            let chaining_closed = p.pacing != Pacing::Respond
-                || p.min_jump_semitones >= 13
-                || p.min_octave_step >= 2;
+            let chaining_closed =
+                p.pacing != Pacing::Respond || p.min_jump_semitones >= 13 || p.min_octave_step >= 2;
             if p.mask == Mask::None
                 && b.effective_feedback().shows_trial_result()
                 && !chaining_closed

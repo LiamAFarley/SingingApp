@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
+use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, test_runs};
 use crate::schema::{
     AnchorSongParams, ChordColorParams, ChordIdParams, DictationParams, ExerciseKind,
     HarmonyParams, IncidentalPairingParams, IntervalComparisonParams, IntervalIdParams,
@@ -14,7 +15,6 @@ use crate::schema::{
     ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams,
     SingPitchParams, SustainParams, TonalCenterIdParams,
 };
-use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, test_runs};
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
 use crate::storage::{Db, SessionRow, SessionStatus, TrialFilter, TrialRow};
 

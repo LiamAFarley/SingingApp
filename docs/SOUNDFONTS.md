@@ -61,9 +61,9 @@ chords/octave layers rather than single notes.
 "Dawn" female source. Programs 2 ("Nicholas") and 3 ("Soprano") are present in the file but rejected:
 2 drifts to -34 cents around C5 and cuts off above D#5, and 3 is up to +49 cents sharp above C4.
 
-`HeavenChoir` and `Flute` are much quieter than the rest at the same velocity. Raise the stimulus
-gain for those timbres (or normalise loudness in the exercise) before using them in a mixed-timbre
-test.
+`HeavenChoir` and `Flute` are much quieter than the rest at the same velocity. The renderer
+levels every note anyway: it measures each timbre and note once (K-weighted loudness, loudest
+400 ms) and brings it to the same level, so the peak figures above only matter for headroom.
 
 ## Rejected candidates
 
@@ -138,8 +138,7 @@ and `sf:SoloVoices:1` to holdout:
   `sf:Violin:100`, `sf:Flute:73`, `sf:DrawbarOrgan:0`, `sf:MaleOohs:1`, `sf:OperaFemale:0`,
   `sf:SoloVoices:1`, `sf:SoloVoices:4`, `sf:SoloVoices:5`, `sf:HeavenChoir:1`
 
-The transfer test (`ap_transfer`, docs/AP_TESTING.md) plays six of the holdout presets. `HeavenChoir` and
-`Flute` are left out of it because they are much quieter than the rest.
+The transfer test (`ap_transfer`, docs/AP_TESTING.md) plays six of the holdout presets.
 
 Keeping `SoloVoices:0` in training and `SoloVoices:4`/`5` in holdout tests cross-voice transfer
 inside one bank. Do not put the same timbre in both lists; the pool validator treats the holdout

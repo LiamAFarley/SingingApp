@@ -132,7 +132,10 @@ pub fn summarise(session_id: &str, rows: &[&TrialRow]) -> TestRun {
         .filter(|t| t.metrics.get("timeout").and_then(Value::as_bool) == Some(true))
         .count() as u32;
     let points: f64 = main.iter().filter_map(|t| metric(t, "ucsf_points")).sum();
-    let errs: Vec<f64> = main.iter().filter_map(|t| metric(t, "class_error")).collect();
+    let errs: Vec<f64> = main
+        .iter()
+        .filter_map(|t| metric(t, "class_error"))
+        .collect();
     let mean = |v: &[f64]| (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64);
     let mad = mean(&errs.iter().map(|e| e.abs()).collect::<Vec<_>>());
     let signed = mean(&errs);
@@ -170,8 +173,8 @@ pub fn summarise(session_id: &str, rows: &[&TrialRow]) -> TestRun {
     }
     if let Some(m) = signed {
         let lean = errs.iter().filter(|e| **e != 0.0).collect::<Vec<_>>();
-        let same_side =
-            lean.iter().filter(|e| e.signum() == m.signum()).count() as f64 / lean.len().max(1) as f64;
+        let same_side = lean.iter().filter(|e| e.signum() == m.signum()).count() as f64
+            / lean.len().max(1) as f64;
         if errs.len() >= 24 && m.abs() >= 0.75 && same_side >= 0.8 {
             notes.push(format!(
                 "Answers lean {:.1} semitones {} on almost every note. Check the audio setup first (a 44.1 vs 48 kHz sample-rate mismatch shifts everything by about 1.5 semitones) before reading this as the ear.",
@@ -284,7 +287,10 @@ mod tests {
     fn wilson_interval_brackets_the_rate() {
         let (lo, hi) = wilson(15.0, 60.0);
         assert!(lo < 0.25 && hi > 0.25);
-        assert!((lo - 0.158).abs() < 0.01 && (hi - 0.372).abs() < 0.01, "{lo} {hi}");
+        assert!(
+            (lo - 0.158).abs() < 0.01 && (hi - 0.372).abs() < 0.01,
+            "{lo} {hi}"
+        );
         assert_eq!(wilson(0.0, 0.0), (0.0, 1.0));
     }
 
@@ -295,7 +301,11 @@ mod tests {
         t.metrics = if rt.is_none() {
             serde_json::json!({ "timeout": true })
         } else {
-            let pts = match err.abs() { 0 => 1.0, 1 => 0.75, _ => 0.0 };
+            let pts = match err.abs() {
+                0 => 1.0,
+                1 => 0.75,
+                _ => 0.0,
+            };
             serde_json::json!({ "timeout": false, "class_error": err, "ucsf_points": pts })
         };
         t
@@ -333,13 +343,19 @@ mod tests {
         assert!((r.mad.unwrap() - 1.0 / 3.0).abs() < 1e-9);
         assert_eq!(r.median_correct_rt_ms, Some(2350.0));
         assert_eq!(r.shepard, Some(0.5));
-        assert!(r.notes.iter().any(|n| n.contains("Named notes were heard 10 min")));
+        assert!(
+            r.notes
+                .iter()
+                .any(|n| n.contains("Named notes were heard 10 min"))
+        );
     }
 
     #[test]
     fn chained_singing_is_flagged() {
         // Every note 250 cents off the same way: the steps between them are right.
-        let chained: Vec<TrialRow> = (0..12).map(|i| sung(i, 250.0 + (i % 3) as f64 * 10.0)).collect();
+        let chained: Vec<TrialRow> = (0..12)
+            .map(|i| sung(i, 250.0 + (i % 3) as f64 * 10.0))
+            .collect();
         let s = sung_summary(&chained.iter().collect::<Vec<_>>());
         assert!(s.chaining_likely, "{s:?}");
         // Errors that come and go note by note are not chaining.

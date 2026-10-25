@@ -466,11 +466,15 @@ fn gen_pitch_id(
             let prev_oct = prev.div_euclid(12) - 1;
             let far = |o: i32| (o - prev_oct).abs() >= step;
             if !far(octave) {
-                let same: Vec<i32> = octaves_of(&timbre).into_iter().filter(|&o| far(o)).collect();
+                let same: Vec<i32> = octaves_of(&timbre)
+                    .into_iter()
+                    .filter(|&o| far(o))
+                    .collect();
                 if let Some(&o) = rng.choose(&same) {
                     octave = o;
                 } else {
-                    let any: Vec<&(TimbreId, i32)> = combos.iter().filter(|(_, o)| far(*o)).collect();
+                    let any: Vec<&(TimbreId, i32)> =
+                        combos.iter().filter(|(_, o)| far(*o)).collect();
                     if let Some(&&(ref t, o)) = rng.choose(&any) {
                         timbre = t.clone();
                         octave = o;
@@ -3385,7 +3389,10 @@ mod tests {
                 *counts.entry(t.correct.clone()).or_default() += 1;
             }
             assert_eq!(counts.len(), 12);
-            let (lo, hi) = (counts.values().min().unwrap(), counts.values().max().unwrap());
+            let (lo, hi) = (
+                counts.values().min().unwrap(),
+                counts.values().max().unwrap(),
+            );
             // Independent draws would typically spread by five or more.
             assert!(hi - lo <= 2, "seed {seed}: {counts:?}");
         }

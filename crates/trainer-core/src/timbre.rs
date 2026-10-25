@@ -175,29 +175,95 @@ pub struct SfPreset {
 }
 
 const fn sf(id: &'static str, name: &'static str, low: i32, high: i32, pool: SfPool) -> SfPreset {
-    SfPreset { id, name, low, high, pool }
+    SfPreset {
+        id,
+        name,
+        low,
+        high,
+        pool,
+    }
 }
 
 /// The measured presets, with the training/holdout split from docs/SOUNDFONTS.md.
 pub const SOUNDFONT_PRESETS: [SfPreset; 19] = [
-    sf("sf:UprightPiano:0", "Upright piano", 48, 83, SfPool::Training),
+    sf(
+        "sf:UprightPiano:0",
+        "Upright piano",
+        48,
+        83,
+        SfPool::Training,
+    ),
     sf("sf:TenorSax:0", "Tenor saxophone", 48, 83, SfPool::Training),
-    sf("sf:ClassicalGuitar:0", "Classical guitar", 48, 83, SfPool::Training),
+    sf(
+        "sf:ClassicalGuitar:0",
+        "Classical guitar",
+        48,
+        83,
+        SfPool::Training,
+    ),
     sf("sf:Viola:41", "Viola", 48, 83, SfPool::Training),
-    sf("sf:SoloVoices:0", "Male voice (Duncan)", 48, 83, SfPool::Training),
-    sf("sf:SoftVoice:0", "Soft female voice", 48, 83, SfPool::Training),
+    sf(
+        "sf:SoloVoices:0",
+        "Male voice (Duncan)",
+        48,
+        83,
+        SfPool::Training,
+    ),
+    sf(
+        "sf:SoftVoice:0",
+        "Soft female voice",
+        48,
+        83,
+        SfPool::Training,
+    ),
     sf("sf:ConcertHarp:0", "Concert harp", 48, 83, SfPool::Training),
     sf("sf:FrenchHorn:60", "French horn", 48, 83, SfPool::Holdout),
     sf("sf:Trombone:57", "Trombone", 48, 83, SfPool::Holdout),
     sf("sf:Cello:42", "Cello", 48, 72, SfPool::Holdout),
     sf("sf:Violin:100", "Violin", 48, 83, SfPool::Holdout),
     sf("sf:Flute:73", "Flute", 48, 83, SfPool::Holdout),
-    sf("sf:DrawbarOrgan:0", "Drawbar organ", 48, 83, SfPool::Holdout),
-    sf("sf:MaleOohs:1", "Male \"ooh\" ensemble", 50, 83, SfPool::Holdout),
-    sf("sf:OperaFemale:0", "Operatic female voice", 49, 75, SfPool::Holdout),
-    sf("sf:SoloVoices:1", "Male voice, \"na\"", 48, 83, SfPool::Holdout),
-    sf("sf:SoloVoices:4", "Male bass voice (Buck)", 48, 72, SfPool::Holdout),
-    sf("sf:SoloVoices:5", "Female voice (Dawn)", 48, 83, SfPool::Holdout),
+    sf(
+        "sf:DrawbarOrgan:0",
+        "Drawbar organ",
+        48,
+        83,
+        SfPool::Holdout,
+    ),
+    sf(
+        "sf:MaleOohs:1",
+        "Male \"ooh\" ensemble",
+        50,
+        83,
+        SfPool::Holdout,
+    ),
+    sf(
+        "sf:OperaFemale:0",
+        "Operatic female voice",
+        49,
+        75,
+        SfPool::Holdout,
+    ),
+    sf(
+        "sf:SoloVoices:1",
+        "Male voice, \"na\"",
+        48,
+        83,
+        SfPool::Holdout,
+    ),
+    sf(
+        "sf:SoloVoices:4",
+        "Male bass voice (Buck)",
+        48,
+        72,
+        SfPool::Holdout,
+    ),
+    sf(
+        "sf:SoloVoices:5",
+        "Female voice (Dawn)",
+        48,
+        83,
+        SfPool::Holdout,
+    ),
     sf("sf:HeavenChoir:1", "Choir", 48, 83, SfPool::Holdout),
 ];
 
@@ -391,7 +457,12 @@ mod tests {
         }
         for sf in SOUNDFONT_PRESETS {
             assert!(Timbre::parse(sf.id).is_some(), "{}", sf.id);
-            assert_eq!(p.is_holdout_timbre(sf.id), sf.pool == SfPool::Holdout, "{}", sf.id);
+            assert_eq!(
+                p.is_holdout_timbre(sf.id),
+                sf.pool == SfPool::Holdout,
+                "{}",
+                sf.id
+            );
         }
     }
 
@@ -410,7 +481,10 @@ mod tests {
         assert!(!training.contains(&"sf:TenorSax:0".to_string()));
         assert!(training.contains(&"gm:0".to_string()));
         assert!(soundfont_installed("gm:42", Some(installed.as_slice())));
-        assert!(!soundfont_installed("sf:Cello:42", Some(installed.as_slice())));
+        assert!(!soundfont_installed(
+            "sf:Cello:42",
+            Some(installed.as_slice())
+        ));
         assert!(soundfont_installed("sf:Cello:42", None));
     }
 }

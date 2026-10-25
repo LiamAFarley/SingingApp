@@ -1601,13 +1601,17 @@ mod tests {
 
     #[test]
     fn data_stays_in_the_app_directory() {
-        let built = Path::new(r"F:\Documents\music app\SingingApp\target\release\singing-trainer.exe");
+        let built =
+            Path::new(r"F:\Documents\music app\SingingApp\target\release\singing-trainer.exe");
         assert_eq!(
             data_dir_for_exe(built),
             PathBuf::from(r"F:\Documents\music app\SingingApp\data")
         );
         let tests = Path::new(r"C:\proj\SingingApp\target\debug\deps\trainer_core.exe");
-        assert_eq!(data_dir_for_exe(tests), PathBuf::from(r"C:\proj\SingingApp\data"));
+        assert_eq!(
+            data_dir_for_exe(tests),
+            PathBuf::from(r"C:\proj\SingingApp\data")
+        );
         let installed = Path::new(r"D:\Apps\Singing Trainer\singing-trainer.exe");
         assert_eq!(
             data_dir_for_exe(installed),

@@ -1128,7 +1128,9 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
                 let (d, mut note) =
                     recurring_due(*days, *on_test_day, after_ok, last.as_deref(), &plan, now);
                 if d && named_today {
-                    note.push_str(" Named notes were heard today, so it is better run first thing tomorrow.");
+                    note.push_str(
+                        " Named notes were heard today, so it is better run first thing tomorrow.",
+                    );
                 }
                 (d, Some(note))
             }

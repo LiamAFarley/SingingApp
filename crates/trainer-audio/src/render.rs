@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
@@ -68,6 +68,118 @@ pub struct Renderer {
     fonts: SoundFonts,
     click_hi: Arc<SoundBuffer>,
     click_lo: Arc<SoundBuffer>,
+    /// `level_gain` per (timbre, MIDI note), measured on first use.
+    levels: Mutex<HashMap<(String, i32), f32>>,
+}
+
+/// Every note at `gain_db` -6 is brought to this loudness (K-weighted, dB): about where a
+/// General MIDI piano's middle C sat before notes were levelled.
+pub const TARGET_LOUDNESS_DB: f32 = -20.0;
+/// The `gain_db` at which a note sounds at `TARGET_LOUDNESS_DB`.
+pub const REF_GAIN_DB: f32 = -6.0;
+
+/// Loudness in dB of a buffer, K-weighted as in ITU-R BS.1770 (a high-pass near 38 Hz and a
+/// +4 dB shelf above about 1.7 kHz, which follow how loud tones of different pitch sound).
+/// With `window` it is the loudest stretch of that length (momentary loudness, the way a note's
+/// loudness is heard, so a slow swell is judged by its full level, not its start); without it,
+/// the whole buffer. `None` when silent.
+pub fn loudness_db(buf: &SoundBuffer, window: Option<f64>) -> Option<f32> {
+    let sr = buf.sample_rate.max(1) as f64;
+    let n = buf.frames();
+    if n == 0 {
+        return None;
+    }
+    let mut shelf = Biquad::high_shelf(
+        sr,
+        1681.974_450_955_533,
+        3.999_843_853_973_347,
+        0.707_175_236_955_419_6,
+    );
+    let mut hp = Biquad::high_pass(sr, 38.135_470_876_024_44, 0.500_327_037_323_877_3);
+    let sq: Vec<f64> = (0..n)
+        .map(|i| {
+            let x = 0.5 * (buf.data[2 * i] + buf.data[2 * i + 1]) as f64;
+            let y = hp.run(shelf.run(x));
+            y * y
+        })
+        .collect();
+    let ms = match window {
+        None => sq.iter().sum::<f64>() / n as f64,
+        Some(w) => {
+            let len = ((w * sr) as usize).clamp(1, n);
+            let hop = (len / 4).max(1);
+            let mut best = 0.0f64;
+            let mut start = 0;
+            loop {
+                let end = (start + len).min(n);
+                best = best.max(sq[start..end].iter().sum::<f64>() / len as f64);
+                if end == n {
+                    break;
+                }
+                start += hop;
+            }
+            best
+        }
+    };
+    (ms > 1e-12).then(|| (10.0 * ms.log10()) as f32)
+}
+
+/// A direct-form I biquad (RBJ cookbook designs).
+struct Biquad {
+    b: [f64; 3],
+    a: [f64; 2],
+    x: [f64; 2],
+    y: [f64; 2],
+}
+
+impl Biquad {
+    fn new(b: [f64; 3], a: [f64; 3]) -> Self {
+        Biquad {
+            b: [b[0] / a[0], b[1] / a[0], b[2] / a[0]],
+            a: [a[1] / a[0], a[2] / a[0]],
+            x: [0.0; 2],
+            y: [0.0; 2],
+        }
+    }
+
+    fn high_shelf(sr: f64, fc: f64, gain_db: f64, q: f64) -> Self {
+        let a = 10f64.powf(gain_db / 40.0);
+        let w = 2.0 * std::f64::consts::PI * fc / sr;
+        let (sw, cw) = w.sin_cos();
+        let alpha = sw / (2.0 * q);
+        let sa = 2.0 * a.sqrt() * alpha;
+        Biquad::new(
+            [
+                a * ((a + 1.0) + (a - 1.0) * cw + sa),
+                -2.0 * a * ((a - 1.0) + (a + 1.0) * cw),
+                a * ((a + 1.0) + (a - 1.0) * cw - sa),
+            ],
+            [
+                (a + 1.0) - (a - 1.0) * cw + sa,
+                2.0 * ((a - 1.0) - (a + 1.0) * cw),
+                (a + 1.0) - (a - 1.0) * cw - sa,
+            ],
+        )
+    }
+
+    fn high_pass(sr: f64, fc: f64, q: f64) -> Self {
+        let w = 2.0 * std::f64::consts::PI * fc / sr;
+        let (sw, cw) = w.sin_cos();
+        let alpha = sw / (2.0 * q);
+        Biquad::new(
+            [(1.0 + cw) / 2.0, -(1.0 + cw), (1.0 + cw) / 2.0],
+            [1.0 + alpha, -2.0 * cw, 1.0 - alpha],
+        )
+    }
+
+    fn run(&mut self, x: f64) -> f64 {
+        let y = self.b[0] * x + self.b[1] * self.x[0] + self.b[2] * self.x[1]
+            - self.a[0] * self.y[0]
+            - self.a[1] * self.y[1];
+        self.x = [x, self.x[0]];
+        self.y = [y, self.y[0]];
+        y
+    }
 }
 
 fn velocity_for(gain_db: f32) -> i32 {
@@ -90,6 +202,7 @@ impl Renderer {
             fonts,
             click_hi,
             click_lo,
+            levels: Mutex::new(HashMap::new()),
         }
     }
 
@@ -115,61 +228,114 @@ impl Renderer {
         (ms / 1000.0 * self.sample_rate as f64).round().max(0.0) as usize
     }
 
-    /// Mixes all events into one buffer (with a release tail).
+    /// Mixes all events into one buffer (with a release tail). Every note is brought to the same
+    /// loudness whatever its timbre and register (`level_gain`), then `gain_db` applies on top;
+    /// notes sounding together share the loudness of one.
     pub fn render_events(&self, events: &[SoundEvent]) -> SoundBuffer {
         let end_ms = events
             .iter()
             .map(|e| e.start_ms + e.dur_ms)
             .fold(0.0, f64::max);
         let mut out = SoundBuffer::silent(self.sample_rate, self.frames(end_ms + 600.0));
-        // SoundFont events are grouped per bank so each bank renders in one synthesizer pass.
-        let mut by_bank: HashMap<Option<String>, Vec<(&SoundEvent, u8)>> = HashMap::new();
+        let together = |e: &SoundEvent| {
+            events
+                .iter()
+                .filter(|o| o.start_ms <= e.start_ms + 1.0 && e.start_ms < o.start_ms + o.dur_ms)
+                .count()
+                .max(1) as f32
+        };
+        // SoundFont events are grouped per timbre so each renders in one synthesizer pass.
+        let mut groups: std::collections::BTreeMap<&str, Vec<&SoundEvent>> = Default::default();
         for e in events {
-            match Timbre::parse(&e.timbre) {
-                Some(Timbre::Gm(p)) if self.fonts.gm.is_some() => {
-                    by_bank.entry(None).or_default().push((e, p))
-                }
-                Some(Timbre::SoundFont { bank, program })
-                    if self.fonts.banks.contains_key(&bank) =>
-                {
-                    by_bank.entry(Some(bank)).or_default().push((e, program))
-                }
-                Some(Timbre::Gm(p)) => {
-                    // No General MIDI bank installed: a built-in approximation of the instrument family.
-                    let wave = fallback_wave(p);
-                    let tone = self.synth_note(wave, e);
-                    out.mix(&tone, self.frames(e.start_ms), 1.0);
-                }
-                Some(Timbre::SoundFont { .. }) => {
-                    let tone = self.synth_note("soft_piano", e);
-                    out.mix(&tone, self.frames(e.start_ms), 1.0);
-                }
-                Some(Timbre::Synth(w)) => {
-                    let tone = self.synth_note(&w, e);
-                    out.mix(&tone, self.frames(e.start_ms), 1.0);
-                }
-                Some(Timbre::Shepard) => {
-                    let tone = self.shepard_note(e);
-                    out.mix(&tone, self.frames(e.start_ms), 1.0);
-                }
-                None => {
-                    let tone = self.synth_note("sine", e);
-                    out.mix(&tone, self.frames(e.start_ms), 1.0);
-                }
+            if self.soundfont_of(&e.timbre).is_some() {
+                groups.entry(e.timbre.as_str()).or_default().push(e);
+                continue;
             }
+            let tone = self.render_one(e);
+            let gain = self.level_gain(&e.timbre, e.midi) / together(e).sqrt();
+            out.mix(&tone, self.frames(e.start_ms), gain);
         }
-        for (bank, evs) in by_bank {
-            let sf = match &bank {
-                None => self.fonts.gm.clone(),
-                Some(b) => self.fonts.banks.get(b).cloned(),
-            };
-            if let Some(sf) = sf {
-                let rendered = self.render_soundfont(&sf, &evs);
-                out.mix(&rendered, 0, 1.0);
-            }
+        for (timbre, evs) in groups {
+            let (sf, program) = self.soundfont_of(timbre).expect("grouped as a SoundFont");
+            let mut midis: Vec<i32> = evs.iter().map(|e| e.midi).collect();
+            midis.sort();
+            let mid = midis[midis.len() / 2];
+            let k = evs.iter().map(|e| together(e)).fold(1.0, f32::max);
+            let pairs: Vec<(&SoundEvent, u8)> = evs.iter().map(|e| (*e, program)).collect();
+            let rendered = self.render_soundfont(&sf, &pairs);
+            out.mix(&rendered, 0, self.level_gain(timbre, mid) / k.sqrt());
         }
         out.limit(0.95);
         out
+    }
+
+    /// The SoundFont and program a timbre plays from, when that bank is loaded.
+    fn soundfont_of(&self, timbre: &str) -> Option<(Arc<SoundFont>, u8)> {
+        match Timbre::parse(timbre) {
+            Some(Timbre::Gm(p)) => self.fonts.gm.clone().map(|sf| (sf, p)),
+            Some(Timbre::SoundFont { bank, program }) => {
+                self.fonts.banks.get(&bank).cloned().map(|sf| (sf, program))
+            }
+            _ => None,
+        }
+    }
+
+    /// One note from an oscillator, a Shepard tone, or the stand-in for a missing SoundFont.
+    fn render_one(&self, e: &SoundEvent) -> SoundBuffer {
+        match Timbre::parse(&e.timbre) {
+            // No General MIDI bank installed: a built-in approximation of the instrument family.
+            Some(Timbre::Gm(p)) => self.synth_note(fallback_wave(p), e),
+            Some(Timbre::SoundFont { .. }) => self.synth_note("soft_piano", e),
+            Some(Timbre::Synth(w)) => self.synth_note(&w, e),
+            Some(Timbre::Shepard) => self.shepard_note(e),
+            None => self.synth_note("sine", e),
+        }
+    }
+
+    /// The gain that brings this timbre's note to `TARGET_LOUDNESS_DB` at `REF_GAIN_DB`: the
+    /// loudest 400 ms of a 0.8 s probe note, measured once per timbre and note.
+    fn level_gain(&self, timbre: &str, midi: i32) -> f32 {
+        let key = (timbre.to_string(), midi);
+        if let Some(g) = self
+            .levels
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&key)
+        {
+            return *g;
+        }
+        let probe = SoundEvent {
+            midi,
+            start_ms: 0.0,
+            dur_ms: 800.0,
+            timbre: timbre.to_string(),
+            gain_db: REF_GAIN_DB,
+            detune_cents: 0.0,
+        };
+        let buf = match self.soundfont_of(timbre) {
+            Some((sf, program)) => self.render_soundfont(&sf, &[(&probe, program)]),
+            None => self.render_one(&probe),
+        };
+        let g = match loudness_db(&buf, Some(0.4)) {
+            Some(l) => db_to_gain((TARGET_LOUDNESS_DB - l).clamp(-30.0, 24.0)),
+            None => 1.0,
+        };
+        self.levels
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(key, g);
+        g
+    }
+
+    /// Scales a whole buffer to `target` loudness (for the masks and the glissando).
+    fn normalise(&self, buf: &mut SoundBuffer, target: f32) {
+        if let Some(l) = loudness_db(buf, None) {
+            let g = db_to_gain((target - l).clamp(-30.0, 24.0));
+            for v in &mut buf.data {
+                *v *= g;
+            }
+        }
+        buf.limit(0.95);
     }
 
     fn render_soundfont(&self, sf: &Arc<SoundFont>, events: &[(&SoundEvent, u8)]) -> SoundBuffer {
@@ -402,10 +568,16 @@ impl Renderer {
                         0.12 * env * (rng.f64() as f32 * 2.0 - 1.0)
                     })
                     .collect();
-                Some(SoundBuffer::from_mono(self.sample_rate, &mono))
+                let mut buf = SoundBuffer::from_mono(self.sample_rate, &mono);
+                self.normalise(&mut buf, TARGET_LOUDNESS_DB - 8.0);
+                Some(buf)
             }
             Mask::ShepardGlissando => {
-                Some(self.shepard_glissando(SHEPARD_GLISSANDO_S as f64, GLISSANDO_S_PER_OCTAVE))
+                let mut buf =
+                    self.shepard_glissando(SHEPARD_GLISSANDO_S as f64, GLISSANDO_S_PER_OCTAVE);
+                // A little under the notes: it is long and is not listened to.
+                self.normalise(&mut buf, TARGET_LOUDNESS_DB - 4.0);
+                Some(buf)
             }
             Mask::ChromaticCluster => {
                 let events: Vec<SoundEvent> = (0..24)
@@ -750,6 +922,42 @@ mod tests {
         assert!(!v.is_empty());
         let pc = (v[v.len() / 2].round() as i32).rem_euclid(12);
         assert_eq!(pc, 2);
+    }
+
+    #[test]
+    fn notes_are_levelled_across_timbres_registers_and_chords() {
+        let r = r();
+        let note = |t: &str, m: i32| SoundEvent {
+            midi: m,
+            start_ms: 0.0,
+            dur_ms: 1000.0,
+            timbre: t.into(),
+            gain_db: REF_GAIN_DB,
+            detune_cents: 0.0,
+        };
+        for t in [
+            "synth:square",
+            "synth:sine",
+            "synth:soft_piano",
+            "shepard",
+            "gm:0",
+        ] {
+            for m in [48, 72, 95] {
+                let l = loudness_db(&r.render_events(&[note(t, m)]), Some(0.4)).unwrap();
+                assert!((l - TARGET_LOUDNESS_DB).abs() < 1.0, "{t} {m}: {l}");
+            }
+        }
+        // gain_db still applies on top, and a chord is about as loud as one note.
+        let mut quiet = note("synth:square", 60);
+        quiet.gain_db = REF_GAIN_DB - 12.0;
+        let l = loudness_db(&r.render_events(&[quiet]), Some(0.4)).unwrap();
+        assert!((l - (TARGET_LOUDNESS_DB - 12.0)).abs() < 1.0, "{l}");
+        let chord: Vec<SoundEvent> = [60, 64, 67]
+            .iter()
+            .map(|m| note("synth:triangle", *m))
+            .collect();
+        let l = loudness_db(&r.render_events(&chord), Some(0.4)).unwrap();
+        assert!((l - TARGET_LOUDNESS_DB).abs() < 2.0, "{l}");
     }
 
     #[test]
