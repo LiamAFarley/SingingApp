@@ -2161,11 +2161,29 @@ fn degree_number(id: &str) -> i32 {
     id.trim_start_matches(['b', '#']).parse().unwrap_or(1)
 }
 
-/// The fixed-do name (C is do) of the note `semis` above `tonic`, spelt as the key writes it:
-/// degree `number` picks the letter, so in G major 7 is fa♯ and in F major 4 is si♭.
+/// The chromatic fixed-do name (C is do) of the note `semis` above `tonic`, spelt as the key
+/// writes it: degree `number` picks the letter, then sharps take an i and flats an e (di ri fi si
+/// li; ra me se le te), so in G major 7 is fi and in F major 4 is te; B is ti and G♯ si. A
+/// spelling with no syllable of its own (E♯, F♭, B♯, C♭, double sharps and flats) is named as
+/// the note it sounds.
 fn fixed_do(tonic: PitchClass, mode: KeyMode, semis: i32, number: i32) -> String {
-    const SYLLABLES: [&str; 7] = ["do", "re", "mi", "fa", "sol", "la", "si"];
     const NATURAL: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+    // Per letter C–B: flat, natural, sharp; empty where the spelling is another note's.
+    const NAMES: [[&str; 3]; 7] = [
+        ["", "do", "di"],
+        ["ra", "re", "ri"],
+        ["me", "mi", ""],
+        ["", "fa", "fi"],
+        ["se", "sol", "si"],
+        ["le", "la", "li"],
+        ["te", "ti", ""],
+    ];
+    // By pitch class: the natural, sharp or flat name of the note that sounds.
+    const NATURALS: [&str; 12] = [
+        "do", "", "re", "", "mi", "fa", "", "sol", "", "la", "", "ti",
+    ];
+    const SHARPS: [&str; 12] = ["", "di", "", "ri", "", "", "fi", "", "si", "", "li", ""];
+    const FLATS: [&str; 12] = ["", "ra", "", "me", "", "", "se", "", "le", "", "te", ""];
     // The tonic's letter as the key is usually written (D♭, E♭, F♯, A♭, B♭ major; C♯, E♭, F♯,
     // G♯, B♭ minor).
     let letters = match mode {
@@ -2173,15 +2191,26 @@ fn fixed_do(tonic: PitchClass, mode: KeyMode, semis: i32, number: i32) -> String
         KeyMode::Minor => [0, 0, 1, 2, 2, 3, 3, 4, 4, 5, 6, 6],
     };
     let letter = (letters[tonic.index() as usize] + number - 1).rem_euclid(7) as usize;
-    let target = (tonic.index() as i32 + semis).rem_euclid(12);
-    let accidental = match (target - NATURAL[letter] + 6).rem_euclid(12) - 6 {
-        -2 => "♭♭",
-        -1 => "♭",
-        1 => "♯",
-        2 => "♯♯",
-        _ => "",
-    };
-    format!("{}{accidental}", SYLLABLES[letter])
+    let target = (tonic.index() as i32 + semis).rem_euclid(12) as usize;
+    let accidental = (target as i32 - NATURAL[letter] + 6).rem_euclid(12) - 6;
+    if (-1..=1).contains(&accidental) {
+        let name = NAMES[letter][(accidental + 1) as usize];
+        if !name.is_empty() {
+            return name.into();
+        }
+    }
+    let name = [
+        NATURALS[target],
+        if accidental > 0 {
+            SHARPS[target]
+        } else {
+            FLATS[target]
+        },
+    ]
+    .into_iter()
+    .find(|n| !n.is_empty())
+    .unwrap_or(SHARPS[target]);
+    name.into()
 }
 
 fn gen_interval_comparison(
@@ -4952,10 +4981,17 @@ mod tests {
                     degree_number(DEGREE_IDS[s as usize])
                 ))
                 .collect::<Vec<_>>(),
-            ["sol", "la", "si", "do", "re", "mi", "fa♯"]
+            ["sol", "la", "ti", "do", "re", "mi", "fi"]
         );
-        assert_eq!(fixed_do(PitchClass::new(5), KeyMode::Major, 5, 4), "si♭");
-        assert_eq!(fixed_do(PitchClass::new(3), KeyMode::Minor, 3, 3), "sol♭");
+        assert_eq!(fixed_do(PitchClass::new(5), KeyMode::Major, 5, 4), "te");
+        assert_eq!(fixed_do(PitchClass::new(3), KeyMode::Minor, 3, 3), "se");
+        // G♯ is si; D♭ ra; E♯ and B♯ are named as the notes they sound, fa and do.
+        assert_eq!(fixed_do(PitchClass::new(9), KeyMode::Major, 11, 7), "si");
+        assert_eq!(fixed_do(PitchClass::new(1), KeyMode::Major, 0, 1), "ra");
+        assert_eq!(fixed_do(PitchClass::new(6), KeyMode::Major, 11, 7), "fa");
+        assert_eq!(fixed_do(PitchClass::new(1), KeyMode::Minor, 11, 7), "do");
+        // A double sharp (F𝄪 in G♯ minor) is the note it sounds: sol.
+        assert_eq!(fixed_do(PitchClass::new(8), KeyMode::Minor, 11, 7), "sol");
         // Fixed do is the default label; a key per question cadences on each change.
         let b = block(
             r#"{"type": "scale_degree_id", "count": 6, "params": {"keys": "all", "key_change": "per_trial"}}"#,
@@ -4969,7 +5005,7 @@ mod tests {
                 || c.label.starts_with("mi")
                 || c.label.starts_with("fa")
                 || c.label.starts_with("la")
-                || c.label.starts_with("si")));
+                || c.label.starts_with("ti")));
         }
         let every = block(
             r#"{"type": "scale_degree_id", "count": 4, "params": {"cadence": "every", "cadence_bpm": 60}}"#,
@@ -5002,7 +5038,7 @@ mod tests {
             let x = t.explain.as_deref().unwrap();
             assert!(x.starts_with("sol → "), "{x}");
             if t.correct == "m3" {
-                assert_eq!(x, "sol → si♭");
+                assert_eq!(x, "sol → te");
                 assert_eq!(t.stimulus["diatonic"], false);
                 seen_m3 = true;
             }

@@ -436,7 +436,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::SingInterval,
-            "The first note is given; sing both notes of the interval in time with the metronome. Reports interval error. in_key=true plays a cadence first (cadence plan as for intervals) and starts from the tonic (start tonic) or any scale note (start random), staying in the scale unless chromatic; the prompt names the notes with labels (fixed do by default), e.g. From sol, sing si.",
+            "The first note is given; sing both notes of the interval in time with the metronome. Reports interval error. in_key=true plays a cadence first (cadence plan as for intervals) and starts from the tonic (start tonic) or any scale note (start random), staying in the scale unless chromatic; the prompt names the notes with labels (fixed do by default), e.g. From sol, sing ti.",
             schema_of::<SingIntervalParams>(),
             json!({"type": "sing_interval", "count": 12, "params": {"intervals": ["M3", "P5"], "directions": ["up"], "tempo_bpm": 80}}),
         ),
@@ -472,7 +472,7 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::ScaleDegreeId,
-            "Scale degrees, as in Functional Ear Trainer: a cadence sets the key, one note plays, the user names its degree; after answering the note walks diatonically to the tonic, each answer lighting up as it sounds (resolution: nearest = 2-4 down and 5-7 up, ascending, descending, none). labels: fixed_do (default; C is do, so buttons name the key's notes, e.g. sol la si do re mi fa# sol in G), solfege (movable do) or numbers. upper_tonic (default true) adds 8, the tonic above the cadence's. Build levels with `degrees` (e.g. [\"1\",\"2\",\"3\"], then add degrees; chromatic ones like b2 or #4 later), a fixed key (keys [\"C\"]), one random key for the block (keys \"all\", key_change per_block) or a new key every question (key_change per_trial). cadence: start (default in one key), key_change (default when the key changes) or every; cadence_bpm sets its tempo. resolve_before_answer is a learning aid for new degrees; octaves [-1,0,1] for range.",
+            "Scale degrees, as in Functional Ear Trainer: a cadence sets the key, one note plays, the user names its degree; after answering the note walks diatonically to the tonic, each answer lighting up as it sounds (resolution: nearest = 2-4 down and 5-7 up, ascending, descending, none). labels: fixed_do (default; C is do, so buttons name the key's notes, e.g. sol la ti do re mi fi sol in G, with di ri fi si li for sharps and ra me se le te for flats), solfege (movable do) or numbers. upper_tonic (default true) adds 8, the tonic above the cadence's. Build levels with `degrees` (e.g. [\"1\",\"2\",\"3\"], then add degrees; chromatic ones like b2 or #4 later), a fixed key (keys [\"C\"]), one random key for the block (keys \"all\", key_change per_block) or a new key every question (key_change per_trial). cadence: start (default in one key), key_change (default when the key changes) or every; cadence_bpm sets its tempo. resolve_before_answer is a learning aid for new degrees; octaves [-1,0,1] for range.",
             schema_of::<ScaleDegreeParams>(),
             json!({"type": "scale_degree_id", "count": 30, "feedback": "after_trial", "params": {"keys": ["C"], "degrees": ["1", "2", "3"]}}),
         ),

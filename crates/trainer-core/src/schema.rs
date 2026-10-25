@@ -707,8 +707,9 @@ pub enum DegreeLabels {
     Numbers,
     /// Movable do with do-based minor: the tonic is always do (do re me fa sol le te).
     Solfege,
-    /// Fixed do: C is always do, so the buttons name the key's actual notes (in G major: sol la
-    /// si do re mi fa♯ sol), with the degree number beside each.
+    /// Chromatic fixed do: C is always do, so the buttons name the key's actual notes (in G
+    /// major: sol la ti do re mi fi sol), sharps with i (di ri fi si li) and flats with e (ra me
+    /// se le te), with the degree number beside each.
     #[default]
     FixedDo,
 }
@@ -2792,7 +2793,7 @@ pub struct IdentifyTrial {
     /// Played as soon as the result is shown, e.g. a scale degree walking to the tonic.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_answer: Option<Vec<SoundEvent>>,
-    /// Added to the result, e.g. the two notes of an interval in a key ("sol → si").
+    /// Added to the result, e.g. the two notes of an interval in a key ("sol → ti").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explain: Option<String>,
     /// Which answer each MIDI note stands for, so the answer lights up while it sounds (a
