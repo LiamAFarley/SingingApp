@@ -1359,6 +1359,16 @@ select.sing-part {
 .session.flashing h1 {
   color: inherit;
 }
+.answer-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 99px;
+  margin-right: 0.45em;
+  vertical-align: -0.08em;
+  box-shadow: 0 0 0 2px var(--bg);
+}
+
 .result.flash-word {
   font-size: 34px;
   font-weight: 700;

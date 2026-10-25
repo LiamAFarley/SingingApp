@@ -143,15 +143,20 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
         }
         if let Exercise::PitchId(p) = &b.exercise {
             // A stream is too fast to chain intervals, and a 13-semitone jump rule defeats it.
-            let chaining_closed =
-                p.pacing != Pacing::Respond || p.min_jump_semitones >= 13 || p.min_octave_step >= 2;
+            // Under three octaves there is no room for one, and nothing else to suggest.
+            let span =
+                p.octaves.iter().max().unwrap_or(&0) - p.octaves.iter().min().unwrap_or(&0) + 1;
+            let chaining_closed = p.pacing != Pacing::Respond
+                || p.min_jump_semitones >= 13
+                || p.min_octave_step >= 2
+                || span < 3;
             if p.mask == Mask::None
                 && b.effective_feedback().shows_trial_result()
                 && !chaining_closed
             {
                 warnings.push(issue(
-                    format!("{path}.params.mask"),
-                    "without a mask, each answer reveals a labelled pitch that can be used as a relative reference for the next trial",
+                    format!("{path}.params.min_jump_semitones"),
+                    "each answer reveals a labelled pitch that can be used as a relative reference for the next trial; spread notes over three octaves with min_jump_semitones 13",
                 ));
             }
         }
@@ -263,10 +268,13 @@ mod tests {
             &ctx,
         );
         assert!(r.ok, "{:?}", r.errors);
-        // The pool misuse twice, and the holdout training block shows answers with no mask or
-        // jump rule.
+        // The pool misuse twice, and the holdout training block shows answers with no jump rule.
         assert_eq!(r.warnings.len(), 3, "{:?}", r.warnings);
-        assert!(r.warnings.iter().any(|w| w.path == "blocks[1].params.mask"));
+        assert!(
+            r.warnings
+                .iter()
+                .any(|w| w.path == "blocks[1].params.min_jump_semitones")
+        );
         assert!(
             r.estimated_minutes > 2.0 && r.estimated_minutes < 6.0,
             "{}",

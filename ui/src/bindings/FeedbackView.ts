@@ -44,4 +44,8 @@ errorless: boolean,
 /**
  * Tint behind the result, the colour of the note that played.
  */
-flash_color: string | null, };
+flash_color: string | null, 
+/**
+ * The note's colour beside a named result; unlike `flash_color` the marks stay.
+ */
+answer_color: string | null, };

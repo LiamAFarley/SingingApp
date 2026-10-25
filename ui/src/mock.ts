@@ -369,7 +369,7 @@ function sightFeedback(): FeedbackView {
     tuner: null,
     auto_advance_ms: null,
     hidden: false,
-    dictation: null, errorless: false, flash_color: null,
+    dictation: null, errorless: false, flash_color: null, answer_color: null,
   };
 }
 
@@ -454,6 +454,7 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
     dictation: { target, answer: { ...target, notes: answer }, target_marks, answer_marks },
     errorless: false,
     flash_color: null,
+    answer_color: null,
   };
 }
 
@@ -694,7 +695,7 @@ function sungFeedback(): FeedbackView {
     tuner: null,
     auto_advance_ms: null,
     hidden: false,
-    dictation: null, errorless: false, flash_color: null,
+    dictation: null, errorless: false, flash_color: null, answer_color: null,
   };
 }
 
@@ -754,7 +755,7 @@ function startScenario() {
   if (scenario === "contrast" || scenario === "contrast-flash") {
     const base = { session_id: "demo", title: "Absolute pitch: today's set", block_index: 1, block_count: 3, block_title: "Contrast · Name the word", block_kind: "pitch_id" as const, trial_index: 7, trial_count: 20, done_in_block: 7, correct_in_block: 6, feedback_mode: "errorless" as const, outline: OUTLINE, trial: contrastTrial() };
     if (scenario === "contrast") emit({ phase: "answering", ...base });
-    else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57" } });
+    else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57", answer_color: null } });
   } else if (scenario === "pitch") {
     emit({ phase: "answering", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, block_title: "Name the note", block_kind: "pitch_id", trial_index: 6, trial_count: 60, done_in_block: 6, correct_in_block: 5, trial: choiceTrial() });
   } else if (scenario === "sung" || scenario === "sung-feedback") {
@@ -773,7 +774,7 @@ function startScenario() {
     emit({ phase: "feedback", feedback: {
       correct: false, summary: "Sang G3 (80 cents flat), did not settle", correct_choice: null, answered: null, cents: -80,
       notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: true, can_show_answer: false,
-      can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null, errorless: false, flash_color: null,
+      can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null, errorless: false, flash_color: null, answer_color: null,
       tuner: { pitch_class: 8, midi: null, name: "A♭", reference_midi: 56 },
     } });
   } else if (scenario === "sing-pitch") {
@@ -821,7 +822,7 @@ function startScenario() {
           tuner: null,
           auto_advance_ms: null,
           hidden: false,
-          dictation: null, errorless: false, flash_color: null,
+          dictation: null, errorless: false, flash_color: null, answer_color: null,
         },
       });
     }
@@ -878,7 +879,7 @@ function runnerCommand(c: RunnerCommand) {
           can_play_answer: false,
           can_hear_choices: true,
           tuner: null,
-          dictation: null, errorless: false, flash_color: null,
+          dictation: null, errorless: false, flash_color: null, answer_color: "#e6c229",
           auto_advance_ms: correct ? 900 : null,
           hidden: false,
         },

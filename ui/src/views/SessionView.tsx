@@ -122,10 +122,19 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
   // After a colour answer the whole screen takes the right colour, with readable text.
   const flashing = phase === "feedback" && !!runner.feedback?.flash_color;
   const fill = flashing ? tint(runner.feedback!.flash_color!, "#ffffff", 1) : undefined;
+  // A named answer keeps its marks; the note's colour shows behind them.
+  const answerColor = phase === "feedback" ? runner.feedback?.answer_color : null;
   return (
     <div
       className={`session ${flashing ? "flashing" : ""}`}
-      style={fill ?? (flash ? { background: `color-mix(in srgb, ${flash} 16%, var(--bg))` } : undefined)}
+      style={
+        fill ??
+        (flash
+          ? { background: `color-mix(in srgb, ${flash} 16%, var(--bg))` }
+          : answerColor
+            ? { background: `color-mix(in srgb, ${answerColor} 30%, var(--bg))` }
+            : undefined)
+      }
     >
       <div className="session-head">
         <div>
@@ -425,7 +434,12 @@ function Result({ runner }: { runner: RunnerState }) {
     return <div className="result flash-word">{c?.word ?? c?.label ?? ""}</div>;
   }
   const cls = fb.correct === true ? "correct" : fb.correct === false ? "wrong" : "";
-  return <div className={`result ${cls}`}>{fb.summary}</div>;
+  return (
+    <div className={`result ${cls}`}>
+      {fb.answer_color && <span className="answer-swatch" style={{ background: fb.answer_color }} />}
+      {fb.summary}
+    </div>
+  );
 }
 
 function NextButton({ auto }: { auto: number | null }) {

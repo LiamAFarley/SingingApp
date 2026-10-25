@@ -1252,6 +1252,7 @@ mod tests {
         let tr = track(&sig, &TrackOptions::new(SR));
         let trial = SingPitchTrial {
             exercise: ExerciseKind::SingPitch,
+            answer_color: None,
             prompt: "Sing E♭".into(),
             target_class: PitchClass::new(3),
             target_midi: None,

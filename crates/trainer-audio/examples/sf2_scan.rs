@@ -33,7 +33,11 @@ fn main() -> anyhow::Result<()> {
             detune_cents: 0.0,
         };
         let b = r.render_events(&[e]);
-        let mono: Vec<f32> = b.data.chunks_exact(2).map(|c| 0.5 * (c[0] + c[1])).collect();
+        let mono: Vec<f32> = b
+            .data
+            .chunks_exact(2)
+            .map(|c| 0.5 * (c[0] + c[1]))
+            .collect();
         let tr = track(&mono, &TrackOptions::new(48_000.0));
         let mut v: Vec<f32> = tr
             .frames
@@ -44,7 +48,11 @@ fn main() -> anyhow::Result<()> {
         v.sort_by(|a, b| a.total_cmp(b));
         let med = v.get(v.len() / 2).copied();
         let voiced = v.len();
-        let total = tr.frames.iter().filter(|f| f.t >= 0.15 && f.t <= 0.65).count();
+        let total = tr
+            .frames
+            .iter()
+            .filter(|f| f.t >= 0.15 && f.t <= 0.65)
+            .count();
         match med {
             Some(m) => {
                 let cents = (m - midi as f32) * 100.0;

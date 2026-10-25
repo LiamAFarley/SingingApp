@@ -225,6 +225,8 @@ struct SessionRun<'a> {
 
 /// A block answered without help starts with the clearing sound if a named tone was heard this
 /// recently.
+/// How fast the last trial's sound fades when the next one starts.
+const TRIAL_FADE_MS: f64 = 120.0;
 const SCRUB_WITHIN: Duration = Duration::from_secs(5 * 60);
 
 fn secs(engine: &AudioEngine, frame: u64) -> f64 {
@@ -424,6 +426,11 @@ impl<'a> SessionRun<'a> {
                 let mut assisted = trial.is_practice();
                 let mut last_correct: Option<bool> = None;
                 loop {
+                    // Whatever the last trial left ringing fades out quickly instead of
+                    // sounding under this one, and nothing waits for it to end.
+                    engine.fade_bus(Bus::Prompt, TRIAL_FADE_MS);
+                    engine.fade_bus(Bus::Guide, TRIAL_FADE_MS);
+                    self.hold_until = None;
                     self.set(|st| {
                         st.trial_index = ti as u32;
                         st.phase = Phase::Preparing;
@@ -1424,6 +1431,11 @@ impl<'a> SessionRun<'a> {
             hidden: !show,
             errorless: shown.errorless,
             flash_color: flash,
+            answer_color: match trial {
+                TrialSpec::Identify(t) if show => t.answer_color.clone(),
+                TrialSpec::SingPitch(t) if show => t.answer_color.clone(),
+                _ => None,
+            },
         };
         self.set(|st| {
             st.phase = Phase::Feedback;

@@ -275,7 +275,7 @@ fn benchmark_course() -> Course {
                     "type": "sing_pitch", "title": "Sing from memory", "count": 12, "assessment": true,
                     "pre_mask": "shepard_glissando", "tags": ["ap.benchmark", "ap.production"],
                     "instructions": "Sing each note as you remember it. Nothing plays it for you, and there is no feedback. Do not work it out from the note before.",
-                    "params": { "classes": "all", "response_ms": 4000, "pre_mask": "random_tones",
+                    "params": { "classes": "all", "response_ms": 4000,
                                 "reveal_target_after": false },
                 })),
                 block(AP_BENCHMARK, 1, true, json!({
@@ -327,14 +327,14 @@ fn transfer_course() -> Course {
                                 "octaves": WEEKLY_OCTAVES, "min_jump_semitones": 13, "mask": "none",
                                 "deadline_ms": TEST_DEADLINE_MS },
                 })),
-                // Shepard tones are heard by name only, so a jump rule cannot separate them; a
-                // stream of random tones between them does instead.
+                // Shepard tones are heard by name only, so a jump rule cannot separate them; with
+                // no results until the end, a labelled tone gives nothing away.
                 block(AP_TRANSFER, 1, true, json!({
                     "type": "pitch_id", "title": "Shepard tones", "count": 24, "assessment": true,
                     "pre_mask": "shepard_glissando", "tags": ["ap.transfer", "ap.transfer.chroma"],
-                    "instructions": "Each tone has a note name but no high or low. Random tones play between them.",
+                    "instructions": "Each tone has a note name but no high or low.",
                     "params": { "classes": "all", "pool": "holdout", "timbres": ["shepard"], "octaves": [4],
-                                "mask": "random_tones", "deadline_ms": TEST_DEADLINE_MS },
+                                "deadline_ms": TEST_DEADLINE_MS },
                 })),
             ],
         }],

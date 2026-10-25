@@ -27,9 +27,7 @@ fn main() -> anyhow::Result<()> {
     let stem = args.next().expect("bank stem");
     let out = PathBuf::from(args.next().expect("output dir"));
     std::fs::create_dir_all(&out)?;
-    let programs: Vec<u8> = args
-        .map(|p| p.parse().expect("program number"))
-        .collect();
+    let programs: Vec<u8> = args.map(|p| p.parse().expect("program number")).collect();
     assert!(!programs.is_empty(), "give at least one program");
 
     let sf = SoundFonts::load_file(&path)?;
@@ -50,7 +48,11 @@ fn main() -> anyhow::Result<()> {
                 detune_cents: 0.0,
             };
             let b = r.render_events(&[e]);
-            let mono: Vec<f32> = b.data.chunks_exact(2).map(|c| 0.5 * (c[0] + c[1])).collect();
+            let mono: Vec<f32> = b
+                .data
+                .chunks_exact(2)
+                .map(|c| 0.5 * (c[0] + c[1]))
+                .collect();
             let tr = track(&mono, &TrackOptions::new(48_000.0));
             let mut v: Vec<f32> = tr.frames.iter().filter_map(|f| f.midi).collect();
             v.sort_by(|a, b| a.total_cmp(b));

@@ -373,6 +373,11 @@ impl AudioEngine {
         self.command(Command::StopBus(bus));
     }
 
+    /// Fades a bus to silence over `ms` and drops what it had scheduled.
+    pub fn fade_bus(&self, bus: Bus, ms: f64) {
+        self.command(Command::FadeBus(bus, self.frames_from_ms(ms) as u32));
+    }
+
     pub fn stop_all(&self) {
         self.command(Command::StopAll);
     }

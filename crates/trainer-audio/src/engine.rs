@@ -54,6 +54,9 @@ pub enum Command {
         id: u64,
     },
     StopBus(Bus),
+    /// Fades what is sounding on a bus to silence over this many frames, and drops what has
+    /// not started yet.
+    FadeBus(Bus, u32),
     StopAll,
     SetBusGain(Bus, f32),
     SetMasterGain(f32),
@@ -65,8 +68,8 @@ struct Voice {
     start: u64,
     gain: f32,
     bus: Bus,
-    /// Fade-out in progress: remaining frames.
-    fading: Option<u32>,
+    /// Fade-out in progress: remaining frames, and the fade's length.
+    fading: Option<(u32, u32)>,
 }
 
 const FADE_FRAMES: u32 = 256;
@@ -159,17 +162,32 @@ impl OutputCore {
                 }
                 Command::Stop { id } => {
                     for v in self.voices.iter_mut().filter(|v| v.id == id) {
-                        v.fading.get_or_insert(FADE_FRAMES);
+                        v.fading.get_or_insert((FADE_FRAMES, FADE_FRAMES));
                     }
                 }
                 Command::StopBus(bus) => {
                     for v in self.voices.iter_mut().filter(|v| v.bus == bus) {
-                        v.fading.get_or_insert(FADE_FRAMES);
+                        v.fading.get_or_insert((FADE_FRAMES, FADE_FRAMES));
+                    }
+                }
+                Command::FadeBus(bus, frames) => {
+                    let frames = frames.max(1);
+                    let now = self.frame;
+                    for v in self.voices.iter_mut().filter(|v| v.bus == bus) {
+                        if v.start >= now {
+                            v.fading = Some((0, 1));
+                        } else {
+                            // A shorter fade already under way is kept.
+                            match v.fading {
+                                Some((rem, _)) if rem <= frames => {}
+                                _ => v.fading = Some((frames, frames)),
+                            }
+                        }
                     }
                 }
                 Command::StopAll => {
                     for v in self.voices.iter_mut() {
-                        v.fading.get_or_insert(FADE_FRAMES);
+                        v.fading.get_or_insert((FADE_FRAMES, FADE_FRAMES));
                     }
                 }
                 Command::SetBusGain(bus, g) => self.bus_target[bus.index()] = g.clamp(0.0, 4.0),
@@ -213,8 +231,8 @@ impl OutputCore {
                     let src = ((f - v.start) as usize) * 2;
                     let mut g =
                         v.gain * (gains_start[bi] + gains_step[bi] * k as f32) * self.master;
-                    if let Some(rem) = v.fading.as_mut() {
-                        g *= *rem as f32 / FADE_FRAMES as f32;
+                    if let Some((rem, total)) = v.fading.as_mut() {
+                        g *= *rem as f32 / *total as f32;
                         if *rem == 0 {
                             finished = true;
                             break;
@@ -394,6 +412,36 @@ mod tests {
         }
         assert!(buf.iter().all(|&s| s == 0.0));
         assert!(garbage.pop().is_ok());
+    }
+
+    #[test]
+    fn fade_bus_ramps_down_and_drops_unstarted_voices() {
+        let (mut tx, mut garbage, mut out, _) = core(2);
+        let flat = Arc::new(SoundBuffer::from_mono(48_000, &[0.5; 48_000]));
+        for (id, at) in [(1, 0), (2, 10_000)] {
+            tx.push(Command::Play {
+                id,
+                buf: flat.clone(),
+                at,
+                gain: 1.0,
+                bus: Bus::Prompt,
+            })
+            .unwrap();
+        }
+        let mut buf = vec![0.0; 128 * 2];
+        out.process(&mut buf);
+        tx.push(Command::FadeBus(Bus::Prompt, 1000)).unwrap();
+        let mut faded = vec![0.0; 1000 * 2];
+        out.process(&mut faded);
+        // Down steadily from full level, not cut.
+        assert!((faded[0] - 0.5).abs() < 0.01);
+        assert!(faded[1000] > 0.2 && faded[1000] < 0.3);
+        assert!(faded[1998].abs() < 0.01);
+        for _ in 0..100 {
+            out.process(&mut buf);
+        }
+        assert!(buf.iter().all(|&s| s == 0.0));
+        assert!(garbage.pop().is_ok() && garbage.pop().is_ok());
     }
 
     #[test]

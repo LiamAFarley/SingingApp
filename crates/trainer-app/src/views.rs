@@ -190,6 +190,8 @@ pub struct FeedbackView {
     pub errorless: bool,
     /// Tint behind the result, the colour of the note that played.
     pub flash_color: Option<String>,
+    /// The note's colour beside a named result; unlike `flash_color` the marks stay.
+    pub answer_color: Option<String>,
 }
 
 /// The note to lock on to with the tuner after singing a single note.

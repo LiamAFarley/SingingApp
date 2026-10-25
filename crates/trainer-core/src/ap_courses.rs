@@ -134,11 +134,6 @@ fn color_params(
         "hide_note_names": errorless,
         "requeue_misses": errorless,
     });
-    // In one octave no jump rule is possible, so a short burst of random tones separates the
-    // notes; over more octaves the jump rule does.
-    if octaves.len() < 3 {
-        params["mask"] = json!("random_tones");
-    }
     if classes.len() < 12 {
         params["out_of_set_rate"] = json!(0.15);
     }
@@ -416,11 +411,6 @@ fn contrast_params(
         "hide_note_names": true,
         "requeue_misses": errorless,
     });
-    // In one octave no jump rule is possible, so a short burst of random tones separates the
-    // notes; over more octaves the jump rule does.
-    if octaves.len() < 3 {
-        params["mask"] = json!("random_tones");
-    }
     if classes.len() < 12 {
         params["out_of_set_rate"] = json!(0.15);
     }

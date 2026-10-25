@@ -62,7 +62,7 @@ The repeatable core measure. If only one number is tracked, it comes from this t
 
 | Block | What | Why |
 | --- | --- | --- |
-| 1. Sing from memory | 12 notes, each asked by name. Nothing is played, there is no feedback, a stream of random tones plays before each prompt, any octave counts. | Absolute pitch production, measured before a single reference tone has been heard today. It runs first for that reason. |
+| 1. Sing from memory | 12 notes, each asked by name. Nothing is played, there is no feedback, any octave counts. | Absolute pitch production, measured before a single reference tone has been heard today. It runs first for that reason. |
 | 2. Name the piano note | 60 notes, General MIDI piano (`gm:0`), C3–B6, two-octave steps. | Naming on a trained instrument in the trained register. This is the headline number. |
 
 Piano is one of the training instruments, and C3–B6 is the training register, so this measures
@@ -83,8 +83,9 @@ reports per-instrument accuracy.
 | 2. Shepard tones | 24 tones that have a note name but no height. | The **height check**. If piano naming climbs while Shepard stays near 8%, the user is learning how high notes sound, not what they are. |
 
 Shepard tones have no height, so a jump rule cannot separate them. Two Shepard tones in a row are
-heard as a short interval, which makes working one out from the last easy. This block therefore
-plays a short stream of random tones between notes.
+heard as a short interval, which could make working one out from the last easy. With no results
+until the end of the block, though, no tone is ever labelled, so there is nothing to work from.
+Nothing plays between notes.
 
 ### 3.4 UCSF-style test (`ap_ucsf_style`): every 28 days, on the test day
 
@@ -150,7 +151,7 @@ eight-week course (13.9% to 31.7%). So:
 | Sign | Likely meaning | Action |
 | --- | --- | --- |
 | "Answers lean … semitones high/low on almost every note" | Audio setup, not the ear. A 44.1 vs 48 kHz sample-rate mismatch shifts everything by about 1.5 semitones. | Ask the user to check the Scarlett and Windows sample rates match the app, then retest. Do not change training on it. |
-| `chaining_likely` on sung notes | The user sang each note relative to the previous one. The steps between notes are right while the notes themselves are off. | Remind them to reset between notes (breathe, let the random tones go by) and to sing each note from memory alone. Discount that run's sung accuracy. |
+| `chaining_likely` on sung notes | The user sang each note relative to the previous one. The steps between notes are right while the notes themselves are off. | Remind them to reset between notes (breathe, wait a moment) and to sing each note from memory alone. Discount that run's sung accuracy. |
 | Piano accuracy up, `shepard` near 8% | Learning height, not note names. | More Shepard and chord-colour work (`ap_chord_colors`), and use the full four octaves. |
 | Piano good, untrained instruments much lower | Instrument-specific learning. | More instrument variety in training (the training pool already mixes General MIDI and SoundFont instruments). |
 | Named note heard before the run | Possibly inflated. | Note it and do not compare it with clean runs. Remind the user that tests go first in the day. |

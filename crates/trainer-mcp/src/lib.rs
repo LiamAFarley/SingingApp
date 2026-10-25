@@ -56,11 +56,13 @@ switched off. Use set_course_level only to correct a level. The dashboard pools 
 90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory with a block pre_mask \
 \"shepard_glissando\" and keep consecutive tones apart: min_jump_semitones 13 and, over four or more octaves, \
 min_octave_step 2 (each tone two octaves from the last, so its octave gives nothing away). Masks between trials (mask, \
-pre_mask) are off by default: the jump rule and an answer limit do that job without the wait. Use random_tones (under a \
-second) only where no jump rule is possible, e.g. notes in one octave or Shepard tones. feedback \"errorless\" stores \
+pre_mask) are off by default: the jump rule and an answer limit do that job without the wait. Do not put sounds between \
+trials; the user finds them useless. feedback \"errorless\" stores \
 the true result but shows no error mark; it is the default on early colour, chord and contrast levels unless the user turns \
 \"Errorless early levels\" off (set_ap_prefs). Label sets (list_label_sets, set_label_set) are note_names, taneda_colors, \
-gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \
+gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. \
+Every absolute-pitch block that shows results also shows each note's Taneda colour (tinted keys, and the note's colour \
+with the result); blocks without feedback show none. Do not \
 treat a block without feedback as passed if the tones were within an octave of each other or a named note was heard in the \
 previous few minutes without the clearing sound.\n\
 - Relative pitch starts from rp_core, the daily core (on in the plan by default): twelve short mixed sessions in four \

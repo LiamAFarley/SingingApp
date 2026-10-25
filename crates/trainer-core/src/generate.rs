@@ -86,7 +86,7 @@ pub fn generate_block(
     if n > 1000 {
         return err("count must be at most 1000");
     }
-    match &block.exercise {
+    let mut trials = match &block.exercise {
         Exercise::PitchId(p) => gen_pitch_id(p, n, &mut rng, ctx),
         Exercise::SingPitch(p) => gen_sing_pitch(p, n, &mut rng, ctx),
         Exercise::PitchPairing(p) => gen_pairing(p, n, &mut rng, ctx),
@@ -117,6 +117,64 @@ pub fn generate_block(
         Exercise::SyllableCheck(p) => audiation::gen_syllable_check(p, n, &mut rng),
         Exercise::CadenceId(p) => audiation::gen_cadence_id(p, n, &mut rng),
         Exercise::BassLine(p) => audiation::gen_bass_line(p, n, &mut rng, ctx),
+    }?;
+    if block.effective_feedback().shows_trial_result() {
+        color_answers(&mut trials, ctx);
+    }
+    Ok(trials)
+}
+
+/// Absolute-pitch trials that show their answers also show each note's colour: the buttons are
+/// tinted, and the played note's colour sits behind the result, so naming a note reinforces its
+/// colour too. Colours a label set already gives are kept.
+fn color_answers(trials: &mut [TrialSpec], ctx: &GenContext) {
+    let Some(set) = ctx.label_set(crate::labels::TANEDA_COLORS) else {
+        return;
+    };
+    let color_of =
+        |pc: PitchClass| crate::labels::class_entry(&set, pc).and_then(|e| e.color.clone());
+    // "C#" or "C#4".
+    let class_of = |id: &str| -> Option<PitchClass> {
+        id.trim_end_matches(|c: char| c.is_ascii_digit() || c == '-')
+            .parse()
+            .ok()
+    };
+    let played = |stimulus: &serde_json::Value| {
+        stimulus
+            .get("pitch_class")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<PitchClass>().ok())
+    };
+    for trial in trials {
+        match trial {
+            TrialSpec::Identify(t)
+                if matches!(
+                    t.exercise,
+                    ExerciseKind::PitchId | ExerciseKind::TonalCenterId
+                ) =>
+            {
+                for c in &mut t.choices {
+                    if c.color.is_none() {
+                        c.color = class_of(&c.id).and_then(color_of);
+                    }
+                }
+                if t.flash_color.is_none() {
+                    t.answer_color = played(&t.stimulus)
+                        .or_else(|| class_of(&t.correct))
+                        .and_then(color_of);
+                }
+            }
+            TrialSpec::SingPitch(t) => t.answer_color = color_of(t.target_class),
+            TrialSpec::Pairing(t) if t.flash_color.is_none() => {
+                t.flash_color = played(&t.stimulus).and_then(color_of);
+            }
+            TrialSpec::Detect(t)
+                if t.exercise == ExerciseKind::PitchDetect && t.target_color.is_none() =>
+            {
+                t.target_color = color_of(t.target_class);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1018,6 +1076,7 @@ fn gen_chord_color(
             choice_sounds,
             pace_ms: None,
             flash_color: color,
+            answer_color: None,
             label_set: Some(crate::labels::EGUCHI_CHORDS.into()),
             requeue_misses: p.requeue_misses,
             requeue_octaves: Vec::new(),
@@ -1072,6 +1131,7 @@ fn gen_chord_color(
                 flash_color: note_set
                     .as_ref()
                     .and_then(|s| crate::labels::class_entry(s, pc).and_then(|e| e.color.clone())),
+                answer_color: None,
                 label_set: note_set.as_ref().map(|_| p.note_labels.clone()),
                 requeue_misses: false,
                 requeue_octaves: Vec::new(),
@@ -1112,6 +1172,7 @@ fn gen_sing_pitch(
         };
         out.push(TrialSpec::SingPitch(SingPitchTrial {
             exercise: ExerciseKind::SingPitch,
+            answer_color: None,
             prompt,
             target_class: pc,
             target_midi,
@@ -1234,6 +1295,7 @@ fn gen_anchor_song(
                 let pc = PitchClass::of_midi(first.midi());
                 out.push(TrialSpec::SingPitch(SingPitchTrial {
                     exercise: ExerciseKind::AnchorSong,
+                    answer_color: None,
                     prompt: format!("Sing the first note of “{}”", a.title),
                     target_class: pc,
                     target_midi: None,
@@ -5277,9 +5339,44 @@ mod tests {
     }
 
     #[test]
+    fn naming_shows_note_colours_only_when_answers_show() {
+        let taneda = crate::labels::builtin_set(crate::labels::TANEDA_COLORS).unwrap();
+        for t in pitch_trials(
+            r#"{"type": "pitch_id", "count": 6, "feedback": "after_trial"}"#,
+            3,
+        ) {
+            // Letter names stay; every key takes its note's colour.
+            for c in t.choices.iter().filter(|c| c.id != OTHER) {
+                assert_eq!(c.color, taneda.entries[&c.id].color, "{}", c.id);
+                assert_ne!(c.word.as_deref(), Some(c.label.as_str()));
+            }
+            let pc = t.stimulus["pitch_class"].as_str().unwrap();
+            assert_eq!(t.answer_color, taneda.entries[pc].color);
+            assert!(t.flash_color.is_none());
+        }
+        for t in pitch_trials(r#"{"type": "pitch_id", "count": 6, "assessment": true}"#, 3) {
+            assert!(t.choices.iter().all(|c| c.color.is_none()));
+            assert!(t.answer_color.is_none());
+        }
+        // A trial with its own colours keeps them.
+        let b = block(
+            r#"{"type": "pitch_id", "count": 4, "params": {"labels": "gervain_names", "color_flash": true, "hide_note_names": true}}"#,
+        );
+        for t in generate_block(&b, 1, &GenContext::default()).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            assert!(t.flash_color.is_some() && t.answer_color.is_none());
+        }
+        let b = block(r#"{"type": "sing_pitch", "count": 3}"#);
+        for t in generate_block(&b, 1, &GenContext::default()).unwrap() {
+            let TrialSpec::SingPitch(t) = t else { panic!() };
+            assert_eq!(t.answer_color, taneda.entries[t.target_class.name()].color);
+        }
+    }
+
+    #[test]
     fn streams_are_paced_without_masks() {
         let trials = pitch_trials(
-            r#"{"type": "pitch_id", "count": 5, "params": {"pacing": {"stream": {"ioi_ms": 1400}}, "mask": "random_tones"}}"#,
+            r#"{"type": "pitch_id", "count": 5, "params": {"pacing": {"stream": {"ioi_ms": 1400}}, "mask": "noise"}}"#,
             1,
         );
         for t in &trials {

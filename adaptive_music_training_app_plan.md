@@ -318,7 +318,7 @@ Per-stimulus parameters: pitch, timbre, duration, loudness, attack shape, option
 
 ### Masks between trials
 
-A mask between AP trials stops the next trial being solved by relative pitch from the previous, labelled one: `none | noise | random_tones | chromatic_cluster | shepard_glissando`. The default is `random_tones` (~1.5 s of random pitches across the range) whenever feedback reveals answers. `min_jump_semitones` (13 over three octaves) closes the same loophole without a mask.
+A mask between AP trials stops the next trial being solved by relative pitch from the previous, labelled one: `none | noise | chromatic_cluster | shepard_glissando`. The default is `none`; the random-tone burst was removed (old specs asking for `random_tones` get no mask). `min_jump_semitones` (13 over three octaves) closes the same loophole without a mask.
 
 A block's `pre_mask` plays once before its first trial. `shepard_glissando` is a 20-second, endlessly descending Shepard–Risset glissando that clears echoic and tonal memory. An absolute-pitch block without feedback gets it automatically when a named tone was heard in the last five minutes (`pre_mask: none` turns that off).
 
@@ -378,7 +378,7 @@ Every sung exercise with more than one note (pitch matching sequences, patterns,
         "pool": "training",
         "duration_ms": 1000,
         "deadline_ms": 3000,
-        "mask": "random_tones",
+        "mask": "none",
         "answer": "pitch_class"
       }
     },
@@ -390,7 +390,7 @@ Every sung exercise with more than one note (pitch matching sequences, patterns,
         "classes": "all",
         "prompt": "text",
         "response_ms": 4000,
-        "pre_mask": "random_tones",
+        "pre_mask": "none",
         "reveal_target_after": true
       },
       "grading": { "mode": "pitch_class", "category_tol_cents": 50, "in_tune_tol_cents": 20 }

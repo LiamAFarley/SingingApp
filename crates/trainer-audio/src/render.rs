@@ -536,40 +536,6 @@ impl Renderer {
         let mut rng = Rng::new(seed ^ 0x6d61_736b);
         match mask {
             Mask::None => None,
-            Mask::RandomTones => {
-                let mut events = Vec::new();
-                let mut t = 0.0;
-                for _ in 0..6 {
-                    let midi = rng.range_i32(45, 88);
-                    let wave = if rng.chance(0.5) {
-                        "synth:sine"
-                    } else {
-                        "synth:triangle"
-                    };
-                    events.push(SoundEvent {
-                        midi,
-                        start_ms: t,
-                        dur_ms: 95.0,
-                        timbre: wave.into(),
-                        gain_db: -14.0,
-                        detune_cents: rng.range_f64(-40.0, 40.0) as f32,
-                    });
-                    t += 110.0;
-                }
-                // Without the release tail render_events leaves for instruments: the next tone
-                // follows straight on.
-                let mut buf = self.render_events(&events);
-                let keep = self.frames(t + 60.0).min(buf.frames());
-                buf.data.truncate(keep * 2);
-                let fade = self.frames(20.0).min(keep);
-                for i in 0..fade {
-                    let g = i as f32 / fade as f32;
-                    let f = keep - 1 - i;
-                    buf.data[f * 2] *= g;
-                    buf.data[f * 2 + 1] *= g;
-                }
-                Some(buf)
-            }
             Mask::Noise => {
                 let n = self.frames(1200.0);
                 let mono: Vec<f32> = (0..n)
@@ -983,14 +949,11 @@ mod tests {
     fn masks_render() {
         let r = r();
         assert!(r.render_mask(Mask::None, 1).is_none());
-        for m in [Mask::RandomTones, Mask::Noise, Mask::ChromaticCluster] {
+        for m in [Mask::Noise, Mask::ChromaticCluster] {
             let b = r.render_mask(m, 1).unwrap();
             assert!(b.duration_s() > 0.5 && b.duration_s() < 2.5, "{m:?}");
             assert!(b.peak() > 0.01 && b.peak() <= 0.95);
         }
-        // Random tones end where the last tone does, with no silent tail.
-        let b = r.render_mask(Mask::RandomTones, 1).unwrap();
-        assert!(b.duration_s() < 0.8, "{}", b.duration_s());
     }
 
     #[test]

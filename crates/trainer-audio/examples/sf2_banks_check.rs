@@ -38,7 +38,11 @@ fn main() -> anyhow::Result<()> {
                 detune_cents: 0.0,
             };
             let b = r.render_events(&[e]);
-            let mono: Vec<f32> = b.data.chunks_exact(2).map(|c| 0.5 * (c[0] + c[1])).collect();
+            let mono: Vec<f32> = b
+                .data
+                .chunks_exact(2)
+                .map(|c| 0.5 * (c[0] + c[1]))
+                .collect();
             let tr = track(&mono, &TrackOptions::new(48_000.0));
             let mut v: Vec<f32> = tr
                 .frames
@@ -51,8 +55,7 @@ fn main() -> anyhow::Result<()> {
             println!(
                 "  p{program:<3} {preset:<22} peak {:.2}  midi {}",
                 b.peak(),
-                med.map(|m| format!("{m:.1}"))
-                    .unwrap_or_else(|| "-".into())
+                med.map(|m| format!("{m:.1}")).unwrap_or_else(|| "-".into())
             );
         }
     }
