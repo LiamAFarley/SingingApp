@@ -247,15 +247,21 @@ fn color_block(
 
 fn chord_colors_course() -> Course {
     let mut levels = Vec::new();
-    for i in 0..labels::EGUCHI.len() {
+    // The first level already has two chords to tell apart (Red and Yellow): one alone would be
+    // a question with a single answer.
+    for i in 1..labels::EGUCHI.len() {
         let active = &labels::EGUCHI[..=i];
         let ids: Vec<&str> = active.iter().map(|c| c.id).collect();
         let names = active.iter().map(|c| c.word).collect::<Vec<_>>().join(", ");
         let errorless = i < 4;
-        let n = i as u32 + 1;
+        let n = i as u32;
         let chord = &labels::EGUCHI[i];
         levels.push(Level {
-            title: chord.word.into(),
+            title: if i == 1 {
+                format!("{} and {}", labels::EGUCHI[0].word, chord.word)
+            } else {
+                chord.word.into()
+            },
             summary: format!("Active colours: {names}. The next chord is added after 100% and 14 days."),
             pass: PassRule::Spacing { min: 1.0, days: 14.0 },
             blocks: vec![block(AP_CHORD_COLORS, n, true, json!({
@@ -276,7 +282,7 @@ fn chord_colors_course() -> Course {
         summary: "After each chord, one note plays alone and is named by its colour.".into(),
         pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
         blocks: vec![
-            block(AP_CHORD_COLORS, 15, false, json!({
+            block(AP_CHORD_COLORS, labels::EGUCHI.len() as u32, false, json!({
                 "type": "chord_color_id",
                 "title": "Chord, then a note",
                 "count": 12,
@@ -285,7 +291,7 @@ fn chord_colors_course() -> Course {
                 "instructions": "Name the chord colour, then the note that follows.",
                 "params": params,
             })),
-            block(AP_CHORD_COLORS, 15, true, json!({
+            block(AP_CHORD_COLORS, labels::EGUCHI.len() as u32, true, json!({
                 "type": "chord_color_id",
                 "title": "Check: no feedback",
                 "count": 10,
