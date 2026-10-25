@@ -894,6 +894,7 @@ fn suggested_minutes(id: &str) -> f32 {
         AP_CONTRAST => 6.0,
         crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY => 8.0,
         crate::rp_courses::RP_SING | crate::rp_courses::RP_SIGHT => 6.0,
+        crate::audiation_courses::RP_CORE => 12.0,
         id if id.starts_with("rp_") => 6.0,
         _ => 10.0,
     }
@@ -971,14 +972,14 @@ pub fn daily_plan(db: &Db) -> Result<DailyPlan> {
     let mut plan: DailyPlan = db.get_setting(PLAN_KEY)?.unwrap_or_default();
     // Courses that no longer exist (renamed or merged) drop out.
     plan.courses.retain(|p| find_course(&p.course).is_some());
-    // Ladder courses added since the plan was saved start inactive, except the first two
-    // relative-pitch courses, so that set has something in it from the start.
+    // Ladder courses added since the plan was saved start inactive, except the relative-pitch
+    // core and scale degrees, so that set has something in it from the start.
     for c in builtin_courses() {
         if c.schedule == Schedule::Ladder && !plan.courses.iter().any(|p| p.course == c.id) {
             let minutes = suggested_minutes(&c.id);
             let active = matches!(
                 c.id.as_str(),
-                crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY
+                crate::audiation_courses::RP_CORE | crate::rp_courses::RP_DEGREES
             );
             plan.courses.push(PlanCourse {
                 course: c.id,

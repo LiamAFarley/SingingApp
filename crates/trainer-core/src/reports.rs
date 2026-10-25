@@ -9,11 +9,13 @@ use ts_rs::TS;
 
 use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, test_runs};
 use crate::schema::{
-    AnchorSongParams, ChordColorParams, ChordIdParams, DictationParams, ExerciseKind,
-    HarmonyParams, IncidentalPairingParams, IntervalComparisonParams, IntervalIdParams,
-    PatternParams, PitchDetectParams, PitchIdParams, PitchMatchParams, PitchPairingParams,
-    ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams,
-    SingPitchParams, SustainParams, TonalCenterIdParams,
+    AnchorSongParams, BassLineParams, CadenceIdParams, ChordColorParams, ChordIdParams,
+    DictationParams, ErrorDetectionParams, ExerciseKind, HarmonyParams, IncidentalPairingParams,
+    IntervalComparisonParams, IntervalIdParams, MelodicUpdatingParams, NBackParams,
+    PatternDialogueParams, PatternMemoryParams, PatternParams, PitchDetectParams, PitchIdParams,
+    PitchMatchParams, PitchPairingParams, RestingToneParams, ScaleDegreeParams, ScaleIdParams,
+    SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams, SustainParams,
+    SyllableCheckParams, TonalCenterIdParams, TonalPatternParams,
 };
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
 use crate::storage::{Db, SessionRow, SessionStatus, TrialFilter, TrialRow};
@@ -479,6 +481,66 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Two intervals play one after the other (melodic or harmonic); answer which is larger, or that they are the same. `differences` are the semitone gaps used (0 = same; smaller gaps are harder). `shared` picks per question which note they share: first (same starting note, easiest), second (same last note), near (starts a semitone to a minor third apart) or none (hardest). pairs_from_pool: both intervals come from `intervals`, always two different ones, and there is no Same answer.",
             schema_of::<IntervalComparisonParams>(),
             json!({"type": "interval_comparison", "count": 24, "params": {"differences": [0, 1, 2], "directions": ["ascending"]}}),
+        ),
+        entry(
+            ExerciseKind::RestingTone,
+            "Find home (Gordon's resting tone): a phrase that outlines a tonality without a cadence stops mid-way; after a breath, sing the resting tone (answer: sing, any octave) or name it (answer: name: do major, la minor, re Dorian, mi Phrygian, fa Lydian, sol Mixolydian, ti Locrian). modes are scale ids (major, natural_minor, harmonic_minor, dorian, phrygian, lydian, mixolydian, locrian).",
+            schema_of::<RestingToneParams>(),
+            json!({"type": "resting_tone", "count": 10, "params": {"modes": ["major", "natural_minor"]}}),
+        ),
+        entry(
+            ExerciseKind::TonalPattern,
+            "Tonal pattern echo (Music Learning Theory): after the tonic chord a 2–5 note pattern outlining a function (tonic, dominant, subdominant, or a two-note tendency resolution) plays on an even pulse; a silent breath (breath_beats), then echo it. passes: teaching_then_evaluation (each pattern twice, first with the tonic sounding under the echo, then alone), teaching or evaluation. syllables: neutral (on \"bum\"), solfege (syllables shown) or translate (heard on bum, echoed in solfège; shown afterwards).",
+            schema_of::<TonalPatternParams>(),
+            json!({"type": "tonal_pattern", "count": 12, "params": {"functions": ["tonic", "dominant"], "lengths": [3]}}),
+        ),
+        entry(
+            ExerciseKind::PatternDialogue,
+            "The I–V dialogue: the app sings a tonic or dominant pattern. stage first_pitch: sing back only its first note (the starting pitch of a dictation). same_function: answer with a different pattern of the same function. opposite_function: answer tonic with dominant, dominant with tonic. Free answers are graded on the notes' pitch classes (3–5 notes from the asked function).",
+            schema_of::<PatternDialogueParams>(),
+            json!({"type": "pattern_dialogue", "count": 10, "params": {"stage": "opposite_function"}}),
+        ),
+        entry(
+            ExerciseKind::NBack,
+            "Musical N-back for tonal working memory: a slow stream of scale degrees (degrees, one every ioi_ms) over a quiet tonic. mode recognize: tap Match when the note is the same as n back (scored as d′ like a detection stream; a lesson passes on d′). mode sing: a canon, singing each note n behind the app while the next sounds (headphones needed).",
+            schema_of::<NBackParams>(),
+            json!({"type": "n_back", "count": 2, "params": {"n": 2, "length": 24}}),
+        ),
+        entry(
+            ExerciseKind::MelodicUpdating,
+            "Melodic updating (Chenette): a 3–8 note melody plays without notation; an instruction then asks for a change done in the head (operations: replace_degree \"every mi becomes fa\", replace_position, shift up or down a step, retrograde, omit), chained `changes` times, with think_beats of silence to rehearse; then sing the changed melody.",
+            schema_of::<MelodicUpdatingParams>(),
+            json!({"type": "melodic_updating", "count": 8, "params": {"notes": [4, 5], "changes": 1}}),
+        ),
+        entry(
+            ExerciseKind::PatternMemory,
+            "Tonal short-term memory without notation. task same_different: a pattern, a gap, then the same pattern or one with a note changed (change: step, chromatic or any; transpose plays the second in another key). task probe (Sternberg): a melody, then one note; was it in the melody?",
+            schema_of::<PatternMemoryParams>(),
+            json!({"type": "pattern_memory", "count": 16, "params": {"task": "same_different", "notes": [4]}}),
+        ),
+        entry(
+            ExerciseKind::ErrorDetection,
+            "Single-pass error detection: the score shows and the tonic sounds; after pre_audiation_s of silent reading the melody plays once (no replay) with one note a step (or a semitone) off; tap that note. melody works as in sight_sing.",
+            schema_of::<ErrorDetectionParams>(),
+            json!({"type": "error_detection", "count": 6, "params": {"pre_audiation_s": 15}}),
+        ),
+        entry(
+            ExerciseKind::SyllableCheck,
+            "Mislabeled syllables (a solfège Stroop): a melody plays under its syllables, one of them a neighbour's name; tap the wrong one.",
+            schema_of::<SyllableCheckParams>(),
+            json!({"type": "syllable_check", "count": 12, "params": {"notes": [5]}}),
+        ),
+        entry(
+            ExerciseKind::CadenceId,
+            "Cadences in context: a four-part phrase with lead_in chords before the cadence; name the ending: perfect_authentic (V–I, tonic on top), imperfect_authentic (V–I, third or fifth on top), plagal (IV–I), half (on V) or deceptive (V–vi). The result names the chords in Roman numerals.",
+            schema_of::<CadenceIdParams>(),
+            json!({"type": "cadence_id", "count": 16, "params": {"cadences": ["perfect_authentic", "half", "deceptive"]}}),
+        ),
+        entry(
+            ExerciseKind::BassLine,
+            "Bass and guide-tone singing: sing the roots (line: roots) or the 3rd–7th guide-tone line (line: guide_tones) of a progression (i_iv_v_i, i_vi_iv_v_i, i_iv_i_v_i, i_ii_v_i, i_vi_ii_v_i, ii_v_i7, turnaround7) shown in Roman numerals, with the chords and their bass (backing: with_bass), without the bass (without_bass), or with only the tonic given (tonic_only).",
+            schema_of::<BassLineParams>(),
+            json!({"type": "bass_line", "count": 6, "params": {"line": "roots", "backing": "without_bass"}}),
         ),
         entry(
             ExerciseKind::Harmony,

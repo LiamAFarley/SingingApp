@@ -52,7 +52,7 @@ export function WorkshopPage({
   const [view, setView] = useState<WorkshopView | null>(null);
   const [custom, setCustom] = useState<CustomLevelView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"lessons" | "custom">(() => (remembered(`rp.tab.${course}`) === "custom" ? "custom" : "lessons"));
+  const [tabChoice, setTab] = useState<"lessons" | "custom">(() => (remembered(`rp.tab.${course}`) === "custom" ? "custom" : "lessons"));
   const [selected, setSelected] = useState<number | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<CustomLevel | null>(null);
@@ -71,6 +71,7 @@ export function WorkshopPage({
   useEffect(refresh, [refresh]);
   useBackendEvent("courses-changed", refresh);
 
+  const tab = view && !view.custom_levels ? "lessons" : tabChoice;
   const lessons = useMemo(() => view?.modules.flatMap((m) => m.lessons) ?? [], [view]);
   const current = view ? Math.min(view.current, view.lessons) : 1;
   const chosen = selected ?? current;
@@ -172,9 +173,11 @@ export function WorkshopPage({
         <button className={tab === "lessons" ? "on" : ""} onClick={() => switchTab("lessons")}>
           Lessons
         </button>
-        <button className={tab === "custom" ? "on" : ""} onClick={() => switchTab("custom")}>
-          Custom levels{custom.length > 0 ? ` (${custom.length})` : ""}
-        </button>
+        {view.custom_levels && (
+          <button className={tab === "custom" ? "on" : ""} onClick={() => switchTab("custom")}>
+            Custom levels{custom.length > 0 ? ` (${custom.length})` : ""}
+          </button>
+        )}
       </div>
 
       {editing ? (
@@ -259,7 +262,10 @@ export function WorkshopPage({
                           {mi + 1}.{li + 1} {l.title}
                           {l.test && <span className="badge" style={{ marginLeft: 8 }}>test</span>}
                         </span>
-                        {l.runs > 0 && <span className={`small num ${scoreClass(l.best, view.pass_mark)}`}>Score {pct(l.best)}</span>}
+                        {l.runs > 0 && l.best_d_prime != null && (
+                          <span className={`small num ${l.passed ? "good" : "close"}`}>d′ {l.best_d_prime.toFixed(1)}</span>
+                        )}
+                        {l.runs > 0 && l.best_d_prime == null && <span className={`small num ${scoreClass(l.best, view.pass_mark)}`}>Score {pct(l.best)}</span>}
                       </button>
                     ))}
                 </div>
@@ -323,9 +329,14 @@ export function WorkshopPage({
               {numberOf(chosen)} {lesson.title}
             </div>
             <div className="small faint">
-              {lesson.summary} {lesson.questions} questions, {Math.round(view.pass_mark * 100)}% to pass
-              {lesson.test ? ", no feedback until the end" : ""}.
-              {lesson.runs > 0 && ` Best ${pct(lesson.best)}, last ${pct(lesson.last)}.`}
+              {lesson.summary}{" "}
+              {lesson.parts > 1
+                ? ""
+                : lesson.detection
+                  ? `${lesson.questions} stream${lesson.questions > 1 ? "s" : ""}, d′ 2 to pass.`
+                  : `${lesson.questions} questions, ${Math.round(view.pass_mark * 100)}% to pass${lesson.test ? ", no feedback until the end" : ""}.`}
+              {lesson.runs > 0 && lesson.best_d_prime != null && ` Best d′ ${lesson.best_d_prime.toFixed(1)}, last ${lesson.last_d_prime?.toFixed(1)}.`}
+              {lesson.runs > 0 && lesson.best_d_prime == null && ` Best ${pct(lesson.best)}, last ${pct(lesson.last)}.`}
             </div>
           </div>
           <div className="lesson-bar-actions">
@@ -347,9 +358,11 @@ export function WorkshopPage({
                 min
               </label>
             )}
-            <button className="btn quiet small" onClick={() => newLevel(lesson)}>
-              Customise this lesson
-            </button>
+            {view.custom_levels && (
+              <button className="btn quiet small" onClick={() => newLevel(lesson)}>
+                Customise this lesson
+              </button>
+            )}
             {chosen !== current && (
               <button
                 className="btn small"

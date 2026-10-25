@@ -588,6 +588,82 @@ function MelodyForm({ p, set }: { p: P; set: (patch: P) => void }) {
   );
 }
 
+function SightFields({ p, set }: { p: P; set: (patch: P) => void }) {
+  const mode = get<string>(p, "mode", "read");
+  return (
+    <>
+      <Field label="How">
+        <Choice
+          options={[
+            { value: "read", label: "Sight singing" },
+            { value: "singback", label: "Singback (hear it, score hidden)" },
+            { value: "flash", label: "Flash score (read, then from memory)" },
+          ]}
+          value={mode}
+          onChange={(v) => set({ mode: v })}
+        />
+      </Field>
+      {mode === "flash" && (
+        <Field label="Reading time">
+          <span className="row" style={{ gap: 6 }}>
+            <input className="num" type="number" min={3} max={60} value={get<number>(p, "flash_s", 12)} onChange={(e) => set({ flash_s: Number(e.target.value) })} style={{ width: 64 }} />
+            <span className="small faint">seconds</span>
+          </span>
+        </Field>
+      )}
+      <Field label="Sung silently" hint="Silent notes are sung in your head; the note after them is graded as the re-entry.">
+        <Choice
+          options={[
+            { value: "none", label: "Nothing" },
+            { value: "bars", label: "Middle bars" },
+            { value: "strong_beats", label: "Beat 1" },
+            { value: "weak_beats", label: "All but beat 1" },
+          ]}
+          value={get<string>(p, "silent", "none")}
+          onChange={(v) => set({ silent: v })}
+        />
+      </Field>
+    </>
+  );
+}
+
+const TONALITIES: Opt[] = [
+  { id: "major", label: "do · major" },
+  { id: "natural_minor", label: "la · minor" },
+  { id: "harmonic_minor", label: "la · harmonic minor" },
+  { id: "dorian", label: "re · Dorian" },
+  { id: "phrygian", label: "mi · Phrygian" },
+  { id: "lydian", label: "fa · Lydian" },
+  { id: "mixolydian", label: "sol · Mixolydian" },
+  { id: "locrian", label: "ti · Locrian" },
+];
+
+function HomeForm({ p, set }: { p: P; set: (patch: P) => void }) {
+  return (
+    <>
+      <Field label="Tonalities">
+        <Toggles options={TONALITIES} value={get<string[]>(p, "modes", ["major", "natural_minor"])} onChange={(v) => set({ modes: v })} />
+      </Field>
+      <Field label="Answer">
+        <Choice
+          options={[
+            { value: "sing", label: "Sing the resting tone" },
+            { value: "name", label: "Name it" },
+          ]}
+          value={get<string>(p, "answer", "sing")}
+          onChange={(v) => set({ answer: v })}
+        />
+      </Field>
+      <Field label="Phrase length">
+        <span className="row" style={{ gap: 6 }}>
+          <input className="num" type="number" min={4} max={16} value={get<number>(p, "notes", 8)} onChange={(e) => set({ notes: Number(e.target.value) })} style={{ width: 64 }} />
+          <span className="small faint">notes before it stops</span>
+        </span>
+      </Field>
+    </>
+  );
+}
+
 /** The settings of one exercise, as a form. Unknown params are kept as they are. */
 export function LevelForm({ exercise, params, onChange }: { exercise: string; params: P; onChange: (p: P) => void }) {
   const set = (patch: P) => {
@@ -609,8 +685,16 @@ export function LevelForm({ exercise, params, onChange }: { exercise: string; pa
     case "scale_id":
       return <ScaleForm p={params} set={set} />;
     case "melodic_dictation":
-    case "sight_sing":
       return <MelodyForm p={params} set={set} />;
+    case "sight_sing":
+      return (
+        <>
+          <SightFields p={params} set={set} />
+          <MelodyForm p={params} set={set} />
+        </>
+      );
+    case "resting_tone":
+      return <HomeForm p={params} set={set} />;
     default:
       return <div className="small faint">No form for {exercise} yet.</div>;
   }

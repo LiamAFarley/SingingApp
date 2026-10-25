@@ -1756,3 +1756,87 @@ select.sing-part {
     align-items: stretch;
   }
 }
+
+.activity.wide {
+  grid-column: 1 / -1;
+}
+
+/* Audiation cues on sung trials ------------------------------------------ */
+
+.cue {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 600;
+  border: 2px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.cue-listen {
+  color: var(--text-muted);
+}
+
+.cue-think {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.cue-breathe {
+  border-color: #4a90c9;
+  color: #24679d;
+}
+
+.cue-silent {
+  border-color: var(--wrong);
+  background: var(--wrong-soft);
+  color: var(--wrong);
+}
+
+.cue-sing {
+  border-color: var(--correct);
+  background: var(--correct-soft);
+  color: var(--correct);
+}
+
+.breath-ring {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  animation: breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(0.6);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breath-ring {
+    animation: none;
+  }
+}
+
+.memory-blank {
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 16px;
+  font-weight: 500;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}

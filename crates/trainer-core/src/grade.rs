@@ -454,6 +454,9 @@ pub struct NoteResult {
     pub on_time: Option<bool>,
     pub onset_s: Option<f32>,
     pub offset_s: Option<f32>,
+    /// Sung silently by design (inner hearing): not graded.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub silent: bool,
 }
 
 struct Expected {
@@ -570,6 +573,179 @@ fn register_offset(expected: &[Expected], segs: &[NoteSegment]) -> f32 {
 /// Grades a sung timeline. `sing_start_s` is the capture time at which the trial's
 /// `sing_start_beat` falls (already latency-compensated).
 pub fn grade_sung(
+    trial: &SungTrial,
+    track: &PitchTrack,
+    cfg: &GradingConfig,
+    sing_start_s: f32,
+) -> TrialOutcome {
+    let mut out = if let Some(f) = &trial.free {
+        grade_free(trial, f, track, sing_start_s)
+    } else if !trial.silent.is_empty() {
+        grade_with_silent(trial, track, cfg, sing_start_s)
+    } else {
+        grade_targets(trial, track, cfg, sing_start_s)
+    };
+    if let Some(r) = &trial.reveal {
+        out.summary = format!(
+            "{} {r}",
+            out.summary.trim_end_matches('.').to_string() + "."
+        );
+    }
+    out
+}
+
+/// Notes sung in the head are left out of grading and come back as silent placeholders; the
+/// first note after a silent stretch (the re-entry) is reported on its own.
+fn grade_with_silent(
+    trial: &SungTrial,
+    track: &PitchTrack,
+    cfg: &GradingConfig,
+    sing_start_s: f32,
+) -> TrialOutcome {
+    let mut aloud = trial.clone();
+    aloud.silent.clear();
+    aloud.notes = trial
+        .notes
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !trial.silent.contains(i))
+        .map(|(_, n)| n.clone())
+        .collect();
+    let mut out = grade_targets(&aloud, track, cfg, sing_start_s);
+    let graded: Vec<NoteResult> = out
+        .metrics
+        .get("notes")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    let beat_s = 60.0 / trial.tempo_bpm;
+    let mut all = Vec::with_capacity(trial.notes.len());
+    let mut k = 0;
+    let mut reentry: Option<bool> = None;
+    for (i, n) in trial.notes.iter().enumerate() {
+        if trial.silent.contains(&i) {
+            all.push(NoteResult {
+                target_midi: n.midi,
+                expected_onset_s: sing_start_s + n.start_beat * beat_s,
+                matched: false,
+                sung_midi: None,
+                cents_error: None,
+                onset_error_ms: None,
+                correct: false,
+                in_tune: false,
+                on_time: None,
+                onset_s: None,
+                offset_s: None,
+                silent: true,
+            });
+        } else if let Some(r) = graded.get(k) {
+            if i > 0 && trial.silent.contains(&(i - 1)) && reentry.is_none() {
+                reentry = Some(r.correct);
+            }
+            all.push(r.clone());
+            k += 1;
+        }
+    }
+    out.metrics["notes"] = json!(all);
+    out.metrics["silent_notes"] = json!(trial.silent.len());
+    if let Some(ok) = reentry {
+        out.metrics["reentry_correct"] = json!(ok);
+        out.summary.push_str(if ok {
+            "; came back in on the right note"
+        } else {
+            "; the re-entry after singing silently was off"
+        });
+    }
+    out
+}
+
+/// A free answer: notes sung after singing starts must all be from the allowed set, between
+/// `min_notes` and `max_notes` of them, and not the prompt again.
+fn grade_free(
+    trial: &SungTrial,
+    f: &crate::schema::FreeResponse,
+    track: &PitchTrack,
+    sing_start_s: f32,
+) -> TrialOutcome {
+    let segs: Vec<NoteSegment> = segment_notes(track, &SegmentOptions::default())
+        .into_iter()
+        .filter(|s| s.offset_s > sing_start_s - 0.25 && s.duration_s() >= 0.12)
+        .collect();
+    if segs.is_empty() {
+        return no_voice_outcome();
+    }
+    let name = |pc: i32| {
+        f.names
+            .iter()
+            .find(|(p, _)| *p == pc)
+            .map(|(_, n)| n.clone())
+            .unwrap_or_else(|| {
+                PitchClass::new(pc.rem_euclid(12))
+                    .display_name()
+                    .to_string()
+            })
+    };
+    let mut results = Vec::new();
+    let mut pcs = Vec::new();
+    for sg in &segs {
+        let nearest = sg.median_midi.round() as i32;
+        let pc = nearest.rem_euclid(12);
+        let ok = f.allowed.contains(&pc);
+        pcs.push(pc);
+        results.push(NoteResult {
+            target_midi: nearest,
+            expected_onset_s: sg.onset_s,
+            matched: true,
+            sung_midi: Some(sg.median_midi),
+            cents_error: Some((sg.median_midi - nearest as f32) * 100.0),
+            onset_error_ms: None,
+            correct: ok,
+            in_tune: ok && (sg.median_midi - nearest as f32).abs() <= 0.25,
+            on_time: None,
+            onset_s: Some(sg.onset_s),
+            offset_s: Some(sg.offset_s),
+            silent: false,
+        });
+    }
+    let count_ok = (f.min_notes as usize..=f.max_notes as usize).contains(&pcs.len());
+    let all_ok = results.iter().all(|r| r.correct);
+    let copied = !f.differ_from.is_empty() && pcs == f.differ_from;
+    let correct = count_ok && all_ok && !copied;
+    let sung = pcs.iter().map(|p| name(*p)).collect::<Vec<_>>().join(" ");
+    let summary = if copied {
+        format!("You sang {sung}: the same pattern back. Answer with a different one.")
+    } else if !all_ok {
+        let wrong: Vec<String> = results
+            .iter()
+            .filter(|r| !r.correct)
+            .map(|r| name(r.target_midi.rem_euclid(12)))
+            .collect();
+        format!(
+            "You sang {sung}; {} is not part of {}.",
+            wrong.join(", "),
+            f.what
+        )
+    } else if !count_ok {
+        format!(
+            "You sang {sung}: {} notes, {}–{} were asked for.",
+            pcs.len(),
+            f.min_notes,
+            f.max_notes
+        )
+    } else {
+        format!("You sang {sung}: {}.", f.what)
+    };
+    let _ = trial;
+    TrialOutcome {
+        correct: Some(correct),
+        score: Some(results.iter().filter(|r| r.correct).count() as f32 / results.len() as f32),
+        rt_ms: None,
+        response: json!({ "voiced": true, "segments": segs.len() }),
+        metrics: json!({ "notes": results, "sung_pitch_classes": pcs, "copied": copied, "free": true }),
+        summary,
+    }
+}
+
+fn grade_targets(
     trial: &SungTrial,
     track: &PitchTrack,
     cfg: &GradingConfig,
@@ -729,6 +905,7 @@ pub fn grade_sung(
             on_time,
             onset_s: m.map(|m| m.onset_s),
             offset_s: m.map(|m| m.offset_s),
+            silent: false,
         });
         let _ = x.dur;
     }
@@ -1124,6 +1301,10 @@ mod tests {
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: json!({}),
         }
     }
@@ -1164,6 +1345,73 @@ mod tests {
         assert!((e0 - 10.0).abs() < 2.0, "{e0}");
         assert_eq!(o.correct, Some(false));
         assert!((o.score.unwrap() - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn free_answers_are_graded_on_their_pitch_classes() {
+        let sing = |notes: &[f32]| {
+            let mut sig = silence(SR, 1.0);
+            for m in notes {
+                let m = *m;
+                sig.extend(harmonic_tone(SR, 0.4, 440.0, move |_| m));
+                sig.extend(silence(SR, 0.15));
+            }
+            sig.extend(silence(SR, 0.5));
+            track(&sig, &TrackOptions::new(SR))
+        };
+        let mut trial = sung_trial(&[], 120.0, ExerciseKind::PatternDialogue);
+        trial.free = Some(crate::schema::FreeResponse {
+            allowed: vec![2, 5, 7, 11],
+            names: vec![
+                (2, "re".into()),
+                (5, "fa".into()),
+                (7, "sol".into()),
+                (11, "ti".into()),
+            ],
+            min_notes: 3,
+            max_notes: 5,
+            differ_from: vec![7, 11, 2],
+            what: "a different dominant pattern".into(),
+        });
+        let cfg = GradingConfig::resolve(&GradingOverrides::default(), PitchRefMode::AnyOctave);
+        let ok = grade_sung(&trial, &sing(&[67.0, 65.0, 62.0, 59.0]), &cfg, 1.0);
+        assert_eq!(ok.correct, Some(true), "{}", ok.summary);
+        assert!(ok.summary.contains("sol fa re ti"), "{}", ok.summary);
+        let copied = grade_sung(&trial, &sing(&[67.0, 71.0, 74.0]), &cfg, 1.0);
+        assert_eq!(copied.correct, Some(false));
+        assert_eq!(copied.metrics["copied"], json!(true));
+        let wrong = grade_sung(&trial, &sing(&[67.0, 64.0, 62.0]), &cfg, 1.0);
+        assert_eq!(wrong.correct, Some(false), "mi is not a dominant tone");
+    }
+
+    #[test]
+    fn silent_notes_are_not_graded_and_the_reentry_is() {
+        let mut trial = sung_trial(
+            &[
+                (60, 0.0, 1.0),
+                (62, 1.0, 1.0),
+                (64, 2.0, 1.0),
+                (65, 3.0, 1.0),
+            ],
+            120.0,
+            ExerciseKind::SightSing,
+        );
+        trial.silent = vec![1, 2];
+        trial.reveal = Some("Inner hearing.".into());
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 0.45, 440.0, |_| 60.0));
+        sig.extend(silence(SR, 1.05));
+        sig.extend(harmonic_tone(SR, 0.45, 440.0, |_| 65.0));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let cfg = GradingConfig::resolve(&GradingOverrides::default(), PitchRefMode::Absolute);
+        let o = grade_sung(&trial, &tr, &cfg, 1.0);
+        assert_eq!(o.correct, Some(true), "{}", o.summary);
+        let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert_eq!(notes.len(), 4);
+        assert!(notes[1].silent && notes[2].silent && !notes[3].silent);
+        assert_eq!(o.metrics["reentry_correct"], json!(true));
+        assert!(o.summary.ends_with("Inner hearing."), "{}", o.summary);
     }
 
     #[test]
@@ -1456,6 +1704,7 @@ mod tests {
             midi: if far { 48 } else { 60 },
         };
         let trial = DetectTrial {
+            exercise: ExerciseKind::PitchDetect,
             prompt: "Listen for C".into(),
             target_class: PitchClass::new(0),
             target_label: "C".into(),

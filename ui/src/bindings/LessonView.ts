@@ -8,11 +8,27 @@ level: number, title: string, summary: string,
 /**
  * No feedback until the end.
  */
-test: boolean, questions: number, runs: number, 
+test: boolean, questions: number, 
 /**
- * Best and latest score of a full run (0–1).
+ * Exercises in the lesson: one, or several in a core session.
  */
-best: number | null, last: number | null, last_at: string | null, passed: boolean, 
+parts: number, 
+/**
+ * The (first) exercise of the lesson.
+ */
+exercise: string, 
+/**
+ * Scored as d′ (a detection stream such as the N-back).
+ */
+detection: boolean, runs: number, 
+/**
+ * Best and latest score of a full run (0–1); for a session of several parts, its weakest part.
+ */
+best: number | null, last: number | null, 
+/**
+ * Detection lessons (N-back) are scored as d′.
+ */
+best_d_prime: number | null, last_d_prime: number | null, last_at: string | null, passed: boolean, 
 /**
  * The lesson's exercise settings, to start a custom level from.
  */

@@ -775,6 +775,13 @@ pub struct ScaleDegreeParams {
     pub timbres: Vec<TimbreId>,
     #[serde(default = "d_degree_tempo")]
     pub tempo_bpm: f32,
+    /// A silent pause after the note before the answers open, to audiate it (Gordon's breath).
+    /// A beat when not set; 0 turns it off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub think_ms: Option<u32>,
+    /// Ask more often for the degrees recently answered wrong (from the last few hundred answers).
+    #[serde(default = "d_true")]
+    pub adaptive: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
@@ -952,8 +959,25 @@ pub struct SingIntervalParams {
     pub chromatic: bool,
     #[serde(default)]
     pub labels: DegreeLabels,
+    /// Two-step help for hard intervals: `additive` sings an anchor interval first (a 5th, then
+    /// a step to the 6th), `complementary` sings a wide descending interval as its inversion up
+    /// and then the octave down. `none` sings it straight.
+    #[serde(default)]
+    pub scaffold: Scaffold,
     #[serde(flatten)]
     pub sung: SungOptions,
+}
+
+/// Two-step routes to a hard interval (Arnold; Wyatt and Schroeder).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Scaffold {
+    #[default]
+    None,
+    /// Via a perfect 4th, 5th or octave, then a step: M6 = P5 + M2, M7 = P8 − m2.
+    Additive,
+    /// A descending interval as its inversion up, then down an octave: m7 down = M2 up, octave down.
+    Complementary,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
@@ -1137,6 +1161,48 @@ pub struct SightSingParams {
     /// Move a cursor over the score while singing.
     #[serde(default)]
     pub follow_cursor: bool,
+    /// `read` (sight singing), `singback` (hear it, the score hidden, sing it back) or `flash`
+    /// (the score shows for `flash_s` with only the tonic sounding, then is sung from memory).
+    #[serde(default)]
+    pub mode: SightMode,
+    #[serde(default = "d_flash_s")]
+    pub flash_s: f32,
+    /// Kodály's silent singing: bars or beats sung in the head only, graded on re-entry.
+    #[serde(default)]
+    pub silent: SilentMode,
+    /// Bars sung silently with `silent: bars` (1-based; default the middle bars).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub silent_bars: Vec<u32>,
+}
+
+fn d_flash_s() -> f32 {
+    12.0
+}
+
+/// How a notated melody is met.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SightMode {
+    #[default]
+    Read,
+    /// Melody singback: heard after the key, sung back with the score hidden.
+    Singback,
+    /// A flash score: read it in silence, then sing it from memory.
+    Flash,
+}
+
+/// Which notes are sung silently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SilentMode {
+    #[default]
+    None,
+    /// The bars in `silent_bars`.
+    Bars,
+    /// Notes on beat 1 of each bar.
+    StrongBeats,
+    /// Every note not on beat 1.
+    WeakBeats,
 }
 
 impl Default for SightSingParams {
@@ -1635,6 +1701,579 @@ impl Default for ChordColorParams {
 // Blocks and sessions
 // ---------------------------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------------------------
+// Audiation: tonal context, tonal patterns, working memory, inner hearing, harmony, error detection
+// ---------------------------------------------------------------------------------------------
+
+fn d_rest_modes() -> Vec<ScaleKind> {
+    vec![ScaleKind::Major, ScaleKind::NaturalMinor]
+}
+fn d_phrase_notes() -> u32 {
+    8
+}
+fn d_tempo_96() -> f32 {
+    96.0
+}
+fn d_tempo_90() -> f32 {
+    90.0
+}
+fn d_tempo_80() -> f32 {
+    80.0
+}
+fn d_tempo_72() -> f32 {
+    72.0
+}
+fn d_one_beat() -> f32 {
+    1.0
+}
+
+/// How a resting tone is answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum RestingAnswer {
+    /// Sing it (any octave).
+    #[default]
+    Sing,
+    /// Name it: its syllable and so the tonality (do for major, la for minor, re for Dorian …).
+    Name,
+}
+
+/// Find home (Gordon's resting tone): a phrase that outlines a tonality without a cadence stops
+/// mid-way; breathe, then sing or name its resting tone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct RestingToneParams {
+    /// Tonalities: major, natural_minor, harmonic_minor, dorian, phrygian, lydian, mixolydian,
+    /// locrian.
+    #[serde(default = "d_rest_modes")]
+    pub modes: Vec<ScaleKind>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub answer: RestingAnswer,
+    /// Notes in the phrase before it stops (4–16).
+    #[serde(default = "d_phrase_notes")]
+    pub notes: u32,
+    #[serde(default = "d_tempo_96")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+}
+
+/// A harmonic function a tonal pattern outlines.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternFunction {
+    /// Do mi sol (la do mi in minor).
+    Tonic,
+    /// Sol ti re fa (mi si ti re in minor).
+    Dominant,
+    /// Fa la do (re fa la in minor).
+    Subdominant,
+    /// Two-note tendency resolutions: ti–do, fa–mi, re–do, la–sol, fi–sol, te–la …
+    Tendency,
+}
+
+/// Which of Gordon's two passes a pattern trial is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternPasses {
+    /// Each pattern twice: first with the tonic sounding under the echo, then unaccompanied.
+    #[default]
+    TeachingThenEvaluation,
+    Teaching,
+    Evaluation,
+}
+
+/// What the echo is sung on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PatternSyllables {
+    /// A neutral syllable ("bum"): no labels.
+    #[default]
+    Neutral,
+    /// The syllables are shown; echo in solfège.
+    Solfege,
+    /// Played on "bum", echoed in solfège from the ear; the syllables are shown afterwards.
+    Translate,
+}
+
+fn d_functions() -> Vec<PatternFunction> {
+    vec![PatternFunction::Tonic, PatternFunction::Dominant]
+}
+fn d_three() -> Vec<u32> {
+    vec![3]
+}
+
+/// Tonal pattern echo (Gordon): a 2–5 note pattern outlining a function, sung back after a
+/// silent breath. Teaching passes sound the tonic under the echo; evaluation passes do not.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TonalPatternParams {
+    #[serde(default = "d_functions")]
+    pub functions: Vec<PatternFunction>,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    /// Notes per pattern, 2–5.
+    #[serde(default = "d_three")]
+    pub lengths: Vec<u32>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default)]
+    pub passes: PatternPasses,
+    #[serde(default)]
+    pub syllables: PatternSyllables,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    /// Silent beats between the prompt and the echo, to audiate during the breath.
+    #[serde(default = "d_one_beat")]
+    pub breath_beats: f32,
+    #[serde(default = "d_tempo_90")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub range: Option<NoteRange>,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+/// The stages of Gordon's pattern conversation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogueStage {
+    /// Sing back only the first note of a quick pattern (the starting pitch of a dictation).
+    #[default]
+    FirstPitch,
+    /// Answer with a different pattern of the same function.
+    SameFunction,
+    /// Answer tonic with dominant and dominant with tonic.
+    OppositeFunction,
+}
+
+/// The I–V dialogue: the app sings a pattern; you answer by ear, not by copying.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PatternDialogueParams {
+    #[serde(default)]
+    pub stage: DialogueStage,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default = "d_one_beat")]
+    pub breath_beats: f32,
+    #[serde(default = "d_tempo_90")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub range: Option<NoteRange>,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+/// How an N-back stream is answered.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum NBackMode {
+    /// Tap Match when the note is the one N notes back.
+    #[default]
+    Recognize,
+    /// Canon: sing the note N back while the next one sounds.
+    Sing,
+}
+
+fn d_one_u32() -> u32 {
+    1
+}
+fn d_five_degrees() -> Vec<String> {
+    ["1", "2", "3", "4", "5"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+fn d_stream_len() -> u32 {
+    24
+}
+fn d_ioi_2000() -> u32 {
+    2000
+}
+fn d_target_rate() -> f32 {
+    0.3
+}
+
+/// Musical N-back: a slow stream of scale degrees over the tonic. Recognize taps a match with
+/// the note N back; sing is a canon, singing N notes behind the app.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct NBackParams {
+    /// 1–3.
+    #[serde(default = "d_one_u32")]
+    pub n: u32,
+    #[serde(default)]
+    pub mode: NBackMode,
+    /// Degrees the stream uses, numbered against the major scale (default 1–5).
+    #[serde(default = "d_five_degrees")]
+    pub degrees: Vec<String>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    /// Notes per stream (recognize) or canon (sing), 6–60.
+    #[serde(default = "d_stream_len")]
+    pub length: u32,
+    /// Time between notes.
+    #[serde(default = "d_ioi_2000")]
+    pub ioi_ms: u32,
+    /// Share of notes that match (recognize).
+    #[serde(default = "d_target_rate")]
+    pub target_rate: f32,
+    /// A quiet tonic under the stream.
+    #[serde(default = "d_true")]
+    pub drone: bool,
+    #[serde(default)]
+    pub marks: DetectMarks,
+    #[serde(default)]
+    pub range: Option<NoteRange>,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+/// A change made to a heard melody before singing it (melodic updating).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateOp {
+    /// Every instance of one degree becomes its neighbour ("every mi becomes fa").
+    ReplaceDegree,
+    /// One note becomes another degree ("the third note becomes sol").
+    ReplacePosition,
+    /// Everything moves up (or down) one step of the scale.
+    Shift,
+    /// The melody backwards.
+    Retrograde,
+    /// One note is left out, its beat kept silent.
+    Omit,
+}
+
+fn d_update_lengths() -> Vec<u32> {
+    vec![4, 5]
+}
+fn d_six_degrees() -> Vec<String> {
+    ["1", "2", "3", "4", "5", "6"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+fn d_update_ops() -> Vec<UpdateOp> {
+    vec![
+        UpdateOp::ReplaceDegree,
+        UpdateOp::ReplacePosition,
+        UpdateOp::Shift,
+    ]
+}
+fn d_think_beats() -> f32 {
+    4.0
+}
+
+/// Melodic updating (Chenette): hear a short melody, change it in your head as told, then sing
+/// the changed melody.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MelodicUpdatingParams {
+    /// Notes in the melody, 3–8.
+    #[serde(default = "d_update_lengths")]
+    pub notes: Vec<u32>,
+    #[serde(default = "d_six_degrees")]
+    pub degrees: Vec<String>,
+    /// Changes chained before singing, 1–3.
+    #[serde(default = "d_one_u32")]
+    pub changes: u32,
+    #[serde(default = "d_update_ops")]
+    pub operations: Vec<UpdateOp>,
+    /// Silent beats to rehearse the change.
+    #[serde(default = "d_think_beats")]
+    pub think_beats: f32,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default = "d_tempo_80")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub range: Option<NoteRange>,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+/// A short-term memory task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryTask {
+    /// Two renditions: the same, or one note changed?
+    #[default]
+    SameDifferent,
+    /// A melody, then one note: was it in the melody? (Sternberg)
+    Probe,
+}
+
+/// How the second rendition differs (same/different).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeSize {
+    /// One note moves a step of the scale.
+    #[default]
+    Step,
+    /// One note moves a semitone, leaving the key.
+    Chromatic,
+    /// Either.
+    Any,
+}
+
+fn d_memory_lengths() -> Vec<u32> {
+    vec![4]
+}
+fn d_seven_degrees() -> Vec<String> {
+    ["1", "2", "3", "4", "5", "6", "7"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+fn d_gap_ms() -> u32 {
+    2000
+}
+
+/// Same/different and probe tasks: tonal short-term memory without notation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PatternMemoryParams {
+    #[serde(default)]
+    pub task: MemoryTask,
+    /// Notes per pattern, 3–8.
+    #[serde(default = "d_memory_lengths")]
+    pub notes: Vec<u32>,
+    #[serde(default = "d_seven_degrees")]
+    pub degrees: Vec<String>,
+    #[serde(default)]
+    pub change: ChangeSize,
+    /// The second rendition is in another key (same/different), so only the relations count.
+    #[serde(default)]
+    pub transpose: bool,
+    #[serde(default = "d_gap_ms")]
+    pub gap_ms: u32,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default = "d_tempo_96")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+}
+
+fn d_error_melody() -> MelodySource {
+    MelodySource::Generate(MelodyParams {
+        bars: 2,
+        max_leap: 2,
+        ..MelodyParams::default()
+    })
+}
+fn d_pre_audiation() -> f32 {
+    15.0
+}
+
+/// Single-pass error detection: read the score in silence, then hear it once with one note
+/// played wrong; tap that note.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ErrorDetectionParams {
+    #[serde(default = "d_error_melody")]
+    pub melody: MelodySource,
+    /// Seconds to audiate the score before it plays (the tonic sounds at the start).
+    #[serde(default = "d_pre_audiation")]
+    pub pre_audiation_s: f32,
+    /// The wrong note is a step of the scale away, or (chromatic) a semitone.
+    #[serde(default)]
+    pub change: ChangeSize,
+    #[serde(default = "d_tempo_80")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+fn d_stroop_lengths() -> Vec<u32> {
+    vec![5, 6]
+}
+
+/// Mislabeled syllables (a solfège Stroop): a melody plays under its syllables, one of them
+/// wrong; tap the wrong one.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SyllableCheckParams {
+    #[serde(default = "d_stroop_lengths")]
+    pub notes: Vec<u32>,
+    #[serde(default = "d_seven_degrees")]
+    pub degrees: Vec<String>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default = "d_tempo_90")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+}
+
+/// A phrase ending.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum CadenceKind {
+    /// V–I, both in root position, the tonic in the soprano.
+    PerfectAuthentic,
+    /// V–I with the third or fifth in the soprano.
+    ImperfectAuthentic,
+    /// IV–I.
+    Plagal,
+    /// Ends on V.
+    Half,
+    /// V–vi.
+    Deceptive,
+}
+
+impl CadenceKind {
+    pub fn id(self) -> &'static str {
+        match self {
+            CadenceKind::PerfectAuthentic => "perfect_authentic",
+            CadenceKind::ImperfectAuthentic => "imperfect_authentic",
+            CadenceKind::Plagal => "plagal",
+            CadenceKind::Half => "half",
+            CadenceKind::Deceptive => "deceptive",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            CadenceKind::PerfectAuthentic => "Perfect authentic",
+            CadenceKind::ImperfectAuthentic => "Imperfect authentic",
+            CadenceKind::Plagal => "Plagal",
+            CadenceKind::Half => "Half",
+            CadenceKind::Deceptive => "Deceptive",
+        }
+    }
+}
+
+fn d_cadences() -> Vec<CadenceKind> {
+    vec![CadenceKind::PerfectAuthentic, CadenceKind::Half]
+}
+fn d_lead_in() -> u32 {
+    2
+}
+
+/// Cadences in context: a four-part phrase in a key; name how it ends.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CadenceIdParams {
+    #[serde(default = "d_cadences")]
+    pub cadences: Vec<CadenceKind>,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    /// Chords before the cadence, 0–4.
+    #[serde(default = "d_lead_in")]
+    pub lead_in: u32,
+    #[serde(default = "d_tempo_72")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+}
+
+/// What is sung against a progression.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum BassLineKind {
+    /// The root of each chord.
+    #[default]
+    Roots,
+    /// The guide-tone line: thirds and sevenths, each moving to the nearest one of the next chord.
+    GuideTones,
+}
+
+/// What plays while singing a line against a progression.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum LineBacking {
+    /// The chords with their bass: sing along with it (first pass).
+    WithBass,
+    /// The chords without the bass: supply it.
+    #[default]
+    WithoutBass,
+    /// Only the tonic before starting: audiate the whole progression.
+    TonicOnly,
+}
+
+/// A progression to sing a line against, as Roman numerals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Progression {
+    /// I IV V I (i iv V i in minor).
+    IIvVI,
+    /// I vi IV V I.
+    IViIvVI,
+    /// I IV I V I.
+    IIvIVI,
+    /// I ii V I.
+    IIiVI,
+    /// I vi ii V I.
+    IViIiVI,
+    /// ii7 V7 Imaj7 (iiø7 V7 i in minor).
+    IiVI7,
+    /// I vi ii7 V7 I with sevenths.
+    Turnaround7,
+}
+
+fn d_progressions() -> Vec<Progression> {
+    vec![Progression::IIvVI, Progression::IViIvVI, Progression::IIiVI]
+}
+fn d_two_beats() -> f32 {
+    2.0
+}
+
+/// Bass and guide-tone singing: sing the roots or the 3rd–7th line of a progression, with the
+/// bass, without it, or with only the tonic given.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BassLineParams {
+    #[serde(default)]
+    pub line: BassLineKind,
+    #[serde(default)]
+    pub backing: LineBacking,
+    #[serde(default = "d_progressions")]
+    pub progressions: Vec<Progression>,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default = "d_two_beats")]
+    pub beats_per_chord: f32,
+    #[serde(default = "d_tempo_80")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub range: Option<NoteRange>,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
 /// The exercise type and its parameters. `params` may be `{}` to use every default.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", content = "params", rename_all = "snake_case")]
@@ -1659,6 +2298,16 @@ pub enum Exercise {
     Harmony(HarmonyParams),
     PitchDetect(PitchDetectParams),
     ChordColorId(ChordColorParams),
+    RestingTone(RestingToneParams),
+    TonalPattern(TonalPatternParams),
+    PatternDialogue(PatternDialogueParams),
+    NBack(NBackParams),
+    MelodicUpdating(MelodicUpdatingParams),
+    PatternMemory(PatternMemoryParams),
+    ErrorDetection(ErrorDetectionParams),
+    SyllableCheck(SyllableCheckParams),
+    CadenceId(CadenceIdParams),
+    BassLine(BassLineParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -1684,10 +2333,20 @@ pub enum ExerciseKind {
     Harmony,
     PitchDetect,
     ChordColorId,
+    RestingTone,
+    TonalPattern,
+    PatternDialogue,
+    NBack,
+    MelodicUpdating,
+    PatternMemory,
+    ErrorDetection,
+    SyllableCheck,
+    CadenceId,
+    BassLine,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 20] = [
+    pub const ALL: [ExerciseKind; 30] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -1708,6 +2367,16 @@ impl ExerciseKind {
         ExerciseKind::Harmony,
         ExerciseKind::PitchDetect,
         ExerciseKind::ChordColorId,
+        ExerciseKind::RestingTone,
+        ExerciseKind::TonalPattern,
+        ExerciseKind::PatternDialogue,
+        ExerciseKind::NBack,
+        ExerciseKind::MelodicUpdating,
+        ExerciseKind::PatternMemory,
+        ExerciseKind::ErrorDetection,
+        ExerciseKind::SyllableCheck,
+        ExerciseKind::CadenceId,
+        ExerciseKind::BassLine,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -1732,6 +2401,16 @@ impl ExerciseKind {
             ExerciseKind::Harmony => "harmony",
             ExerciseKind::PitchDetect => "pitch_detect",
             ExerciseKind::ChordColorId => "chord_color_id",
+            ExerciseKind::RestingTone => "resting_tone",
+            ExerciseKind::TonalPattern => "tonal_pattern",
+            ExerciseKind::PatternDialogue => "pattern_dialogue",
+            ExerciseKind::NBack => "n_back",
+            ExerciseKind::MelodicUpdating => "melodic_updating",
+            ExerciseKind::PatternMemory => "pattern_memory",
+            ExerciseKind::ErrorDetection => "error_detection",
+            ExerciseKind::SyllableCheck => "syllable_check",
+            ExerciseKind::CadenceId => "cadence_id",
+            ExerciseKind::BassLine => "bass_line",
         }
     }
 
@@ -1761,6 +2440,16 @@ impl ExerciseKind {
             ExerciseKind::Harmony => "Harmony singing",
             ExerciseKind::PitchDetect => "Find the note",
             ExerciseKind::ChordColorId => "Chord colours",
+            ExerciseKind::RestingTone => "Find home",
+            ExerciseKind::TonalPattern => "Tonal patterns",
+            ExerciseKind::PatternDialogue => "Pattern dialogue",
+            ExerciseKind::NBack => "Musical N-back",
+            ExerciseKind::MelodicUpdating => "Melodic updating",
+            ExerciseKind::PatternMemory => "Same or different",
+            ExerciseKind::ErrorDetection => "Error detection",
+            ExerciseKind::SyllableCheck => "Mislabeled syllables",
+            ExerciseKind::CadenceId => "Cadences",
+            ExerciseKind::BassLine => "Bass and guide tones",
         }
     }
 
@@ -1786,6 +2475,16 @@ impl ExerciseKind {
             ExerciseKind::Harmony => &["voice.harmony"],
             ExerciseKind::PitchDetect => &["ap.detect"],
             ExerciseKind::ChordColorId => &["ap.chord_color"],
+            ExerciseKind::RestingTone => &["rp.resting_tone"],
+            ExerciseKind::TonalPattern => &["rp.tonal_pattern"],
+            ExerciseKind::PatternDialogue => &["rp.dialogue"],
+            ExerciseKind::NBack => &["rp.n_back"],
+            ExerciseKind::MelodicUpdating => &["rp.updating"],
+            ExerciseKind::PatternMemory => &["rp.memory"],
+            ExerciseKind::ErrorDetection => &["rp.error_detection"],
+            ExerciseKind::SyllableCheck => &["rp.syllable_check"],
+            ExerciseKind::CadenceId => &["rp.cadence"],
+            ExerciseKind::BassLine => &["rp.bass_line"],
         }
     }
 
@@ -1799,6 +2498,12 @@ impl ExerciseKind {
                 | ExerciseKind::Pattern
                 | ExerciseKind::SightSing
                 | ExerciseKind::Harmony
+                | ExerciseKind::RestingTone
+                | ExerciseKind::TonalPattern
+                | ExerciseKind::PatternDialogue
+                | ExerciseKind::NBack
+                | ExerciseKind::MelodicUpdating
+                | ExerciseKind::BassLine
         )
     }
 }
@@ -1826,6 +2531,16 @@ impl Exercise {
             Exercise::Harmony(_) => ExerciseKind::Harmony,
             Exercise::PitchDetect(_) => ExerciseKind::PitchDetect,
             Exercise::ChordColorId(_) => ExerciseKind::ChordColorId,
+            Exercise::RestingTone(_) => ExerciseKind::RestingTone,
+            Exercise::TonalPattern(_) => ExerciseKind::TonalPattern,
+            Exercise::PatternDialogue(_) => ExerciseKind::PatternDialogue,
+            Exercise::NBack(_) => ExerciseKind::NBack,
+            Exercise::MelodicUpdating(_) => ExerciseKind::MelodicUpdating,
+            Exercise::PatternMemory(_) => ExerciseKind::PatternMemory,
+            Exercise::ErrorDetection(_) => ExerciseKind::ErrorDetection,
+            Exercise::SyllableCheck(_) => ExerciseKind::SyllableCheck,
+            Exercise::CadenceId(_) => ExerciseKind::CadenceId,
+            Exercise::BassLine(_) => ExerciseKind::BassLine,
         }
     }
 
@@ -2103,6 +2818,12 @@ pub struct IdentifyTrial {
     /// Octaves a requeued note may move to. Empty keeps the same octave.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub requeue_octaves: Vec<i32>,
+    /// A score shown while listening (error detection reads it before it plays).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score: Option<Score>,
+    /// Heard once: no replay (error detection, where hearing again overwrites the score).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_replay: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2143,6 +2864,8 @@ impl IdentifyTrial {
             label_set: None,
             requeue_misses: false,
             requeue_octaves: Vec::new(),
+            score: None,
+            no_replay: false,
         }
     }
 }
@@ -2201,9 +2924,16 @@ pub struct DetectTone {
     pub midi: i32,
 }
 
+fn d_detect_kind() -> ExerciseKind {
+    ExerciseKind::PitchDetect
+}
+
 /// One detection stream: a named target, then a run of tones to catch.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct DetectTrial {
+    /// What the stream trains (`pitch_detect`, `n_back`), for storage.
+    #[serde(default = "d_detect_kind")]
+    pub exercise: ExerciseKind,
     pub prompt: String,
     pub target_class: PitchClass,
     pub target_label: String,
@@ -2273,6 +3003,35 @@ pub struct SungTrial {
     /// accompaniment, used when grading with tuning `just`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub just_cents: Vec<f32>,
+    /// Notes sung silently (inner hearing): shown, not graded.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub silent: Vec<usize>,
+    /// Added to the result, e.g. a pattern's syllables after an echo on "bum".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reveal: Option<String>,
+    /// Graded as a free answer (any pattern of a function) instead of against `notes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free: Option<FreeResponse>,
+    /// The score shows until this beat, then the melody is sung from memory (a flash score).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_until_beat: Option<f32>,
+}
+
+/// A sung answer that is any notes from a set rather than given notes: answering a tonic
+/// pattern with any dominant pattern.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct FreeResponse {
+    /// Pitch classes (0–11) the answer may use.
+    pub allowed: Vec<i32>,
+    /// The name of each allowed pitch class, for the result.
+    pub names: Vec<(i32, String)>,
+    pub min_notes: u32,
+    pub max_notes: u32,
+    /// Pitch classes of the prompt; the answer must not repeat it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub differ_from: Vec<i32>,
+    /// What is asked for, e.g. "a dominant pattern".
+    pub what: String,
 }
 
 /// Hear a melody and write it in the score editor.

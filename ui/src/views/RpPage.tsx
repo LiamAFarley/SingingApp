@@ -7,7 +7,7 @@ import { WorkshopPage } from "./WorkshopPage";
 
 const CATEGORY = "Relative pitch";
 
-type Glyph = "ear" | "compare" | "voice" | "eye" | "pencil" | "hand" | "search";
+type Glyph = "ear" | "compare" | "voice" | "eye" | "pencil" | "search" | "home" | "memory" | "core";
 
 interface Activity {
   /** The workshop course; none for activities not built yet. */
@@ -25,27 +25,51 @@ interface Section {
 
 const SECTIONS: Section[] = [
   {
-    title: "Scale degrees",
+    title: "Core",
+    accent: "#1f6f5c",
+    activities: [
+      {
+        course: "rp_core",
+        title: "Core relative pitch",
+        desc: "The daily core: tonality first, then tonal patterns and working memory, inner hearing and lines, then structure and error detection, a few short parts each session",
+        glyph: "core",
+      },
+    ],
+  },
+  {
+    title: "Tonal context",
     accent: "#d9822b",
-    activities: [{ course: "rp_degrees", title: "Scale degrees", desc: "Name each note's degree in a key, after a cadence", glyph: "ear" }],
+    activities: [
+      { course: "rp_home", title: "Find home", desc: "Sing or name the resting tone of a phrase that stops", glyph: "home" },
+      { course: "rp_degrees", title: "Scale degrees", desc: "Name each note's degree in a key, after a cadence and a breath", glyph: "ear" },
+      { course: "rp_patterns", title: "Tonal patterns", desc: "Echo tonic and dominant patterns after a breath; answer in dialogue", glyph: "voice" },
+    ],
+  },
+  {
+    title: "Memory and inner hearing",
+    accent: "#0f7c8c",
+    activities: [
+      { course: "rp_memory", title: "Working memory", desc: "Same or different, probe notes, N-back and canon, changing a melody in your head", glyph: "memory" },
+      { course: "rp_inner", title: "Inner hearing", desc: "Silent bars, silent beats, flash scores sung from memory", glyph: "eye" },
+    ],
   },
   {
     title: "Intervals",
     accent: "#2d6cdf",
     activities: [
-      { course: "rp_compare", title: "Interval comparison", desc: "Which of two intervals is larger", glyph: "compare" },
-      { course: "rp_intervals", title: "Interval identification", desc: "Name intervals on random notes, no key", glyph: "ear" },
       { course: "rp_intervals_key", title: "Intervals in a key", desc: "Diatonic and chromatic intervals against a cadence", glyph: "ear" },
       { course: "rp_sing", title: "Interval singing", desc: "Sing a degree from do, up or down", glyph: "voice" },
+      { course: "rp_intervals", title: "Interval identification", desc: "Name intervals on random notes, no key", glyph: "ear" },
+      { course: "rp_compare", title: "Interval comparison", desc: "Which of two intervals is larger", glyph: "compare" },
     ],
   },
   {
-    title: "Chords",
+    title: "Chords and harmony",
     accent: "#b88a00",
     activities: [
+      { course: "rp_harmony", title: "Cadences and bass lines", desc: "How phrases end; sing the bass and the guide tones", glyph: "ear" },
       { course: "rp_chords", title: "Chord identification", desc: "Name triads and seventh chords", glyph: "ear" },
       { course: "rp_inversions", title: "Chord inversions", desc: "Name the chord and its inversion", glyph: "ear" },
-      { title: "Chord progressions", desc: "Cadences and progressions by ear", glyph: "ear" },
     ],
   },
   {
@@ -54,22 +78,13 @@ const SECTIONS: Section[] = [
     activities: [{ course: "rp_scales", title: "Scale identification", desc: "Name scales and modes by ear", glyph: "ear" }],
   },
   {
-    title: "Rhythm",
-    accent: "#3f8f29",
-    activities: [
-      { title: "Rhythmic sight-reading", desc: "Tap a rhythm from the staff", glyph: "eye" },
-      { title: "Rhythm clapback", desc: "Tap back a rhythm you hear", glyph: "hand" },
-      { title: "Rhythmic dictation", desc: "Write down a rhythm", glyph: "pencil" },
-      { title: "Rhythm error detection", desc: "Find what differs from the staff", glyph: "search" },
-    ],
-  },
-  {
     title: "Melodies",
     accent: "#7a4fd1",
     activities: [
+      { course: "rp_singback", title: "Melody singback", desc: "Hear a melody, sing it back", glyph: "voice" },
       { course: "rp_sight", title: "Melodic sight singing", desc: "Sing a melody from the staff", glyph: "eye" },
-      { title: "Melody singback", desc: "Sing back a melody you hear", glyph: "voice" },
       { course: "rp_dictation", title: "Melodic dictation", desc: "Write down a melody you hear", glyph: "pencil" },
+      { course: "rp_errors", title: "Error detection", desc: "Find the note played wrong, heard once; the wrong syllable", glyph: "search" },
     ],
   },
 ];
@@ -84,7 +99,9 @@ function Icon({ glyph }: { glyph: Glyph }) {
     voice: <path {...common} d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM6 11a6 6 0 0 0 12 0M12 17v4M9 21h6" />,
     eye: <path {...common} d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
     pencil: <path {...common} d="M4 20l4-1 11-11-3-3L5 16l-1 4zM14 6l3 3M4 22h16" />,
-    hand: <path {...common} d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 11V4a1.5 1.5 0 0 1 3 0v7M14 11V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a5 5 0 0 1-4-2l-3-4a1.5 1.5 0 0 1 2.3-2L8 14" />,
+    home: <path {...common} d="M3 11l9-7 9 7M5 9.5V20h14V9.5M10 20v-6h4v6" />,
+    memory: <path {...common} d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 3 3h0a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-3 3h0a3 3 0 0 1-3-3" />,
+    core: <path {...common} d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z" />,
     search: <path {...common} d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM16 16l5 5" />,
   };
   return (
@@ -186,8 +203,9 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
         <div>
           <h1>Relative pitch</h1>
           <div className="sub">
-            Ear training in workshops: each activity is a course of modules and lessons. A lesson passes at 90%, and the course
-            moves on to the next one. Tick Daily inside an activity to put its current lesson in today's set.
+            Start with the core: short mixed sessions in four tiers, from tonality to inner hearing and error detection. Every
+            activity is also a course of modules and lessons of its own; tick Daily inside one to add its current lesson to
+            today's set.
           </div>
         </div>
       </div>
@@ -231,7 +249,7 @@ export function RpPage({ sessionActive, onOpenSession }: { sessionActive: boolea
               const daily = plan?.courses.find((p) => p.course === a.course)?.active ?? false;
               const lesson = c ? Math.min(c.level, c.levels) : 0;
               return (
-                <button key={a.title} className={`activity${a.course ? "" : " soon"}`} disabled={!a.course} onClick={() => a.course && setOpen(a.course)}>
+                <button key={a.title} className={`activity${a.course ? "" : " soon"}${a.course === "rp_core" ? " wide" : ""}`} disabled={!a.course} onClick={() => a.course && setOpen(a.course)}>
                   <span className="activity-icon">
                     <Icon glyph={a.glyph} />
                   </span>

@@ -97,6 +97,10 @@ pub struct LaneSpec {
     pub sections: Vec<LaneSection>,
     /// Move a cursor over the score while singing (sight singing).
     pub cursor: bool,
+    /// A flash score is hidden from this time on (seconds on the timeline) while singing.
+    pub score_until_s: Option<f32>,
+    /// Indexes of notes sung silently (inner hearing).
+    pub silent: Vec<u32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

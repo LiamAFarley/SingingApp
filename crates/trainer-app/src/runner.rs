@@ -618,8 +618,9 @@ impl<'a> SessionRun<'a> {
         view.choices = t.choices.clone();
         view.layout = layout;
         view.deadline_ms = deadline_ms;
-        // A test plays each tone once, whatever its answer limit.
-        let can_replay = deadline_ms.is_none() && !assessment;
+        // A test plays each tone once, whatever its answer limit; so does a single-pass trial.
+        let can_replay = deadline_ms.is_none() && !assessment && !t.no_replay;
+        view.score = t.score.clone();
         view.can_replay = can_replay;
         view.can_reference = t.reference.is_some();
         // The countdown starts where response times do.
@@ -701,12 +702,7 @@ impl<'a> SessionRun<'a> {
         attempt: u32,
     ) -> R<Option<(TrialOutcome, Extras)>> {
         let renderer = self.core.renderer();
-        let mut view = self.base_view(
-            ExerciseKind::PitchDetect,
-            Interaction::Detect,
-            &t.prompt,
-            attempt,
-        );
+        let mut view = self.base_view(t.exercise, Interaction::Detect, &t.prompt, attempt);
         view.label = Some(t.target_label.clone());
         view.flash_color = t.target_color.clone();
         view.detect_total = Some(t.tones.len() as u32);
@@ -1556,7 +1552,7 @@ fn stored_kind(block: &BlockSpec, trial: &TrialSpec) -> ExerciseKind {
         TrialSpec::Identify(t) => t.exercise,
         TrialSpec::SingPitch(t) => t.exercise,
         TrialSpec::Sung(t) => t.exercise,
-        TrialSpec::Detect(_) => ExerciseKind::PitchDetect,
+        TrialSpec::Detect(t) => t.exercise,
         TrialSpec::Pairing(_) | TrialSpec::Dictation(_) => block.exercise.kind(),
     }
 }
@@ -1642,6 +1638,8 @@ fn lane_for(t: &SungTrial) -> LaneSpec {
             })
             .collect(),
         cursor: t.follow_cursor,
+        score_until_s: t.score_until_beat.map(|b| b * beat),
+        silent: t.silent.iter().map(|i| *i as u32).collect(),
     }
 }
 

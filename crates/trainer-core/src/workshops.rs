@@ -26,10 +26,19 @@ pub struct LessonView {
     /// No feedback until the end.
     pub test: bool,
     pub questions: u32,
+    /// Exercises in the lesson: one, or several in a core session.
+    pub parts: u32,
+    /// The (first) exercise of the lesson.
+    pub exercise: String,
+    /// Scored as d′ (a detection stream such as the N-back).
+    pub detection: bool,
     pub runs: u32,
-    /// Best and latest score of a full run (0–1).
+    /// Best and latest score of a full run (0–1); for a session of several parts, its weakest part.
     pub best: Option<f64>,
     pub last: Option<f64>,
+    /// Detection lessons (N-back) are scored as d′.
+    pub best_d_prime: Option<f64>,
+    pub last_d_prime: Option<f64>,
     pub last_at: Option<String>,
     pub passed: bool,
     /// The lesson's exercise settings, to start a custom level from.
@@ -53,6 +62,8 @@ pub struct WorkshopView {
     pub exercise: String,
     /// The lesson the course is on (1-based); `lessons + 1` when every lesson is done.
     pub current: u32,
+    /// Every lesson is one block of the same exercise, so custom levels of it make sense.
+    pub custom_levels: bool,
     pub lessons: u32,
     pub passed: u32,
     pub pass_mark: f32,
@@ -81,6 +92,28 @@ fn runs(trials: &[TrialRow]) -> Vec<(f64, u32, String)> {
     out
 }
 
+/// Like `runs`, with the session of each run: (accuracy, trials, started, session).
+fn runs_by_session(trials: &[TrialRow]) -> Vec<(f64, u32, String, String)> {
+    let mut by_run: BTreeMap<(String, u32), (u32, u32, String)> = BTreeMap::new();
+    for t in trials {
+        let Some(c) = t.correct else { continue };
+        let r = by_run
+            .entry((t.session_id.clone(), t.block_idx))
+            .or_insert((0, 0, t.started_at.clone()));
+        r.0 += 1;
+        r.1 += c as u32;
+        if t.started_at < r.2 {
+            r.2 = t.started_at.clone();
+        }
+    }
+    let mut out: Vec<(f64, u32, String, String)> = by_run
+        .into_iter()
+        .map(|((session, _), (n, c, at))| (c as f64 / n as f64, n, at, session))
+        .collect();
+    out.sort_by(|a, b| a.2.cmp(&b.2));
+    out
+}
+
 fn exercise_of(b: &BlockSpec) -> String {
     serde_json::to_value(b)
         .ok()
@@ -104,20 +137,71 @@ pub fn workshop_view(db: &Db, course: &str) -> Result<WorkshopView> {
     }
     let mut modules: Vec<ModuleView> = Vec::new();
     let mut pass_mark = 0.9;
+    let current = current_level(db, &c)?;
     for (i, l) in c.levels.iter().enumerate() {
         let level = i as u32 + 1;
-        let min = match l.pass {
-            PassRule::Accuracy { min, .. } => min,
-            _ => 0.9,
-        };
-        pass_mark = min;
         let block = l.blocks.first();
         let questions = block.map(|b| b.count).unwrap_or(0);
-        let full: Vec<(f64, u32, String)> =
-            runs(by_level.get(&level).map(Vec::as_slice).unwrap_or(&[]))
-                .into_iter()
-                .filter(|r| r.1 >= MIN_RUN.min(questions.max(1)))
-                .collect();
+        let trials = by_level.get(&level).map(Vec::as_slice).unwrap_or(&[]);
+        // A run's score: the share right in a block, or for a session of several parts (the
+        // core) the lowest part, since every part must pass; a detection stream's d′.
+        let (full, min, d_prime): (Vec<(f64, u32, String)>, f64, bool) = match l.pass {
+            PassRule::Detection { min_d_prime, .. } => {
+                let mut v: Vec<(f64, u32, String)> = trials
+                    .iter()
+                    .filter_map(|t| {
+                        t.metrics
+                            .get("d_prime")
+                            .and_then(|d| d.as_f64())
+                            .map(|d| (d, 1, t.started_at.clone()))
+                    })
+                    .collect();
+                v.sort_by(|a, b| a.2.cmp(&b.2));
+                (v, min_d_prime as f64, true)
+            }
+            _ => {
+                let min = match l.pass {
+                    PassRule::Accuracy { min, .. } => min,
+                    _ => 0.9,
+                } as f64;
+                let checked: Vec<TrialRow> = trials
+                    .iter()
+                    .filter(|t| {
+                        l.blocks.len() == 1 || t.tags.iter().any(|g| g == crate::courses::CHECK_TAG)
+                    })
+                    .cloned()
+                    .collect();
+                let mut block_runs = runs_by_session(&checked);
+                let parts = l
+                    .blocks
+                    .iter()
+                    .filter(|b| b.course.as_ref().is_some_and(|c| c.verify))
+                    .count()
+                    .max(1);
+                block_runs.retain(|r| r.1 >= MIN_RUN.min(questions.max(1)) || l.blocks.len() > 1);
+                let v = if l.blocks.len() > 1 {
+                    // Sessions that ran every checked part.
+                    let mut sessions: BTreeMap<String, (Vec<f64>, String)> = BTreeMap::new();
+                    for r in block_runs {
+                        let e = sessions
+                            .entry(r.3.clone())
+                            .or_insert((Vec::new(), r.2.clone()));
+                        e.0.push(r.0);
+                    }
+                    let mut v: Vec<(f64, u32, String)> = sessions
+                        .into_values()
+                        .filter(|(scores, _)| scores.len() >= parts)
+                        .map(|(scores, at)| (scores.iter().copied().fold(1.0, f64::min), 1, at))
+                        .collect();
+                    v.sort_by(|a, b| a.2.cmp(&b.2));
+                    v
+                } else {
+                    block_runs.into_iter().map(|r| (r.0, r.1, r.2)).collect()
+                };
+                (v, min, false)
+            }
+        };
+        pass_mark = if d_prime { pass_mark } else { min as f32 };
         let best = full
             .iter()
             .map(|r| r.0)
@@ -130,11 +214,29 @@ pub fn workshop_view(db: &Db, course: &str) -> Result<WorkshopView> {
                 .map(|b| b.feedback == crate::schema::FeedbackMode::None)
                 .unwrap_or(false),
             questions,
+            parts: l.blocks.len() as u32,
+            exercise: block.map(exercise_of).unwrap_or_default(),
+            detection: d_prime,
             runs: full.len() as u32,
-            best,
-            last: full.last().map(|r| r.0),
+            best: if d_prime { None } else { best },
+            last: if d_prime {
+                None
+            } else {
+                full.last().map(|r| r.0)
+            },
+            best_d_prime: if d_prime { best } else { None },
+            last_d_prime: if d_prime {
+                full.last().map(|r| r.0)
+            } else {
+                None
+            },
             last_at: full.last().map(|r| r.2.clone()),
-            passed: best.is_some_and(|b| b + 1e-9 >= min as f64),
+            // A session of several parts passes as its rule says, which moves the course on.
+            passed: if l.blocks.len() > 1 {
+                level < current
+            } else {
+                best.is_some_and(|b| b + 1e-9 >= min)
+            },
             params: block
                 .and_then(|b| serde_json::to_value(b).ok())
                 .and_then(|v| v.get("params").cloned())
@@ -163,7 +265,15 @@ pub fn workshop_view(db: &Db, course: &str) -> Result<WorkshopView> {
             .and_then(|l| l.blocks.first())
             .map(exercise_of)
             .unwrap_or_default(),
-        current: current_level(db, &c)?,
+        current,
+        custom_levels: c.levels.iter().all(|l| l.blocks.len() == 1)
+            && c.levels
+                .iter()
+                .filter_map(|l| l.blocks.first())
+                .map(exercise_of)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == 1,
         lessons: c.levels.len() as u32,
         passed: modules.iter().map(|m| m.passed).sum(),
         pass_mark,

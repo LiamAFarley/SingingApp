@@ -4,6 +4,7 @@
 
 pub mod ap_courses;
 pub mod ap_tests;
+pub mod audiation_courses;
 pub mod courses;
 pub mod generate;
 pub mod grade;

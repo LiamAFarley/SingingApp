@@ -337,9 +337,14 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
   useAnimationFrame(marks.length > 0);
   const now = live.now();
   const lit = marks.find((m) => now >= m.from_s && now < m.to_s)?.id ?? null;
+  // A score read before it plays (error detection): count down to the playing.
+  useAnimationFrame(!!trial.score && phase === "listening");
+  const playsIn = trial.score && phase === "listening" && trial.response_start_s != null ? trial.response_start_s - live.now() : 0;
   const sub =
     phase === "preparing" || phase === "listening"
-      ? "Listen…"
+      ? playsIn > 0.5
+        ? `Read and audiate it: it plays once in ${Math.ceil(playsIn)} s`
+        : "Listen…"
       : answering
         ? trial.deadline_ms
           ? <Deadline trial={trial} />
@@ -353,6 +358,11 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
         <div className="prompt">{trial.prompt}</div>
         <div className="prompt-sub">{sub}</div>
       </div>
+      {trial.score && (
+        <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 160 }} />}>
+          <Staff score={trial.score} maxHeight={260} />
+        </Suspense>
+      )}
       {trial.layout === "pitch_classes" && (
         <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} keyboard={answering} />
       )}
@@ -589,6 +599,7 @@ function SungStage({ runner, trial }: { runner: RunnerState; trial: TrialView })
         <div className="prompt">{trial.prompt}</div>
         <SungStatus runner={runner} trial={trial} />
       </div>
+      {runner.phase === "recording" && <Cue lane={lane} start={trial.timeline_start_s ?? 0} />}
       <PitchLane lane={lane} timelineStart={trial.timeline_start_s} showLive={trial.show_live_pitch} graded={graded} height={320} />
       {runner.phase === "recording" && <LaneReadout trial={trial} />}
       {runner.phase === "feedback" && fb && (
@@ -657,16 +668,22 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
             : `${describeKey(score)} · ${score.time} · ${Math.round(score.tempo_bpm)} bpm${trial.assisted ? " · sing-along attempt" : ""}`}
         </div>
       </div>
-      <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 200 }} />}>
-        <Staff
-          score={score}
-          trace={graded ? graded.trace : liveTrace}
-          {...traceStyle(trial.grading_mode)}
-          timing={timing}
-          results={graded ? graded.notes : null}
-          cursorTick={cursorTick}
-        />
-      </Suspense>
+      {recording && <Cue lane={lane} start={start} />}
+      {recording && lane.score_until_s != null && t >= lane.score_until_s ? (
+        <div className="staff-wrap memory-blank">Sing it from memory</div>
+      ) : (
+        <Suspense fallback={<div className="staff-wrap" style={{ minHeight: 200 }} />}>
+          <Staff
+            score={score}
+            trace={graded ? graded.trace : liveTrace}
+            {...traceStyle(trial.grading_mode)}
+            timing={timing}
+            results={graded ? graded.notes : null}
+            cursorTick={cursorTick}
+            noteColors={graded ? undefined : silentColors(score, lane.silent)}
+          />
+        </Suspense>
+      )}
       {recording && <Steps lane={lane} t={t} />}
       {recording && lane.metronome && <BeatDots lane={lane} t={t} />}
       {runner.phase === "feedback" && fb && (
@@ -756,6 +773,33 @@ function DictationStage({ runner, trial }: { runner: RunnerState; trial: TrialVi
   );
 }
 
+/** The part of the timeline now: listen, breathe, an instruction, sing silently or aloud. */
+function Cue({ lane, start }: { lane: LaneSpec; start: number }) {
+  useAnimationFrame(true);
+  const t = live.now() - start;
+  const s = lane.sections.find((x) => t >= x.start_s && t < x.end_s);
+  if (!s) return null;
+  const l = s.label.toLowerCase();
+  const kind = l.includes("silent") ? "silent" : l.startsWith("breathe") ? "breathe" : l.startsWith("sing") || l.startsWith("answer") ? "sing" : l === "listen" || l === "key" || l === "count-in" ? "listen" : "think";
+  return (
+    <div className={`cue cue-${kind}`} aria-live="polite">
+      {kind === "breathe" && <span className="breath-ring" aria-hidden />}
+      {s.label}
+    </div>
+  );
+}
+
+/** Notes sung silently, greyed on the staff: indexes count pitched notes, colours all notes. */
+function silentColors(score: Score, silent: number[]): (string | null)[] | undefined {
+  if (silent.length === 0) return undefined;
+  let k = -1;
+  return score.notes.map((n) => {
+    if (!n.pitch) return null;
+    k += 1;
+    return silent.includes(k) ? "#a7b0ba" : null;
+  });
+}
+
 /** EarMaster-style steps: establish key, first note, count-in, sing. */
 function Steps({ lane, t }: { lane: LaneSpec; t: number }) {
   if (lane.sections.length === 0) return null;
@@ -766,7 +810,7 @@ function Steps({ lane, t }: { lane: LaneSpec; t: number }) {
       {lane.sections.map((s, i) => {
         const state = i === current ? "active" : !before && (current === -1 ? t >= s.end_s : i < current) ? "done" : "";
         return (
-          <div key={s.label} className={`step ${state}`}>
+          <div key={`${i}-${s.label}`} className={`step ${state}`}>
             {s.label}
           </div>
         );
@@ -850,6 +894,13 @@ function NoteStrip({ notes }: { notes: NonNullable<RunnerState["feedback"]>["not
   return (
     <div className="row wrap" style={{ justifyContent: "center", gap: 6 }}>
       {notes.map((n, i) => {
+        if (n.silent) {
+          return (
+            <span key={i} className="badge num faint" title="Sung silently">
+              {noteDisplay(n.target_midi)} silent
+            </span>
+          );
+        }
         const cls = !n.matched ? "" : !n.correct ? "wrong" : n.in_tune ? "correct" : "marginal";
         return (
           <span key={i} className={`badge num ${cls}`} title={n.onset_error_ms != null ? `Onset ${Math.round(n.onset_error_ms)} ms` : undefined}>

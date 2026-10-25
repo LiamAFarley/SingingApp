@@ -134,8 +134,10 @@ function draw(
   }
 
   // Note labels: target notes first, then each C, then the other naturals, without overlapping.
-  const targetSet = new Set<number>(lane.targets_hidden && !graded ? [] : lane.notes.map((n) => n.midi));
-  for (const n of lane.reference) targetSet.add(n.midi);
+  // With hidden targets the notes heard are hidden too until graded: they are to be audiated.
+  const hideHeard = lane.targets_hidden && !graded;
+  const targetSet = new Set<number>(hideHeard ? [] : lane.notes.map((n) => n.midi));
+  if (!hideHeard) for (const n of lane.reference) targetSet.add(n.midi);
   const pcOf = (m: number) => ((m % 12) + 12) % 12;
   const rank = (m: number) => (targetSet.has(m) ? 0 : pcOf(m) === 0 ? 1 : [2, 4, 5, 7, 9, 11].includes(pcOf(m)) ? 2 : 3);
   // With visible targets only they and the Cs are named; otherwise every natural note.
@@ -220,9 +222,11 @@ function draw(
     }
   };
 
-  for (const n of lane.reference) bar(n.start_s, n.dur_s, n.midi, COLORS.refFill, COLORS.refStroke);
-  // The other voice of a harmony exercise, named so it reads as the part you hear.
-  for (const n of lane.accompaniment) bar(n.start_s, n.dur_s, n.midi, COLORS.accFill, COLORS.accStroke, noteDisplay(n.midi));
+  if (!hideHeard) {
+    for (const n of lane.reference) bar(n.start_s, n.dur_s, n.midi, COLORS.refFill, COLORS.refStroke);
+    // The other voice of a harmony exercise, named so it reads as the part you hear.
+    for (const n of lane.accompaniment) bar(n.start_s, n.dur_s, n.midi, COLORS.accFill, COLORS.accStroke, noteDisplay(n.midi));
+  }
 
   const showTargets = !lane.targets_hidden || !!graded;
   if (showTargets) {

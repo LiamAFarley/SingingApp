@@ -1062,6 +1062,10 @@ mod tests {
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: serde_json::json!({}),
         };
         let a = r.render_sung_trial(&t);

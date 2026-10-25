@@ -1183,7 +1183,41 @@ impl Db {
             library: self.library()?,
             labels: crate::labels::sets_from_db(self)?,
             soundfonts: None,
+            weak: self.weak_answers()?,
         })
+    }
+
+    /// Error rate per answer over the last few hundred unassisted answers of the adaptive drills,
+    /// keyed `exercise:answer`; answers seen fewer than four times are left out.
+    pub fn weak_answers(&self) -> Result<std::collections::BTreeMap<String, f64>> {
+        let mut tally: std::collections::BTreeMap<String, (u32, u32)> = Default::default();
+        for kind in ["scale_degree_id"] {
+            let rows = self.query_trials(
+                &TrialFilter {
+                    types: vec![kind.into()],
+                    assisted: Some(false),
+                    ..Default::default()
+                },
+                400,
+                0,
+            )?;
+            for t in rows {
+                let (Some(ok), Some(exp)) = (
+                    t.correct,
+                    t.metrics.get("expected").and_then(|v| v.as_str()),
+                ) else {
+                    continue;
+                };
+                let e = tally.entry(format!("{kind}:{exp}")).or_default();
+                e.0 += 1;
+                e.1 += u32::from(!ok);
+            }
+        }
+        Ok(tally
+            .into_iter()
+            .filter(|(_, (n, _))| *n >= 4)
+            .map(|(k, (n, wrong))| (k, wrong as f64 / n as f64))
+            .collect())
     }
 
     // --- melody library -------------------------------------------------------------------------

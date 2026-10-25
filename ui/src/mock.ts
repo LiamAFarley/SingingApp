@@ -281,6 +281,8 @@ function sightLane(): LaneSpec {
       { label: "Sing", start_s: sing, end_s: sing + 16 * beat },
     ],
     cursor: false,
+    score_until_s: null,
+    silent: [],
   };
 }
 
@@ -543,6 +545,8 @@ function scaleLane(): LaneSpec {
     metronome: true,
     sections: [],
     cursor: false,
+    score_until_s: null,
+    silent: [],
   };
 }
 
@@ -579,6 +583,8 @@ function harmonyLane(): LaneSpec {
       { label: "Sing", start_s: sing, end_s: sing + 20 * beat },
     ],
     cursor: false,
+    score_until_s: null,
+    silent: [],
   };
 }
 
@@ -1069,8 +1075,8 @@ export function mockBackend(): Backend {
         ? {
             spec: {},
             items: [
+              { course: "rp_core", title: "Core relative pitch: Patterns and working memory – Solfège and the first note", level: 5, minutes: 12, reason: "Session 5 of 12. Each part at 80% or more in one session moves on.", test: false },
               { course: "rp_degrees", title: "Scale degrees: Major scale – C major · one octave", level: 3, minutes: 8, reason: "Lesson 3 of 32. Best so far 82%; 90% passes it.", test: false },
-              { course: "rp_intervals_key", title: "Intervals in a key: Up from the tonic – Sol and the upper do", level: 1, minutes: 8, reason: "Lesson 1 of 26. Needs 1 check at 90% or more.", test: false },
             ],
             minutes: 16,
           }
@@ -1150,11 +1156,11 @@ let apPlan: DailyPlan = {
     { course: "ap_naming", minutes: 15, active: true },
     { course: "ap_brady", minutes: 10, active: true },
     { course: "rp_degrees", minutes: 8, active: true },
-    { course: "rp_intervals_key", minutes: 8, active: true },
+    { course: "rp_core", minutes: 12, active: true },
   ],
   test_day: 6,
 };
-const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1, rp_degrees: 3, rp_intervals_key: 1, rp_intervals: 6 };
+const courseLevels: Record<string, number> = { ap_naming: 3, ap_brady: 1, rp_degrees: 3, rp_intervals_key: 1, rp_intervals: 6, rp_core: 5 };
 
 type MockLesson = [title: string, params: Record<string, unknown>];
 const drills = (pool: string[]): MockLesson[] =>
@@ -1176,9 +1182,29 @@ const fet = (mode: string, low: string[], high: string[]): MockLesson[] => {
     [`${random} · many octaves`, { modes: [mode], keys: "all", key_change: "per_trial", cadence: "every", octaves: [-1, 0, 1] }],
   ];
 };
+const tierSessions = (names: string[]): MockLesson[] => names.map((n) => [n, {}]);
 const CHROM_LOW = ["1", "b2", "2", "b3", "3", "4"];
 const CHROM_HIGH = ["#4", "5", "b6", "6", "b7", "7", "8"];
 const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; description: string; modules: [string, MockLesson[]][] }> = {
+  rp_core: {
+    title: "Core relative pitch",
+    exercise: "resting_tone",
+    description:
+      "The daily core, built on research into how relative pitch is learnt: tonality first (find home, scale degrees with a breath before answering), then a vocabulary of tonal patterns and working memory (echo, dialogue, N-back), then inner hearing and lines (silent bars, flash scores, melodic updating, bass and guide tones), then structure and single-pass error detection. Each session mixes three or four short parts.",
+    modules: [
+      ["Tonal context", tierSessions(["Home and degrees in C", "Any key", "Changing keys"])],
+      ["Patterns and working memory", tierSessions(["Tonic and dominant", "Solfège and the first note", "Dialogue and canon"])],
+      ["Inner hearing and lines", tierSessions(["Silent bars", "Flash scores and guide tones", "From the tonic alone"])],
+      ["Structure and error detection", tierSessions(["Errors and cadences", "Singback and four bars", "Everything, in minor too"])],
+    ],
+  },
+  rp_home: { title: "Find home", exercise: "resting_tone", description: "Sing or name the resting tone of a phrase that stops mid-way.", modules: [["Major and minor", [["Sing home: major", { modes: ["major"] }], ["Name it: major or minor", { modes: ["major", "natural_minor"], answer: "name" }]]]] },
+  rp_patterns: { title: "Tonal patterns", exercise: "tonal_pattern", description: "Echo tonal patterns after a breath; answer in dialogue.", modules: [["Tonic and dominant in major", [["Two notes on “bum”", {}], ["Three notes on “bum”", {}]]], ["Dialogue", [["The first note", {}]]]] },
+  rp_memory: { title: "Working memory", exercise: "pattern_memory", description: "Same or different, probe notes, N-back and canon, melodic updating.", modules: [["Same or different", [["Three notes", {}]]], ["N-back: match", [["1-back on do re mi", {}]]], ["Melodic updating", [["Swap a degree", {}]]]] },
+  rp_inner: { title: "Inner hearing", exercise: "sight_sing", description: "Silent bars, silent beats, flash scores.", modules: [["Silent bars", [["Bars 2 and 3 silent, do to sol", { silent: "bars" }]]], ["Flash scores", [["One bar, 8 s", { mode: "flash" }]]]] },
+  rp_harmony: { title: "Cadences and bass lines", exercise: "cadence_id", description: "How phrases end; bass and guide tones.", modules: [["Cadences", [["Authentic or half", {}]]], ["Bass lines", [["Roots with the bass", {}]]]] },
+  rp_errors: { title: "Error detection", exercise: "error_detection", description: "Find the note played wrong; the wrong syllable.", modules: [["Score against sound", [["One bar, 10 s", {}]]]] },
+  rp_singback: { title: "Melody singback", exercise: "sight_sing", description: "Hear a melody, sing it back.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { mode: "singback" }]]]] },
   rp_degrees: {
     title: "Scale degrees",
     exercise: "scale_degree_id",
@@ -1250,6 +1276,11 @@ function mockWorkshop(course: string): WorkshopView {
         summary: "",
         test: t.startsWith("Test"),
         questions: 20,
+        parts: course === "rp_core" ? 3 : 1,
+        exercise: w.exercise,
+        detection: false,
+        best_d_prime: null,
+        last_d_prime: null,
         runs: best == null ? 0 : 1 + (level % 3),
         best,
         last: best,
@@ -1266,6 +1297,7 @@ function mockWorkshop(course: string): WorkshopView {
     description: w.description,
     exercise: w.exercise,
     current,
+    custom_levels: !["rp_core", "rp_patterns", "rp_memory", "rp_harmony", "rp_errors"].includes(course),
     lessons: level,
     passed: modules.reduce((a, m) => a + m.passed, 0),
     pass_mark: 0.9,

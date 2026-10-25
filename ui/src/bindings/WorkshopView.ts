@@ -9,4 +9,8 @@ exercise: string,
 /**
  * The lesson the course is on (1-based); `lessons + 1` when every lesson is done.
  */
-current: number, lessons: number, passed: number, pass_mark: number, modules: Array<ModuleView>, };
+current: number, 
+/**
+ * Every lesson is one block of the same exercise, so custom levels of it make sense.
+ */
+custom_levels: boolean, lessons: number, passed: number, pass_mark: number, modules: Array<ModuleView>, };

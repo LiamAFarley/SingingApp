@@ -29,4 +29,12 @@ sections: Array<LaneSection>,
 /**
  * Move a cursor over the score while singing (sight singing).
  */
-cursor: boolean, };
+cursor: boolean, 
+/**
+ * A flash score is hidden from this time on (seconds on the timeline) while singing.
+ */
+score_until_s: number | null, 
+/**
+ * Indexes of notes sung silently (inner hearing).
+ */
+silent: Array<number>, };

@@ -1,5 +1,7 @@
 //! Deterministic trial generation: (block spec, seed, context) → concrete trials.
 
+mod audiation;
+
 use serde_json::json;
 
 use crate::library::{self, LibraryPiece};
@@ -26,6 +28,9 @@ pub struct GenContext {
     pub labels: Vec<crate::labels::LabelSet>,
     /// File stems of the extra SoundFont banks that are installed; `None` when not known.
     pub soundfonts: Option<Vec<String>>,
+    /// Recent error rate per answer, keyed `exercise:answer` (`scale_degree_id:b6`), for
+    /// adaptive drills.
+    pub weak: std::collections::BTreeMap<String, f64>,
 }
 
 impl Default for GenContext {
@@ -37,6 +42,7 @@ impl Default for GenContext {
             library: Vec::new(),
             labels: Vec::new(),
             soundfonts: None,
+            weak: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -96,11 +102,21 @@ pub fn generate_block(
         Exercise::MelodicDictation(p) => gen_dictation(p, n, &mut rng, ctx),
         Exercise::AnchorSong(p) => gen_anchor_song(p, n, &mut rng, ctx),
         Exercise::IncidentalPairing(p) => gen_incidental(p, n, &mut rng, ctx),
-        Exercise::ScaleDegreeId(p) => gen_scale_degree(p, n, &mut rng),
+        Exercise::ScaleDegreeId(p) => gen_scale_degree(p, n, &mut rng, ctx),
         Exercise::IntervalComparison(p) => gen_interval_comparison(p, n, &mut rng),
         Exercise::Harmony(p) => gen_harmony(p, n, &mut rng, ctx),
         Exercise::PitchDetect(p) => gen_pitch_detect(p, n, &mut rng, ctx),
         Exercise::ChordColorId(p) => gen_chord_color(p, n, &mut rng, ctx),
+        Exercise::RestingTone(p) => audiation::gen_resting_tone(p, n, &mut rng, ctx),
+        Exercise::TonalPattern(p) => audiation::gen_tonal_pattern(p, n, &mut rng, ctx),
+        Exercise::PatternDialogue(p) => audiation::gen_pattern_dialogue(p, n, &mut rng, ctx),
+        Exercise::NBack(p) => audiation::gen_n_back(p, n, &mut rng, ctx),
+        Exercise::MelodicUpdating(p) => audiation::gen_melodic_updating(p, n, &mut rng, ctx),
+        Exercise::PatternMemory(p) => audiation::gen_pattern_memory(p, n, &mut rng),
+        Exercise::ErrorDetection(p) => audiation::gen_error_detection(p, n, &mut rng, ctx),
+        Exercise::SyllableCheck(p) => audiation::gen_syllable_check(p, n, &mut rng),
+        Exercise::CadenceId(p) => audiation::gen_cadence_id(p, n, &mut rng),
+        Exercise::BassLine(p) => audiation::gen_bass_line(p, n, &mut rng, ctx),
     }
 }
 
@@ -847,6 +863,7 @@ fn gen_pitch_detect(
             stimulus["label_set"] = json!(id);
         }
         out.push(TrialSpec::Detect(DetectTrial {
+            exercise: ExerciseKind::PitchDetect,
             prompt: format!("Listen for {label}"),
             target_class: target,
             target_label: label,
@@ -1004,6 +1021,8 @@ fn gen_chord_color(
             label_set: Some(crate::labels::EGUCHI_CHORDS.into()),
             requeue_misses: p.requeue_misses,
             requeue_octaves: Vec::new(),
+            score: None,
+            no_replay: false,
         }));
         if p.single_note_after {
             let from_chord = !any_white || rng.chance(0.5);
@@ -1056,6 +1075,8 @@ fn gen_chord_color(
                 label_set: note_set.as_ref().map(|_| p.note_labels.clone()),
                 requeue_misses: false,
                 requeue_octaves: Vec::new(),
+                score: None,
+                no_replay: false,
             }));
         }
     }
@@ -1882,6 +1903,7 @@ fn gen_scale_degree(
     p: &ScaleDegreeParams,
     n: usize,
     rng: &mut Rng,
+    ctx: &GenContext,
 ) -> Result<Vec<TrialSpec>, GenError> {
     if !(40.0..=220.0).contains(&p.tempo_bpm) {
         return err("tempo_bpm must be 40–220");
@@ -1948,7 +1970,26 @@ fn gen_scale_degree(
         let bag = match bags.iter().position(|(m, _)| *m == mode) {
             Some(k) => &mut bags[k].1,
             None => {
-                bags.push((mode, BalancedBag::allowing_repeats(degrees.clone())));
+                // Degrees recently missed come up more often: once more at 20% wrong, twice at 40%.
+                let mut weighted = Vec::new();
+                for d in &degrees {
+                    let id = if *d == 12 {
+                        "8"
+                    } else {
+                        DEGREE_IDS[*d as usize]
+                    };
+                    let e = if p.adaptive {
+                        ctx.weak
+                            .get(&format!("scale_degree_id:{id}"))
+                            .copied()
+                            .unwrap_or(0.0)
+                    } else {
+                        0.0
+                    };
+                    let copies = 1 + usize::from(e >= 0.2) + usize::from(e >= 0.4);
+                    weighted.extend(std::iter::repeat_n(*d, copies));
+                }
+                bags.push((mode, BalancedBag::allowing_repeats(weighted)));
                 &mut bags.last_mut().unwrap().1
             }
         };
@@ -1991,6 +2032,12 @@ fn gen_scale_degree(
         };
         let t0 = if cadence { 6.0 * cadence_beat } else { 0.0 };
         events.push(ev(note, t0, beat * 1.5, &timbre, -6.0));
+        // The answers open after the note and a silent beat to audiate it.
+        let think = match p.think_ms {
+            Some(0) => 0.0,
+            Some(ms) => beat * 1.5 + ms as f64,
+            None => beat * 2.5,
+        };
         let route = route_to_tonic(note, tonic.index() as i32, mode, p.resolution);
         let walk = |from: usize, start: f64| -> Vec<SoundEvent> {
             route[from..]
@@ -2100,7 +2147,7 @@ fn gen_scale_degree(
             }),
             cue: None,
             pace_ms: None,
-            answer_after_ms: Some(t0),
+            answer_after_ms: Some(t0 + think),
             after_answer,
             note_choices,
             choice_sounds,
@@ -2620,6 +2667,10 @@ fn gen_pitch_match(
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "timbre": timbre, "mode": p.mode }),
         }));
     }
@@ -2661,6 +2712,10 @@ fn gen_sustain(
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: json!({ "midi": midi, "note": Note(midi).name(), "drone": p.drone, "hold_ms": p.hold_ms }),
         }));
     }
@@ -2746,6 +2801,21 @@ fn gen_sing_interval(
             ));
         }
         let mut signed = if dir == SingDirection::Up { s } else { -s };
+        // A stepping stone for a hard interval, as an offset from the first note: an anchor
+        // (additive) or the inversion the other way (complementary).
+        let via_off = |sign: i32| -> Option<i32> {
+            match p.scaffold {
+                Scaffold::None => None,
+                Scaffold::Additive => match s {
+                    6 => Some(5),
+                    8 | 9 => Some(7),
+                    10 | 11 => Some(12),
+                    _ => None,
+                }
+                .map(|a| sign * a),
+                Scaffold::Complementary => (5..12).contains(&s).then(|| -sign * (12 - s)),
+            }
+        };
         let mut key_cadence: Option<(PitchClass, KeyMode, bool)> = None;
         let first = if p.in_key {
             // In the singer's range: the tonic, or any scale note, with the sung note in the
@@ -2756,6 +2826,7 @@ fn gen_sing_interval(
             let fits = |range: NoteRange, signed: i32| -> Vec<i32> {
                 (range.low.0..=range.high.0)
                     .filter(|m| range.contains(*m + signed))
+                    .filter(|m| via_off(signed.signum()).is_none_or(|v| range.contains(*m + v)))
                     .filter(|m| match p.start {
                         IntervalStart::Tonic => rel(*m) == 0,
                         _ => steps.contains(&rel(*m)),
@@ -2805,32 +2876,53 @@ fn gen_sing_interval(
             key_cadence = Some((tonic, mode, cadence_due(plan, i, changed)));
             f
         } else {
-            match dir {
-                SingDirection::Up => pick_note(
-                    NoteRange::new(range.low.0, range.high.0 - s),
-                    &mut last,
-                    rng,
-                ),
-                SingDirection::Down => pick_note(
-                    NoteRange::new(range.low.0 + s, range.high.0),
-                    &mut last,
-                    rng,
-                ),
-            }
+            // Every note, the stepping stone included, inside the range.
+            let v = via_off(signed.signum()).unwrap_or(0);
+            let lo = 0.min(signed).min(v);
+            let hi = 0.max(signed).max(v);
+            pick_note(
+                NoteRange::new(range.low.0 - lo, (range.high.0 - hi).max(range.low.0 - lo)),
+                &mut last,
+                rng,
+            )
         };
         let second = first + signed;
-        let notes = vec![
-            TargetNote {
-                midi: first,
-                start_beat: 0.0,
-                beats: 2.0,
-            },
-            TargetNote {
-                midi: second,
+        let sign = signed.signum();
+        let via: Option<(i32, String)> = via_off(sign).map(|v| {
+            let how = match p.scaffold {
+                Scaffold::Complementary => format!(
+                    "a {} {} first, then the octave {}",
+                    Interval::from_semitones(12 - s)
+                        .map(|i| i.long_name().to_lowercase())
+                        .unwrap_or_default(),
+                    if sign < 0 { "up" } else { "down" },
+                    if sign < 0 { "down" } else { "up" }
+                ),
+                _ => match s {
+                    6 => "a 4th, then a semitone".into(),
+                    8 | 9 => "a 5th, then a step".into(),
+                    _ => "the octave, then back a step".into(),
+                },
+            };
+            (first + v, how)
+        });
+        let mut notes = vec![TargetNote {
+            midi: first,
+            start_beat: 0.0,
+            beats: 2.0,
+        }];
+        if let Some((m, _)) = &via {
+            notes.push(TargetNote {
+                midi: *m,
                 start_beat: 2.0,
                 beats: 2.0,
-            },
-        ];
+            });
+        }
+        notes.push(TargetNote {
+            midi: second,
+            start_beat: notes.len() as f32 * 2.0,
+            beats: 2.0,
+        });
         let mut tl = timeline(&notes, &p.sung, reference);
         // A cadence before the first note when one is due: four chords, then a beat's rest.
         if let Some((tonic, mode, true)) = key_cadence {
@@ -2878,7 +2970,10 @@ fn gen_sing_interval(
                     },
                     Note(first).display_name()
                 ),
-            },
+            } + &via
+                .as_ref()
+                .map(|(_, how)| format!(", via {how}"))
+                .unwrap_or_default(),
             notes,
             tempo_bpm: p.sung.tempo_bpm.clamp(30.0, 240.0),
             beats_per_bar: p.sung.beats_per_bar.max(1),
@@ -2898,6 +2993,10 @@ fn gen_sing_interval(
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: json!({
                 "interval": iv.id(),
                 "direction": dir,
@@ -3094,6 +3193,10 @@ fn gen_pattern(
             follow_cursor: false,
             accompaniment: Vec::new(),
             just_cents: Vec::new(),
+            silent: Vec::new(),
+            reveal: None,
+            free: None,
+            score_until_beat: None,
             stimulus: json!({
                 "pattern": desc,
                 "tonic_midi": t,
@@ -3344,6 +3447,10 @@ fn score_timeline(score: Score, o: &ScoreTimeline) -> SungTrial {
         follow_cursor: o.follow_cursor,
         accompaniment: Vec::new(),
         just_cents: Vec::new(),
+        silent: Vec::new(),
+        reveal: None,
+        free: None,
+        score_until_beat: None,
         stimulus,
     }
 }
@@ -3366,6 +3473,143 @@ fn sight_trial(score: Score, p: &SightSingParams) -> SungTrial {
     );
     t.stimulus["start"] = json!(p.start);
     t.stimulus["backing"] = json!(p.backing);
+    t.stimulus["mode"] = json!(p.mode);
+    let bpb = t.beats_per_bar.max(1) as f32;
+    // Moves the count-in, the singing and everything after it later by `by` beats.
+    let delay = |t: &mut SungTrial, by: f32| {
+        let from = t.count_in_beat.unwrap_or(t.sing_start_beat);
+        for s in &mut t.sections {
+            if s.start_beat >= from - 1e-3 {
+                s.start_beat += by;
+                s.end_beat += by;
+            }
+        }
+        t.count_in_beat = t.count_in_beat.map(|c| c + by);
+        t.sing_start_beat += by;
+        t.total_beats += by;
+    };
+    match p.mode {
+        SightMode::Read => {}
+        SightMode::Singback => {
+            // After the key the melody plays, then it is sung back with the score hidden.
+            let at = t.count_in_beat.unwrap_or(t.sing_start_beat);
+            let length = t.score.as_ref().map(|s| s.total_beats()).unwrap_or(0.0);
+            let by = ((length + 1.0) / bpb).ceil() * bpb;
+            delay(&mut t, by);
+            let melody: Vec<TargetNote> = t
+                .notes
+                .iter()
+                .map(|n| TargetNote {
+                    midi: n.midi,
+                    start_beat: at + n.start_beat,
+                    beats: n.beats * 0.95,
+                })
+                .collect();
+            t.reference_beats.extend(melody);
+            t.sections.push(TimelineSection {
+                label: "Listen".into(),
+                start_beat: at,
+                end_beat: at + length,
+            });
+            t.sections
+                .sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
+            t.score = None;
+            t.prompt = "Listen, then sing it back".into();
+        }
+        SightMode::Flash => {
+            // Only the tonic sounds; the score shows for a while, then goes.
+            let tempo = t.tempo_bpm;
+            let flash = (p.flash_s.clamp(3.0, 60.0) * tempo / 60.0 / bpb).ceil() * bpb;
+            let tonic = t.score.as_ref().map(|s| s.key.tonic_pc()).unwrap_or(0);
+            let low = t.notes.iter().map(|n| n.midi).min().unwrap_or(60);
+            let mut tm = PitchClass::new(tonic).in_octave(3);
+            while tm + 12 <= low {
+                tm += 12;
+            }
+            let at = t.count_in_beat.unwrap_or(t.sing_start_beat);
+            t.reference_beats.clear();
+            t.sections.retain(|s| s.start_beat >= at - 1e-3);
+            let by = flash - at;
+            delay(&mut t, by);
+            t.reference_beats.push(TargetNote {
+                midi: tm,
+                start_beat: 0.0,
+                beats: 2.0,
+            });
+            t.sections.insert(
+                0,
+                TimelineSection {
+                    label: "Read it silently".into(),
+                    start_beat: 0.0,
+                    end_beat: flash,
+                },
+            );
+            t.score_until_beat = Some(flash);
+            t.prompt = "Read and audiate it; then sing it from memory".into();
+        }
+    }
+    // Kodály's silent singing: some notes are sung in the head only.
+    let silent: Vec<usize> = match p.silent {
+        SilentMode::None => Vec::new(),
+        SilentMode::Bars => {
+            let bars = (t
+                .notes
+                .iter()
+                .map(|n| n.start_beat + n.beats)
+                .fold(0.0f32, f32::max)
+                / bpb)
+                .ceil() as u32;
+            let chosen: Vec<u32> = if p.silent_bars.is_empty() {
+                (2..bars).collect()
+            } else {
+                p.silent_bars.clone()
+            };
+            t.notes
+                .iter()
+                .enumerate()
+                .filter(|(_, n)| chosen.contains(&((n.start_beat / bpb).floor() as u32 + 1)))
+                .map(|(i, _)| i)
+                .collect()
+        }
+        SilentMode::StrongBeats | SilentMode::WeakBeats => t
+            .notes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| {
+                ((n.start_beat % bpb).abs() < 1e-3) == (p.silent == SilentMode::StrongBeats)
+            })
+            .map(|(i, _)| i)
+            .collect(),
+    };
+    if !silent.is_empty() && silent.len() < t.notes.len() {
+        // Show when to sing aloud and when silently.
+        if p.silent == SilentMode::Bars {
+            let sing = t.sing_start_beat;
+            let mut runs: Vec<(bool, f32, f32)> = Vec::new();
+            for (i, n) in t.notes.iter().enumerate() {
+                let quiet = silent.contains(&i);
+                let (a, b) = (sing + n.start_beat, sing + n.start_beat + n.beats);
+                match runs.last_mut() {
+                    Some(r) if r.0 == quiet => r.2 = b,
+                    _ => runs.push((quiet, a, b)),
+                }
+            }
+            t.sections.retain(|s| s.label != "Sing");
+            for (quiet, a, b) in runs {
+                t.sections.push(TimelineSection {
+                    label: if quiet {
+                        "Sing silently".into()
+                    } else {
+                        "Sing aloud".into()
+                    },
+                    start_beat: a,
+                    end_beat: b,
+                });
+            }
+        }
+        t.stimulus["silent"] = json!(silent);
+        t.silent = silent;
+    }
     t
 }
 
@@ -4654,9 +4898,10 @@ mod tests {
             // In one key the cadence (16 notes) plays once, before the first question.
             let cadence = if i == 0 { 16 } else { 0 };
             assert_eq!(t.events.len(), cadence + 1, "trial {i}");
+            // Answers open after the note and a beat's breath (2.5 beats at 100 bpm).
             assert_eq!(
                 t.answer_after_ms,
-                Some(if i == 0 { 6.0 * 600.0 } else { 0.0 })
+                Some(if i == 0 { 6.0 * 600.0 } else { 0.0 } + 2.5 * 600.0)
             );
             // Every note of the walk to the tonic lights its answer.
             for e in t.after_answer.as_ref().unwrap() {
@@ -4732,7 +4977,11 @@ mod tests {
         );
         for t in generate_block(&every, 2, &GenContext::default()).unwrap() {
             let TrialSpec::Identify(t) = t else { panic!() };
-            assert_eq!(t.answer_after_ms, Some(6.0 * 1000.0), "six beats at 60 bpm");
+            assert_eq!(
+                t.answer_after_ms,
+                Some(6.0 * 1000.0 + 2.5 * 600.0),
+                "six beats at 60 bpm, then the note and a breath at 100"
+            );
         }
     }
 

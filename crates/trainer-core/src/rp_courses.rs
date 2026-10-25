@@ -28,6 +28,7 @@ pub const PASS: f32 = 0.9;
 
 pub fn courses() -> Vec<Course> {
     vec![
+        crate::audiation_courses::core_course(),
         degrees_course(),
         intervals_course(),
         intervals_key_course(),
@@ -39,49 +40,71 @@ pub fn courses() -> Vec<Course> {
         dictation_course(),
         sight_course(),
     ]
+    .into_iter()
+    .chain(crate::audiation_courses::workshops())
+    .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
 // Building blocks
 // ---------------------------------------------------------------------------------------------
 
-struct Lesson {
-    title: String,
-    summary: String,
-    params: Value,
+pub(crate) struct Lesson {
+    pub(crate) title: String,
+    pub(crate) summary: String,
+    pub(crate) params: Value,
     /// No feedback until the end.
-    test: bool,
+    pub(crate) test: bool,
+    /// Another exercise than the workshop's (a workshop mixing exercises).
+    pub(crate) kind: Option<&'static str>,
+    /// Another question count than the workshop's.
+    pub(crate) count: Option<u32>,
 }
 
-fn lesson(title: impl Into<String>, summary: impl Into<String>, params: Value) -> Lesson {
+pub(crate) fn lesson(
+    title: impl Into<String>,
+    summary: impl Into<String>,
+    params: Value,
+) -> Lesson {
     Lesson {
         title: title.into(),
         summary: summary.into(),
         params,
         test: false,
+        kind: None,
+        count: None,
     }
 }
 
-fn test(title: impl Into<String>, summary: impl Into<String>, params: Value) -> Lesson {
+impl Lesson {
+    /// The same lesson with another exercise and question count.
+    pub(crate) fn of(mut self, kind: &'static str, count: u32) -> Lesson {
+        self.kind = Some(kind);
+        self.count = Some(count);
+        self
+    }
+}
+
+pub(crate) fn test(title: impl Into<String>, summary: impl Into<String>, params: Value) -> Lesson {
     Lesson {
         test: true,
         ..lesson(title, summary, params)
     }
 }
 
-struct Module {
-    title: String,
-    lessons: Vec<Lesson>,
+pub(crate) struct Module {
+    pub(crate) title: String,
+    pub(crate) lessons: Vec<Lesson>,
 }
 
-fn module(title: impl Into<String>, lessons: Vec<Lesson>) -> Module {
+pub(crate) fn module(title: impl Into<String>, lessons: Vec<Lesson>) -> Module {
     Module {
         title: title.into(),
         lessons,
     }
 }
 
-fn merge(mut a: Value, b: Value) -> Value {
+pub(crate) fn merge(mut a: Value, b: Value) -> Value {
     if let (Some(a), Value::Object(b)) = (a.as_object_mut(), b) {
         a.extend(b);
     }
@@ -89,7 +112,7 @@ fn merge(mut a: Value, b: Value) -> Value {
 }
 
 /// A workshop course: its modules' lessons in order, numbered from 1.
-fn workshop(
+pub(crate) fn workshop(
     id: &str,
     kind: &str,
     count: u32,
@@ -102,22 +125,34 @@ fn workshop(
     for m in modules {
         for l in m.lessons {
             let n = levels.len() as u32 + 1;
+            let kind = l.kind.unwrap_or(kind);
             let mut b = json!({
-                "type": kind, "title": l.title, "count": count, "pass_mark": PASS,
+                "type": kind, "title": l.title, "count": l.count.unwrap_or(count), "pass_mark": PASS,
                 "feedback": if l.test { "none" } else { "after_trial" },
                 "tags": [id], "params": l.params,
             });
             if l.test {
                 b["instructions"] = json!("A test: no results until the end.");
             }
+            // Detection streams (N-back) are scored as d′, not as answers right.
+            let pass = if kind == "n_back"
+                && l.params.get("mode").and_then(|m| m.as_str()) != Some("sing")
+            {
+                PassRule::Detection {
+                    min_d_prime: 2.0,
+                    streams: 1,
+                }
+            } else {
+                PassRule::Accuracy {
+                    min: PASS,
+                    blocks: 1,
+                }
+            };
             levels.push(Level {
                 module: Some(m.title.clone()),
                 title: l.title,
                 summary: l.summary,
-                pass: PassRule::Accuracy {
-                    min: PASS,
-                    blocks: 1,
-                },
+                pass,
                 blocks: vec![block(id, n, true, b)],
             });
         }
@@ -1258,7 +1293,7 @@ fn degree_title(n: usize, minor: bool) -> String {
     names[..n].join(" ")
 }
 
-fn melody(g: Value) -> Value {
+pub(crate) fn melody(g: Value) -> Value {
     let mut g = merge(
         json!({ "max_leap": 2, "step_rate": 0.8, "start_degrees": [1, 3, 5] }),
         g,
@@ -1271,7 +1306,7 @@ fn melody(g: Value) -> Value {
 
 /// The melody ladder shared by dictation and sight singing. `bar_steps` are the lengths of the
 /// rhythm modules (1 and 2 bars for dictation, 1, 2 and 4 for sight singing).
-fn melody_modules(bar_steps: &[u32]) -> Vec<Module> {
+pub(crate) fn melody_modules(bar_steps: &[u32]) -> Vec<Module> {
     let mut modules = Vec::new();
     // Notes only, in C major: the degrees grow by one each lesson, at two lengths.
     for (title, lengths, from) in [
@@ -1425,7 +1460,11 @@ mod tests {
 
     #[test]
     fn lessons_are_one_block_in_a_module() {
-        for c in courses() {
+        // The core's sessions mix several parts; every other course is one exercise a lesson.
+        for c in courses()
+            .into_iter()
+            .filter(|c| c.id != crate::audiation_courses::RP_CORE)
+        {
             assert_eq!(c.category, CATEGORY);
             for l in &c.levels {
                 assert!(l.module.is_some(), "{}", c.id);
@@ -1465,7 +1504,7 @@ mod tests {
         let set = compose_daily_set(&db, &ctx, chrono::Utc::now(), CATEGORY).unwrap();
         let ids: Vec<&str> = set.items.iter().map(|i| i.course.as_str()).collect();
         assert!(
-            ids.contains(&RP_DEGREES) && ids.contains(&RP_INTERVALS_KEY),
+            ids.contains(&RP_DEGREES) && ids.contains(&crate::audiation_courses::RP_CORE),
             "{ids:?}"
         );
         assert!(ids.iter().all(|i| i.starts_with("rp_")));
