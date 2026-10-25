@@ -37,6 +37,11 @@ export function App() {
   const [a4, setA4] = useState(440);
   const [notice, setNotice] = useState<string | null>(null);
   const prevPhase = useRef<string>("idle");
+  // The page a session was opened from, to go back to when it ends.
+  const origin = useRef<View>("practice");
+  useEffect(() => {
+    if (view !== "session") origin.current = view;
+  }, [view]);
 
   const refreshAudio = useCallback(() => {
     api("audioState").then(setAudio).catch(() => undefined);
@@ -60,7 +65,7 @@ export function App() {
   useEffect(() => {
     const phase = runner?.phase ?? "idle";
     if (prevPhase.current === "idle" && phase !== "idle") setView("session");
-    if (prevPhase.current !== "idle" && phase === "idle") setView((v) => (v === "session" ? "practice" : v));
+    if (prevPhase.current !== "idle" && phase === "idle") setView((v) => (v === "session" ? origin.current : v));
     prevPhase.current = phase;
   }, [runner?.phase]);
 
@@ -103,7 +108,7 @@ export function App() {
             </button>
           </div>
         )}
-        {view === "session" && runner && active && <SessionView runner={runner} onClose={() => setView("practice")} />}
+        {view === "session" && runner && active && <SessionView runner={runner} onClose={() => setView(origin.current)} />}
         {view === "session" && !active && (
           <PracticeView runner={runner} audio={audio} onOpenSession={() => setView("session")} onOpenAudio={() => setView("audio")} onOpenAp={() => setView("ap")} onOpenRp={() => setView("rp")} />
         )}
