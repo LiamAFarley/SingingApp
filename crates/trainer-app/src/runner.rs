@@ -551,10 +551,18 @@ impl<'a> SessionRun<'a> {
             .iter()
             .all(|c| c.id == "other" || c.id.parse::<trainer_core::theory::PitchClass>().is_ok());
         let long_label = t.choices.iter().any(|c| c.label.chars().count() > 5);
+        // Names shown instead of note names: a piano layout or piano keys would give the note away.
+        let names_hidden = t
+            .choices
+            .iter()
+            .filter(|c| c.id != "other")
+            .all(|c| c.word.is_some() && c.word.as_deref() == Some(c.label.as_str()));
         let layout = match t.exercise {
             ExerciseKind::IncidentalPairing | ExerciseKind::ChordColorId => ChoiceLayout::Colors,
             ExerciseKind::ScaleDegreeId => ChoiceLayout::Degrees,
-            ExerciseKind::PitchId | ExerciseKind::TonalCenterId if pitch_ids && !long_label => {
+            ExerciseKind::PitchId | ExerciseKind::TonalCenterId
+                if pitch_ids && !long_label && !names_hidden =>
+            {
                 ChoiceLayout::PitchClasses
             }
             ExerciseKind::PitchId if !pitch_ids => ChoiceLayout::Notes,

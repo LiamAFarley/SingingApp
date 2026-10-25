@@ -287,7 +287,14 @@ impl ClassDraw {
         weights: &std::collections::BTreeMap<String, f32>,
     ) -> Result<Self, GenError> {
         if weights.is_empty() {
-            return Ok(ClassDraw::Even(BalancedBag::new(classes.to_vec())));
+            // About twelve to a cycle, so a small set repeats a class as often as chance would
+            // instead of alternating (two classes in a one-each bag go A B, B A, A B ...).
+            let copies = 12usize.div_ceil(classes.len());
+            let items: Vec<PitchClass> = classes
+                .iter()
+                .flat_map(|c| std::iter::repeat_n(*c, copies))
+                .collect();
+            return Ok(ClassDraw::Even(BalancedBag::new(items)));
         }
         let mut listed: Vec<(PitchClass, f64)> = Vec::new();
         for (k, w) in weights {
@@ -350,13 +357,6 @@ impl ClassDraw {
     fn refill_if_empty(&mut self, rng: &mut Rng) {
         if let ClassDraw::Even(b) = self {
             b.refill_if_empty(rng);
-        }
-    }
-
-    /// Returns a drawn class that was not played.
-    fn put_back(&mut self, c: PitchClass, rng: &mut Rng) {
-        if let ClassDraw::Even(b) = self {
-            b.put_back(c, rng);
         }
     }
 
@@ -434,6 +434,10 @@ fn gen_pitch_id(
     let label_set = p.labels.as_deref().and_then(|id| ctx.label_set(id));
     if let Some(set) = &label_set {
         style_choices(&mut choices, set, p.hide_note_names);
+        if p.hide_note_names {
+            // In pitch order the buttons would map onto the keyboard; alphabetical says nothing.
+            choices.sort_by_key(|c| (c.id == OTHER, c.label.to_lowercase()));
+        }
     }
     // The octaves each timbre may use, for the jump rule and out-of-set tones.
     let octaves_of = |timbre: &TimbreId| -> Vec<i32> {
@@ -483,20 +487,15 @@ fn gen_pitch_id(
             }
         }
         let mut midi = pc.in_octave(octave);
-        if Some(midi) == last_midi && classes.len() > 1 && !out_of_set {
-            if let ClassDraw::Weighted(_) = bag {
-                // Redrawing the class would thin out a weighted anchor; move the octave instead.
-                let octs: Vec<i32> = octaves_of(&timbre)
-                    .into_iter()
-                    .filter(|&o| o != octave)
-                    .collect();
-                if let Some(&o) = rng.choose(&octs) {
-                    octave = o;
-                }
-            } else {
-                let old = pc;
-                pc = bag.draw(rng);
-                bag.put_back(old, rng);
+        if Some(midi) == last_midi && !out_of_set {
+            // The same note again: play the class in another octave when there is one. In one
+            // octave the repeat stands; never repeating would make the next answer guessable.
+            let octs: Vec<i32> = octaves_of(&timbre)
+                .into_iter()
+                .filter(|&o| o != octave)
+                .collect();
+            if let Some(&o) = rng.choose(&octs) {
+                octave = o;
             }
             midi = pc.in_octave(octave);
         }
@@ -3374,6 +3373,28 @@ mod tests {
         assert!(after3.values().all(|o| *o == expected), "{after3:?}");
         let octaves: BTreeSet<i32> = notes.iter().map(|n| n.1).collect();
         assert_eq!(octaves, [3, 4, 5, 6].into_iter().collect());
+    }
+
+    #[test]
+    fn two_classes_do_not_just_alternate() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "pitch_id", "count": 400, "params": {"classes": ["D#", "F#"], "octaves": [3]}}"#,
+        );
+        let answers: Vec<String> = generate_block(&b, 9, &ctx)
+            .unwrap()
+            .into_iter()
+            .map(|t| {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                t.correct
+            })
+            .collect();
+        let repeats = answers.windows(2).filter(|w| w[0] == w[1]).count();
+        // Chance is about half; strict alternation would give none.
+        assert!(repeats > 120, "{repeats} repeats in 400");
+        // Still even, give or take the last, partly drawn cycle of twelve.
+        let d = answers.iter().filter(|a| *a == "D#").count() as i32;
+        assert!((d - 200).abs() <= 6, "{d} of 400");
     }
 
     #[test]

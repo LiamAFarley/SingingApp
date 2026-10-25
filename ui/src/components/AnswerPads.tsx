@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { Choice } from "../bindings/Choice";
+import { tint } from "../colors";
 import { pcIdDisplay } from "../music";
 
 /** Computer-keyboard keys for a piano octave: white keys on the home row, black keys above. */
@@ -72,17 +73,18 @@ export function PianoPad({ choices, enabled, states, onPick, octave, compact, ke
     const id = idFor(pc);
     const c = byId.get(id);
     const st = states[id] ?? "idle";
+    const tinted = c?.color && st === "idle" ? tint(c.color, sharp ? "#1f2328" : "#ffffff", 0.32) : undefined;
     return (
       <button
         key={pc}
-        className={`key ${sharp ? "sharp" : ""} ${c ? "" : "inactive"} ${st !== "idle" ? st : ""}`}
+        className={`key ${sharp ? "sharp" : ""} ${c ? "" : "inactive"} ${st !== "idle" ? st : ""} ${tinted ? "tinted" : ""}`}
         style={{
           gridRow: row,
           gridColumn: `${col} / span 2`,
           width: "auto",
           height: compact ? 44 : 64,
           fontSize: c && c.label.length > 4 ? 11 : compact ? 14 : 17,
-          background: c?.color && st === "idle" ? `color-mix(in srgb, ${c.color} 32%, ${sharp ? "#1f2328" : "#fff"})` : undefined,
+          ...tinted,
           borderColor: c?.color,
         }}
         disabled={!enabled || !c}
@@ -150,9 +152,17 @@ export function ChoiceGrid({ choices, enabled, states, onPick }: Omit<PadProps, 
     <div className="choices">
       {choices.map((c, i) => {
         const st = states[c.id] ?? "idle";
+        // The label's own colour, with white or dark text, whichever reads.
+        const tinted = c.color && st === "idle" ? tint(c.color, "#ffffff", 1) : undefined;
         return (
-          <button key={c.id} className={`choice ${st === "correct" || st === "wrong" ? st : ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
-            {c.color && <span className="dot" style={{ background: c.color, width: 14, height: 14, borderRadius: 99, display: "inline-block" }} />}
+          <button
+            key={c.id}
+            className={`choice ${st === "correct" || st === "wrong" ? st : ""} ${tinted ? "tinted" : ""}`}
+            disabled={!enabled}
+            onClick={() => onPick(c.id)}
+            style={tinted ? { ...tinted, borderColor: c.color } : undefined}
+          >
+            {c.color && !tinted && <span className="dot" style={{ background: c.color, width: 14, height: 14, borderRadius: 99, display: "inline-block" }} />}
             <span>{c.label}</span>
             {c.word && c.word !== c.label && <span className="hint">{c.word}</span>}
             {i < 10 && <span className="kbd">{i === 9 ? 0 : i + 1}</span>}

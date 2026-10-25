@@ -1300,3 +1300,15 @@ select.sing-part {
   margin: 8px 0 0;
   padding-left: 18px;
 }
+
+/* Buttons filled with a label's colour: hints and key labels follow the chosen text colour. */
+.key.tinted .hint,
+.choice.tinted .hint,
+.choice.tinted .kbd {
+  color: inherit;
+  opacity: 0.8;
+}
+.choice.tinted .kbd {
+  border-color: currentColor;
+  background: transparent;
+}
