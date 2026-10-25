@@ -124,6 +124,18 @@ pub fn loudness_db(buf: &SoundBuffer, window: Option<f64>) -> Option<f32> {
     (ms > 1e-12).then(|| (10.0 * ms.log10()) as f32)
 }
 
+/// Octaves spanned by the glissando's partials, from 20 Hz up.
+const GLISSANDO_OCTAVES: usize = 9;
+
+/// Level of a glissando partial `pos` octaves above the bottom: a squared raised cosine peaking
+/// in the middle (about 450 Hz) and falling smoothly to exactly zero at both ends, so a partial
+/// that wraps from the bottom to the top comes in from silence instead of appearing.
+fn glissando_envelope(pos: f64) -> f64 {
+    let x = (pos / GLISSANDO_OCTAVES as f64).clamp(0.0, 1.0);
+    let w = 0.5 - 0.5 * (2.0 * std::f64::consts::PI * x).cos();
+    w * w
+}
+
 /// A direct-form I biquad (RBJ cookbook designs).
 struct Biquad {
     b: [f64; 3],
@@ -491,12 +503,10 @@ impl Renderer {
     /// without arriving anywhere. Played before a test to clear pitch memory.
     pub fn shepard_glissando(&self, seconds: f64, s_per_octave: f64) -> SoundBuffer {
         let sr = self.sample_rate as f64;
-        const OCTAVES: usize = 9;
+        const OCTAVES: usize = GLISSANDO_OCTAVES;
         let f_min = 20.0f64;
-        let centre = OCTAVES as f64 / 2.0;
-        let sigma = 1.4;
         let n = (seconds * sr) as usize;
-        let envelope = |pos: f64| (-0.5 * ((pos - centre) / sigma).powi(2)).exp();
+        let envelope = glissando_envelope;
         let norm: f64 = (0..OCTAVES)
             .map(|k| envelope(k as f64 + 0.5))
             .sum::<f64>()
@@ -958,6 +968,15 @@ mod tests {
             .collect();
         let l = loudness_db(&r.render_events(&chord), Some(0.4)).unwrap();
         assert!((l - TARGET_LOUDNESS_DB).abs() < 2.0, "{l}");
+    }
+
+    #[test]
+    fn glissando_partials_fade_in_from_silence() {
+        assert_eq!(glissando_envelope(0.0), 0.0);
+        assert!(glissando_envelope(GLISSANDO_OCTAVES as f64) < 1e-12);
+        assert!((glissando_envelope(GLISSANDO_OCTAVES as f64 / 2.0) - 1.0).abs() < 1e-12);
+        // Within a tenth of an octave of the wrap a partial is still below -60 dB.
+        assert!(glissando_envelope(GLISSANDO_OCTAVES as f64 - 0.1) < 1e-3);
     }
 
     #[test]
