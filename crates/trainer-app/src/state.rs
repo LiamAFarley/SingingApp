@@ -277,7 +277,7 @@ impl Core {
     }
 }
 
-/// `%APPDATA%\SingingTrainer` unless overridden.
+/// The app's `data` folder, unless `SINGING_TRAINER_DATA_DIR` is set.
 pub fn data_dir() -> PathBuf {
     trainer_core::storage::default_data_dir()
 }

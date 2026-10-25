@@ -68,7 +68,12 @@ pub fn estimate_trial_seconds(t: &TrialSpec) -> f32 {
         }
         TrialSpec::Sung(t) => t.total_ms() as f32 / 1000.0 + 2.5,
         // About three hearings plus writing time.
-        TrialSpec::Dictation(t) => t.playback.total_ms() as f32 / 1000.0 * 3.0 + 12.0 * t.score.bars as f32,
+        TrialSpec::Dictation(t) => {
+            t.playback.total_ms() as f32 / 1000.0 * 3.0 + 12.0 * t.score.bars as f32
+        }
+        TrialSpec::Detect(t) => {
+            t.prompt_ms as f32 / 1000.0 + t.tones.len() as f32 * t.window_ms as f32 / 1000.0 + 1.5
+        }
     }
 }
 
@@ -139,7 +144,10 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
         if let Exercise::PitchId(p) = &b.exercise {
             // A stream is too fast to chain intervals, and a 13-semitone jump rule defeats it.
             let chaining_closed = p.pacing != Pacing::Respond || p.min_jump_semitones >= 13;
-            if p.mask == Mask::None && b.effective_feedback().shows_trial_result() && !chaining_closed {
+            if p.mask == Mask::None
+                && b.effective_feedback().shows_trial_result()
+                && !chaining_closed
+            {
                 warnings.push(issue(
                     format!("{path}.params.mask"),
                     "without a mask, each answer reveals a labelled pitch that can be used as a relative reference for the next trial",
@@ -147,7 +155,8 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
             }
         }
         if let Exercise::PitchId(p) = &b.exercise {
-            let span = p.octaves.iter().max().unwrap_or(&0) - p.octaves.iter().min().unwrap_or(&0) + 1;
+            let span =
+                p.octaves.iter().max().unwrap_or(&0) - p.octaves.iter().min().unwrap_or(&0) + 1;
             if p.min_jump_semitones >= 12 && span < 3 {
                 warnings.push(issue(
                     format!("{path}.params.min_jump_semitones"),

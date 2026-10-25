@@ -1,7 +1,7 @@
 //! `trainer-mcp`: stdio MCP server for the singing trainer.
 //!
 //! Usage: `trainer-mcp [--data-dir <dir>]`. Without `--data-dir` it uses the app's data
-//! directory (`%APPDATA%\SingingTrainer` on Windows, or `SINGING_TRAINER_DATA_DIR`).
+//! directory (the app's `data` folder, or `SINGING_TRAINER_DATA_DIR`).
 
 use std::path::PathBuf;
 

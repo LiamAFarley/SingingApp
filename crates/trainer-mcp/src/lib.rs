@@ -10,8 +10,9 @@ use rmcp::model::{CallToolResult, ContentBlock, Implementation, ServerCapabiliti
 use rmcp::{ErrorData, ServerHandler, schemars, tool, tool_handler, tool_router};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use trainer_core::courses::{self, DailyPlan};
+use trainer_core::courses::{self, ApPrefs, DailyPlan};
 use trainer_core::generate::GenContext;
+use trainer_core::labels::LabelSet;
 use trainer_core::library;
 use trainer_core::presets::{builtin_presets, find_builtin};
 use trainer_core::reports;
@@ -40,12 +41,20 @@ calling something learned, and retest after gaps for retention.\n\
 - Absolute pitch is organised in courses (list_courses, get_ap_dashboard): ap_naming (a growing set of notes over three \
 octaves with Other for notes outside the set, a check without feedback per level, the last level needing four checks at 90% \
 with the last one at least 12 h after the third), ap_brady (all twelve notes, C weighted 40% fading to even, paced streams from \
-5 s to 1.4 s apart, starting by singing C from memory), and the tests ap_weekly (120 notes, five timbres, Sundays by default), \
-ap_ucsf_style (every 4 weeks) and ap_maintenance (twice a week once naming is complete). The app moves a course to its next \
-level when the level's checks pass, and the user's \"Today's set\" is composed from the active courses in the daily plan \
-(preview_daily_set, set_daily_plan). Use set_course_level only to correct a level. The dashboard pools every method per \
-note: mastered means at least 90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory \
-with a block pre_mask \"shepard_glissando\" and keep consecutive tones at least 13 semitones apart over three octaves.\n\
+5 s to 1.4 s apart, starting by singing C from memory), ap_speed (pitch_detect streams, d′ on the last streams), \
+ap_note_colors (Taneda colours, errorless at first), ap_chord_colors (Eguchi's 14 chord colours; the next chord is due only \
+after 100% and 14 days), ap_contrast (E♭ against F♯, then the black keys, answered with Gervain names or the user's own set), \
+and the tests ap_weekly (120 notes, five timbres, Sundays by default), ap_ucsf_style (every 4 weeks) and ap_maintenance \
+(twice a week once naming is complete). The app moves a course to its next level when the level's checks pass, and the user's \
+\"Today's set\" is composed from the active courses in the daily plan (preview_daily_set, set_daily_plan). New courses start \
+switched off. Use set_course_level only to correct a level. The dashboard pools every method per note: mastered means at least \
+90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory with a block pre_mask \
+\"shepard_glissando\" and keep consecutive tones at least 13 semitones apart over three octaves. feedback \"errorless\" stores \
+the true result but shows no error mark; it is the default on early colour, chord and contrast levels unless the user turns \
+\"Errorless early levels\" off (set_ap_prefs). Label sets (list_label_sets, set_label_set) are note_names, taneda_colors, \
+gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \
+treat a block without feedback as passed if the tones were within an octave of each other or a named note was heard in the \
+previous few minutes without the clearing sound.\n\
 - Other graded courses are built-in presets: degrees_01–08 (scale degrees in the style of Functional Ear Trainer) and \
 harmony_01–08. Suggest the next level after at least 90% over two sessions.\n\
 - Sight singing (sight_sing) and dictation (melodic_dictation) use staff notation; melodies are generated, written by you \
@@ -266,7 +275,12 @@ impl TrainerServer {
             return Err(format!("{file}: {e}"));
         }
         let ids = self.with_db(|db| {
-            Ok(db.library()?.into_iter().filter(|p| p.file == file).map(|p| p.id).collect::<Vec<_>>())
+            Ok(db
+                .library()?
+                .into_iter()
+                .filter(|p| p.file == file)
+                .map(|p| p.id)
+                .collect::<Vec<_>>())
         })?;
         Ok(json!({ "file": file, "ids": ids }))
     }
@@ -456,9 +470,13 @@ impl TrainerServer {
         let Some(c) = courses::find_course(&req.course) else {
             return tool_error(format!("unknown course `{}`", req.course));
         };
-        match courses::level_session(&c, req.level) {
+        match self.with_db(|db| {
+            let mut spec = courses::level_session(&c, req.level)?;
+            courses::apply_session_prefs(&mut spec, &courses::ap_prefs(db)?);
+            Ok(spec)
+        }) {
             Ok(spec) => text(&spec),
-            Err(e) => tool_error(format!("{e:#}")),
+            Err(e) => tool_error(e),
         }
     }
 
@@ -505,6 +523,50 @@ impl TrainerServer {
             Ok(v) => text(&v.into_iter().find(|s| s.id == req.course)),
             Err(e) => tool_error(e),
         }
+    }
+
+    #[tool(
+        description = "The label and colour sets (note names, Taneda colours, Gervain names, the user's own colours, Eguchi chord colours), including any edits."
+    )]
+    async fn list_label_sets(&self) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| trainer_core::labels::sets_from_db(db)) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Replace one label set. id is note_names, taneda_colors, gervain_names, my_colors, eguchi_chords, or a new id of letters, numbers and underscores. kind is pitch_class or chord. entries map a pitch class (C, C#, …) or a chord id (red, yellow, …) to {name?, color?, word?, speech?}. color is a CSS colour such as #d64545. speech is a path inside the speech folder, such as labels/gervain_names/Sarah.wav."
+    )]
+    async fn set_label_set(
+        &self,
+        Parameters(set): Parameters<LabelSet>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| trainer_core::labels::save_set(db, &set)) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "Read or set whether early colour, chord and contrast levels use errorless feedback, and which label set the contrast course uses (contrast_labels, default gervain_names)."
+    )]
+    async fn set_ap_prefs(
+        &self,
+        Parameters(prefs): Parameters<ApPrefs>,
+    ) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(|db| courses::save_ap_prefs(db, &prefs)) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "The speech folder: which spoken digits, letters, note names and label words are present, which are missing, and which speaking features are therefore off. Naming, detection and chords still run without them."
+    )]
+    async fn speech_folder(&self) -> Result<CallToolResult, ErrorData> {
+        let dir = trainer_core::speech::speech_dir(&self.data_dir);
+        text(&trainer_core::speech::inspect(&dir))
     }
 
     #[tool(
@@ -714,10 +776,20 @@ impl TrainerServer {
             let pieces: Vec<Value> = db
                 .library()?
                 .iter()
-                .filter(|p| req.collection.as_deref().is_none_or(|c| library::in_collection(p, c)))
-                .filter(|p| req.tag.as_deref().is_none_or(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t))))
                 .filter(|p| {
-                    q.as_deref().is_none_or(|q| p.id.to_lowercase().contains(q) || p.title.to_lowercase().contains(q))
+                    req.collection
+                        .as_deref()
+                        .is_none_or(|c| library::in_collection(p, c))
+                })
+                .filter(|p| {
+                    req.tag
+                        .as_deref()
+                        .is_none_or(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
+                })
+                .filter(|p| {
+                    q.as_deref().is_none_or(|q| {
+                        p.id.to_lowercase().contains(q) || p.title.to_lowercase().contains(q)
+                    })
                 })
                 .map(|p| p.summary())
                 .collect();
@@ -734,7 +806,9 @@ impl TrainerServer {
         }
     }
 
-    #[tool(description = "One library piece in full, in the library JSON format (notes as {note, beats} | {rest}).")]
+    #[tool(
+        description = "One library piece in full, in the library JSON format (notes as {note, beats} | {rest})."
+    )]
     async fn get_library_piece(
         &self,
         Parameters(req): Parameters<LibraryPieceRequest>,
@@ -766,10 +840,24 @@ Pieces without an id get collection/file (or …#n). Writing the same file_name 
         let name = req
             .file_name
             .clone()
-            .or_else(|| req.pieces[0].get("title").and_then(Value::as_str).map(str::to_string))
-            .or_else(|| req.pieces[0].get("id").and_then(Value::as_str).map(str::to_string))
+            .or_else(|| {
+                req.pieces[0]
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                req.pieces[0]
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "pieces".into());
-        let name = if name.to_lowercase().ends_with(".json") { name } else { format!("{name}.json") };
+        let name = if name.to_lowercase().ends_with(".json") {
+            name
+        } else {
+            format!("{name}.json")
+        };
         let rel = match library::file_path(req.collection.as_deref(), &name) {
             Ok(r) => r,
             Err(e) => return tool_error(e),
@@ -783,7 +871,10 @@ Pieces without an id get collection/file (or …#n). Writing the same file_name 
             for p in &pieces {
                 if let Some(other) = db.library_piece(&p.id)? {
                     if other.file != rel {
-                        return Ok(Some(format!("the id `{}` is already used in {}", p.id, other.file)));
+                        return Ok(Some(format!(
+                            "the id `{}` is already used in {}",
+                            p.id, other.file
+                        )));
                     }
                 }
             }
@@ -975,9 +1066,22 @@ mod tests {
         // Absolute-pitch courses and the daily set.
         let (err, courses) = call(&client, "list_courses", json!({})).await;
         assert!(!err, "{courses}");
-        let ids: Vec<&str> = courses.as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).collect();
-        assert!(ids.contains(&"ap_naming") && ids.contains(&"ap_weekly"), "{ids:?}");
-        let (err, level) = call(&client, "get_course_level", json!({"course": "ap_naming", "level": 3})).await;
+        let ids: Vec<&str> = courses
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|c| c["id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&"ap_naming") && ids.contains(&"ap_weekly"),
+            "{ids:?}"
+        );
+        let (err, level) = call(
+            &client,
+            "get_course_level",
+            json!({"course": "ap_naming", "level": 3}),
+        )
+        .await;
         assert!(!err, "{level}");
         assert_eq!(level["blocks"][0]["course"]["level"], json!(3));
         let (err, set) = call(&client, "preview_daily_set", json!({})).await;
@@ -993,7 +1097,12 @@ mod tests {
         assert_eq!(plan["test_day"], json!(5));
         let (err, _) = call(&client, "set_daily_plan", json!({"courses": [{"course": "ap_weekly", "minutes": 5, "active": true}], "test_day": 5})).await;
         assert!(err, "tests are not ladder courses");
-        let (err, st) = call(&client, "set_course_level", json!({"course": "ap_naming", "level": 4})).await;
+        let (err, st) = call(
+            &client,
+            "set_course_level",
+            json!({"course": "ap_naming", "level": 4}),
+        )
+        .await;
         assert!(!err, "{st}");
         assert_eq!(st["level"], json!(4));
         let (err, dash) = call(&client, "get_ap_dashboard", json!({})).await;
@@ -1033,42 +1142,89 @@ mod tests {
         );
 
         // Anchor songs: refused until one is saved, then generated from it.
-        let anchors_session = json!({"title": "Anchors", "blocks": [{"type": "anchor_song", "count": 4}]});
-        let (_, a) = call(&client, "queue_session", json!({"session": anchors_session, "dry_run": true})).await;
+        let anchors_session =
+            json!({"title": "Anchors", "blocks": [{"type": "anchor_song", "count": 4}]});
+        let (_, a) = call(
+            &client,
+            "queue_session",
+            json!({"session": anchors_session, "dry_run": true}),
+        )
+        .await;
         assert_eq!(a["validation"]["ok"], json!(false));
-        let (err, saved) = call(&client, "save_anchor", json!({"anchor": {"title": "Yesterday", "first_note": "G4"}})).await;
+        let (err, saved) = call(
+            &client,
+            "save_anchor",
+            json!({"anchor": {"title": "Yesterday", "first_note": "G4"}}),
+        )
+        .await;
         assert!(!err, "{saved}");
         let (_, list) = call(&client, "list_anchors", json!({})).await;
         assert_eq!(list.as_array().unwrap().len(), 1);
-        let (_, a) = call(&client, "queue_session", json!({"session": anchors_session, "dry_run": true})).await;
+        let (_, a) = call(
+            &client,
+            "queue_session",
+            json!({"session": anchors_session, "dry_run": true}),
+        )
+        .await;
         assert_eq!(a["validation"]["ok"], json!(true), "{a}");
 
         // The melody library: pieces written as files, listed, used by a session, removed.
         let lib_session = json!({"title": "Book", "blocks": [{"type": "sight_sing", "count": 2,
             "params": {"melody": {"library": {"collection": "Book"}}}}]});
-        let (_, v) = call(&client, "queue_session", json!({"session": lib_session, "dry_run": true})).await;
+        let (_, v) = call(
+            &client,
+            "queue_session",
+            json!({"session": lib_session, "dry_run": true}),
+        )
+        .await;
         assert_eq!(v["validation"]["ok"], json!(false));
         let (err, added) = call(&client, "add_library_pieces", json!({"collection": "Book", "file_name": "ch1",
             "pieces": [{"title": "No. 1", "key": "D major", "time": "3/4", "notes": "A4:1 | D5:2 C#5:1 | D5:3"}]})).await;
         assert!(!err, "{added}");
         assert_eq!(added["ids"], json!(["Book/ch1"]));
-        let (err, bad) = call(&client, "add_library_pieces", json!({"pieces": [{"key": "C", "notes": "C4:4 | D4:3 E4:2 | C4:4"}]})).await;
-        assert!(err && bad.as_str().unwrap().contains("bar 2 has 5 beats"), "{bad}");
+        let (err, bad) = call(
+            &client,
+            "add_library_pieces",
+            json!({"pieces": [{"key": "C", "notes": "C4:4 | D4:3 E4:2 | C4:4"}]}),
+        )
+        .await;
+        assert!(
+            err && bad.as_str().unwrap().contains("bar 2 has 5 beats"),
+            "{bad}"
+        );
         let midi_dir = tempfile::tempdir()?;
         let json_path = midi_dir.path().join("extra.json");
         std::fs::write(&json_path, r#"{"key": "G", "notes": "G4:4"}"#)?;
-        let (_, imported) = call(&client, "import_library_files",
-            json!({"paths": [json_path.to_string_lossy()], "collection": "Book/More"})).await;
-        assert_eq!(imported[0]["imported"]["ids"], json!(["Book/More/extra"]), "{imported}");
+        let (_, imported) = call(
+            &client,
+            "import_library_files",
+            json!({"paths": [json_path.to_string_lossy()], "collection": "Book/More"}),
+        )
+        .await;
+        assert_eq!(
+            imported[0]["imported"]["ids"],
+            json!(["Book/More/extra"]),
+            "{imported}"
+        );
         let (_, list) = call(&client, "list_library", json!({"collection": "book"})).await;
         assert_eq!(list["pieces"].as_array().unwrap().len(), 2, "{list}");
         assert_eq!(list["pieces"][0]["bars"], json!(3));
-        let (_, v) = call(&client, "queue_session", json!({"session": lib_session, "dry_run": true})).await;
+        let (_, v) = call(
+            &client,
+            "queue_session",
+            json!({"session": lib_session, "dry_run": true}),
+        )
+        .await;
         assert_eq!(v["validation"]["ok"], json!(true), "{v}");
         let (err, piece) = call(&client, "get_library_piece", json!({"id": "Book/ch1"})).await;
         assert!(!err);
         assert_eq!(piece["key"], json!("D major"));
-        let (err, _) = call(&client, "remove_library_file", json!({"file": "Book/More/extra.json"})).await;
+        let (err, _) = call(
+            &client,
+            "remove_library_file",
+            json!({"file": "Book/More/extra.json"}),
+        )
+        .await;
         assert!(!err);
         let (_, list) = call(&client, "list_library", json!({})).await;
         assert_eq!(list["pieces"].as_array().unwrap().len(), 1);
@@ -1081,7 +1237,12 @@ mod tests {
                 {"name": "Alto", "notes": "D4:1 C#4 B3 A3 | A3:4"},
                 {"name": "Tenor", "notes": "A3:1 A3 G3 G3 | F#3:4"},
                 {"name": "Bass", "notes": "D3:1 A2 G2 A2 | D3:4"}]}]}}}}]});
-        let (_, v) = call(&client, "queue_session", json!({"session": satb, "dry_run": true})).await;
+        let (_, v) = call(
+            &client,
+            "queue_session",
+            json!({"session": satb, "dry_run": true}),
+        )
+        .await;
         assert_eq!(v["validation"]["ok"], json!(true), "{v}");
 
         let (_, sessions) = call(&client, "list_sessions", json!({"status": "queued"})).await;

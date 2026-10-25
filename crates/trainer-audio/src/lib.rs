@@ -11,6 +11,7 @@ pub mod device;
 pub mod engine;
 pub mod render;
 pub mod shared;
+pub mod speech;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

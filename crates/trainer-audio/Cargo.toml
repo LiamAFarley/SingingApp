@@ -23,6 +23,7 @@ cpal.workspace = true
 rtrb.workspace = true
 rustysynth.workspace = true
 hound.workspace = true
+symphonia.workspace = true
 crossbeam-channel.workspace = true
 parking_lot.workspace = true
 tracing.workspace = true

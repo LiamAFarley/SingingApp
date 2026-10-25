@@ -39,4 +39,20 @@ score: Score | null,
 /**
  * Dictation: hearings so far and the limit (0 for none).
  */
-plays: number, max_plays: number, };
+plays: number, max_plays: number, 
+/**
+ * Screen tint for the played note (pairing, or the detection target).
+ */
+flash_color: string | null, 
+/**
+ * Detection: how many tones are in the stream.
+ */
+detect_total: number | null, 
+/**
+ * Detection: the tone playing now, 1-based; 0 during the prompt.
+ */
+detect_index: number | null, 
+/**
+ * A mark during a detection stream: `hit`, `miss` or `false`.
+ */
+detect_mark: string | null, };

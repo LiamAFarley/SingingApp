@@ -3,4 +3,4 @@
 /**
  * When the singer or listener sees whether they were right.
  */
-export type FeedbackMode = "continuous" | "after_trial" | "after_block" | "end_of_session" | "none";
+export type FeedbackMode = "continuous" | "after_trial" | "after_block" | "end_of_session" | "none" | "errorless";

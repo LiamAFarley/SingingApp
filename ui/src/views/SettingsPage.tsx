@@ -3,6 +3,9 @@ import { api } from "../api";
 import type { Anchor } from "../bindings/Anchor";
 import type { AppInfo } from "../bindings/AppInfo";
 import type { AppSettings } from "../bindings/AppSettings";
+import type { ApPrefs } from "../bindings/ApPrefs";
+import type { LabelSet } from "../bindings/LabelSet";
+import type { SpeechReport } from "../bindings/SpeechReport";
 import type { RangeProfile } from "../bindings/RangeProfile";
 import { noteDisplay, noteId, parseNote } from "../music";
 
@@ -153,6 +156,8 @@ export function SettingsPage({ onSaved }: { onSaved: (s: AppSettings) => void })
         </div>
       </div>
 
+      <ApPractice />
+
       <AnchorSongs />
 
       <div className="card section">
@@ -189,6 +194,140 @@ export function SettingsPage({ onSaved }: { onSaved: (s: AppSettings) => void })
         </dl>
         <p className="small muted">Add SF2 files to the "soundfonts" folder inside the data folder and restart the app to use them.</p>
       </div>
+    </div>
+  );
+}
+
+const PITCH_CLASSES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+function ApPractice() {
+  const [prefs, setPrefs] = useState<ApPrefs | null>(null);
+  const [sets, setSets] = useState<LabelSet[]>([]);
+  const [speech, setSpeech] = useState<SpeechReport | null>(null);
+  const [which, setWhich] = useState("my_colors");
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api("apPrefs").then(setPrefs).catch((e) => setError(e.message));
+    api("listLabelSets").then((rows) => {
+      setSets(rows);
+      if (rows.some((s) => s.id === "my_colors")) setWhich("my_colors");
+      else if (rows[0]) setWhich(rows[0].id);
+    }).catch((e) => setError(e.message));
+    api("speechStatus").then(setSpeech).catch((e) => setError(e.message));
+  }, []);
+
+  const current = sets.find((s) => s.id === which);
+  const keys = current?.kind === "pitch_class" ? PITCH_CLASSES : Object.keys(current?.entries ?? {});
+
+  const patch = (key: string, field: "color" | "word", value: string) => {
+    if (!current) return;
+    const entries = { ...current.entries };
+    const prev = entries[key] ?? {};
+    const next = { ...prev, [field]: value.trim() ? value.trim() : null };
+    if (!next.color && !next.word && !next.name && !next.speech) delete entries[key];
+    else entries[key] = next;
+    setSets(sets.map((s) => (s.id === current.id ? { ...current, entries } : s)));
+  };
+
+  const save = async () => {
+    if (!prefs || !current) return;
+    setError(null);
+    try {
+      const saved = await api("saveApPrefs", prefs);
+      setPrefs(saved);
+      const set = await api("saveLabelSet", current);
+      setSets(sets.map((s) => (s.id === set.id ? set : s)));
+      setNote("Saved.");
+      setTimeout(() => setNote(null), 2000);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  if (!prefs) return null;
+  return (
+    <div className="card section">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h3>Colours, names and speech</h3>
+        <div className="row">
+          {note && <span className="small muted">{note}</span>}
+          <button className="btn small" onClick={save}>
+            Save
+          </button>
+        </div>
+      </div>
+      {error && <div className="notice error">{error}</div>}
+      <label className="check">
+        <input type="checkbox" checked={prefs.errorless_early} onChange={(e) => setPrefs({ ...prefs, errorless_early: e.target.checked })} />
+        Errorless early levels
+      </label>
+      <p className="small muted">
+        The first levels of note colours, chord colours and contrast light up the right answer without marking a miss. What is stored is still whether you were right.
+      </p>
+      <label className="field" style={{ maxWidth: 280 }}>
+        Contrast course
+        <select value={prefs.contrast_labels} onChange={(e) => setPrefs({ ...prefs, contrast_labels: e.target.value })}>
+          <option value="gervain_names">Gervain names</option>
+          <option value="my_colors">My colours</option>
+          <option value="taneda_colors">Taneda colours</option>
+          <option value="note_names">Note names</option>
+        </select>
+      </label>
+
+      {speech && (
+        <div style={{ marginTop: 8 }}>
+          <div className="small">Speech folder</div>
+          <div className="small muted" style={{ userSelect: "text" }}>{speech.dir}</div>
+          {speech.disabled.length > 0 ? (
+            <p className="small muted">
+              Speaking is off for: {speech.disabled.join(", ")}. {speech.missing.length} files are not there yet. Everything else still runs.
+            </p>
+          ) : (
+            <p className="small muted">Every expected speech file is in place.</p>
+          )}
+        </div>
+      )}
+
+      {sets.length > 0 && current && (
+        <div style={{ marginTop: 12 }}>
+          <label className="field" style={{ maxWidth: 280 }}>
+            Label set
+            <select value={current.id} onChange={(e) => setWhich(e.target.value)}>
+              {sets.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="small muted">{current.description}</p>
+          <div className="grid cols-2">
+            {keys.map((key) => {
+              const entry = current.entries[key];
+              return (
+                <div key={key} className="row" style={{ gap: 8 }}>
+                  <span className="num" style={{ width: 28 }}>{key}</span>
+                  <input
+                    type="text"
+                    placeholder="Word"
+                    value={entry?.word ?? ""}
+                    onChange={(e) => patch(key, "word", e.target.value)}
+                    style={{ width: 120 }}
+                  />
+                  <input
+                    type="color"
+                    aria-label={`Colour for ${key}`}
+                    value={entry?.color && /^#[0-9a-fA-F]{6}$/.test(entry.color) ? entry.color : "#cccccc"}
+                    onChange={(e) => patch(key, "color", e.target.value)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

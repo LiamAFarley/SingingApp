@@ -29,11 +29,21 @@ pub enum FeedbackMode {
     EndOfSession,
     /// No results shown (assessment).
     None,
+    /// A wrong answer is not marked wrong. The right answer lights up and is played, and the
+    /// stored result is still the true one.
+    Errorless,
 }
 
 impl FeedbackMode {
     pub fn shows_trial_result(self) -> bool {
-        matches!(self, FeedbackMode::Continuous | FeedbackMode::AfterTrial)
+        matches!(
+            self,
+            FeedbackMode::Continuous | FeedbackMode::AfterTrial | FeedbackMode::Errorless
+        )
+    }
+
+    pub fn is_errorless(self) -> bool {
+        matches!(self, FeedbackMode::Errorless)
     }
 
     pub fn as_str(self) -> &'static str {
@@ -43,6 +53,7 @@ impl FeedbackMode {
             FeedbackMode::AfterBlock => "after_block",
             FeedbackMode::EndOfSession => "end_of_session",
             FeedbackMode::None => "none",
+            FeedbackMode::Errorless => "errorless",
         }
     }
 }
@@ -402,6 +413,18 @@ pub struct PitchIdParams {
     pub class_weights: std::collections::BTreeMap<String, f32>,
     #[serde(default)]
     pub pacing: Pacing,
+    /// Label set id (`note_names`, `taneda_colors`, `gervain_names`, `my_colors`, or a saved set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<String>,
+    /// Tint the screen with the played note's colour after the answer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub color_flash: bool,
+    /// Buttons show the colour and word only, with no letter name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_note_names: bool,
+    /// A missed class is asked again later in the block, in another octave when the block has one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requeue_misses: bool,
 }
 
 impl Default for PitchIdParams {
@@ -451,6 +474,14 @@ pub struct PitchPairingParams {
     pub duration_ms: u32,
     #[serde(default = "d_ms_1500")]
     pub gap_ms: u32,
+    /// Label set id. The letter name is used when this is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<String>,
+    /// Tint the screen with the note's colour while its label is shown.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub color_flash: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_note_names: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -1064,13 +1095,18 @@ pub struct ParallelHarmony {
 /// A melody source, or a bare generator object for `generate`.
 fn melody_or_generator<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MelodySource, D::Error> {
     let v = serde_json::Value::deserialize(d)?;
-    let tagged = v
-        .as_object()
-        .is_some_and(|o| o.len() == 1 && ["generate", "given", "library"].iter().any(|k| o.contains_key(*k)));
+    let tagged = v.as_object().is_some_and(|o| {
+        o.len() == 1
+            && ["generate", "given", "library"]
+                .iter()
+                .any(|k| o.contains_key(*k))
+    });
     if tagged {
         serde_json::from_value(v).map_err(serde::de::Error::custom)
     } else {
-        serde_json::from_value::<MelodyParams>(v).map(MelodySource::Generate).map_err(serde::de::Error::custom)
+        serde_json::from_value::<MelodyParams>(v)
+            .map(MelodySource::Generate)
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -1299,7 +1335,12 @@ pub struct AnchorSongParams {
 }
 
 fn d_incidental_classes() -> ClassSet {
-    ClassSet::List(vec![PitchClass::new(0), PitchClass::new(4), PitchClass::new(8), PitchClass::new(2)])
+    ClassSet::List(vec![
+        PitchClass::new(0),
+        PitchClass::new(4),
+        PitchClass::new(8),
+        PitchClass::new(2),
+    ])
 }
 
 fn d_ms_300() -> u32 {
@@ -1351,6 +1392,111 @@ pub struct IncidentalPairingParams {
     pub mismatch_rate: f32,
 }
 
+fn d_jump_13() -> u32 {
+    13
+}
+fn d_tones_16() -> u32 {
+    16
+}
+fn d_quarter() -> f32 {
+    0.25
+}
+fn d_ms_1750() -> u32 {
+    1750
+}
+fn d_choir() -> TimbreId {
+    "gm:52".into()
+}
+fn d_taneda() -> String {
+    "taneda_colors".into()
+}
+
+/// How a detection stream marks each tone.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DetectMarks {
+    /// A summary of d′ and latency after the stream.
+    #[default]
+    Summary,
+    /// A mark after each tone, as well as the summary.
+    Each,
+    /// No marks during the stream. The block's feedback mode still decides the summary.
+    None,
+}
+
+/// Fast detection (Simple Speed): one stream of tones, press on the target class.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PitchDetectParams {
+    #[serde(default)]
+    pub classes: ClassSet,
+    #[serde(default = "d_octaves")]
+    pub octaves: Vec<i32>,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+    #[serde(default)]
+    pub pool: Pool,
+    #[serde(default = "d_jump_13")]
+    pub min_jump_semitones: u32,
+    /// Tones in the stream.
+    #[serde(default = "d_tones_16")]
+    pub tones: u32,
+    /// Share of tones that are the target class.
+    #[serde(default = "d_quarter")]
+    pub target_rate: f32,
+    /// How long each tone can be answered, and the time until the next one.
+    #[serde(default = "d_ms_1750")]
+    pub window_ms: u32,
+    #[serde(default = "d_ms_1500")]
+    pub prompt_ms: u32,
+    #[serde(default = "d_ms_300")]
+    pub tone_ms: u32,
+    /// The target is sung on this timbre (General MIDI choir "aahs").
+    #[serde(default = "d_choir")]
+    pub prompt_timbre: TimbreId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<String>,
+    #[serde(default)]
+    pub marks: DetectMarks,
+    /// Say the target's name when that speech file exists.
+    #[serde(default = "d_true")]
+    pub speak: bool,
+}
+
+impl Default for PitchDetectParams {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
+/// Eguchi chord colours: name the colour of a fixed voicing.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChordColorParams {
+    /// Chord ids from the Eguchi catalogue, in catalogue order. Empty means the nine white chords.
+    #[serde(default)]
+    pub chords: Vec<String>,
+    #[serde(default = "d_ms_1500")]
+    pub duration_ms: u32,
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+    /// Shift the fixed voicing by this many octaves.
+    #[serde(default)]
+    pub register_shift: i32,
+    /// After each chord, one of its notes (or a white-key note) is named on its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub single_note_after: bool,
+    /// Label set for that note.
+    #[serde(default = "d_taneda")]
+    pub note_labels: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requeue_misses: bool,
+}
+
+impl Default for ChordColorParams {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Blocks and sessions
 // ---------------------------------------------------------------------------------------------
@@ -1377,6 +1523,8 @@ pub enum Exercise {
     ScaleDegreeId(ScaleDegreeParams),
     IntervalComparison(IntervalComparisonParams),
     Harmony(HarmonyParams),
+    PitchDetect(PitchDetectParams),
+    ChordColorId(ChordColorParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -1400,10 +1548,12 @@ pub enum ExerciseKind {
     ScaleDegreeId,
     IntervalComparison,
     Harmony,
+    PitchDetect,
+    ChordColorId,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 18] = [
+    pub const ALL: [ExerciseKind; 20] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -1422,6 +1572,8 @@ impl ExerciseKind {
         ExerciseKind::ScaleDegreeId,
         ExerciseKind::IntervalComparison,
         ExerciseKind::Harmony,
+        ExerciseKind::PitchDetect,
+        ExerciseKind::ChordColorId,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -1444,6 +1596,8 @@ impl ExerciseKind {
             ExerciseKind::ScaleDegreeId => "scale_degree_id",
             ExerciseKind::IntervalComparison => "interval_comparison",
             ExerciseKind::Harmony => "harmony",
+            ExerciseKind::PitchDetect => "pitch_detect",
+            ExerciseKind::ChordColorId => "chord_color_id",
         }
     }
 
@@ -1471,6 +1625,8 @@ impl ExerciseKind {
             ExerciseKind::ScaleDegreeId => "Scale degrees",
             ExerciseKind::IntervalComparison => "Interval comparison",
             ExerciseKind::Harmony => "Harmony singing",
+            ExerciseKind::PitchDetect => "Find the note",
+            ExerciseKind::ChordColorId => "Chord colours",
         }
     }
 
@@ -1494,6 +1650,8 @@ impl ExerciseKind {
             ExerciseKind::ScaleDegreeId => &["rp.degree"],
             ExerciseKind::IntervalComparison => &["rp.interval_compare"],
             ExerciseKind::Harmony => &["voice.harmony"],
+            ExerciseKind::PitchDetect => &["ap.detect"],
+            ExerciseKind::ChordColorId => &["ap.chord_color"],
         }
     }
 
@@ -1532,6 +1690,8 @@ impl Exercise {
             Exercise::ScaleDegreeId(_) => ExerciseKind::ScaleDegreeId,
             Exercise::IntervalComparison(_) => ExerciseKind::IntervalComparison,
             Exercise::Harmony(_) => ExerciseKind::Harmony,
+            Exercise::PitchDetect(_) => ExerciseKind::PitchDetect,
+            Exercise::ChordColorId(_) => ExerciseKind::ChordColorId,
         }
     }
 
@@ -1540,6 +1700,7 @@ impl Exercise {
             Exercise::PitchId(p) => Some(p.pool),
             Exercise::PitchPairing(p) => Some(p.pool),
             Exercise::IncidentalPairing(p) => Some(p.pool),
+            Exercise::PitchDetect(p) => Some(p.pool),
             _ => None,
         }
     }
@@ -1728,6 +1889,34 @@ pub struct SoundEvent {
 pub struct Choice {
     pub id: String,
     pub label: String,
+    /// CSS colour for a swatch on the button.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub color: Option<String>,
+    /// A word shown with the label ("Sarah", "Red"), or instead of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub word: Option<String>,
+}
+
+impl Choice {
+    pub fn new(id: impl AsRef<str>, label: impl AsRef<str>) -> Self {
+        Self {
+            id: id.as_ref().to_string(),
+            label: label.as_ref().to_string(),
+            color: None,
+            word: None,
+        }
+    }
+
+    pub fn swatch(mut self, color: impl Into<String>, word: impl Into<String>) -> Self {
+        self.color = Some(color.into());
+        let word = word.into();
+        if !word.is_empty() {
+            self.word = Some(word);
+        }
+        self
+    }
 }
 
 /// Play sounds, then pick an answer (pitch, interval, chord, scale and key identification).
@@ -1761,6 +1950,18 @@ pub struct IdentifyTrial {
     /// Paced stream: a tone every this many ms, answered before the next one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pace_ms: Option<u32>,
+    /// Screen tint for the played note, shown with the result or during pairing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_color: Option<String>,
+    /// Label set id stored with the trial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_set: Option<String>,
+    /// This class comes back later in the block if it is missed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub requeue_misses: bool,
+    /// Octaves a requeued note may move to. Empty keeps the same octave.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub requeue_octaves: Vec<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1772,7 +1973,34 @@ pub struct ChoiceSound {
 impl IdentifyTrial {
     /// The sound of answer `id`, if the trial has one.
     pub fn choice_sound(&self, id: &str) -> Option<&[SoundEvent]> {
-        self.choice_sounds.iter().find(|c| c.id == id).map(|c| c.events.as_slice())
+        self.choice_sounds
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| c.events.as_slice())
+    }
+
+    /// Empty optional fields, spread into a constructor: `IdentifyTrial { .., ..IdentifyTrial::skeleton() }`.
+    pub fn skeleton() -> Self {
+        Self {
+            exercise: ExerciseKind::PitchId,
+            prompt: String::new(),
+            events: Vec::new(),
+            mask_before: Mask::None,
+            choices: Vec::new(),
+            correct: String::new(),
+            deadline_ms: None,
+            reference: None,
+            stimulus: serde_json::Value::Null,
+            cue: None,
+            answer_after_ms: None,
+            after_answer: None,
+            choice_sounds: Vec::new(),
+            pace_ms: None,
+            flash_color: None,
+            label_set: None,
+            requeue_misses: false,
+            requeue_octaves: Vec::new(),
+        }
     }
 }
 
@@ -1810,6 +2038,41 @@ pub struct PairingTrial {
     pub events: Vec<SoundEvent>,
     pub label: String,
     pub gap_ms: u32,
+    #[ts(type = "Record<string, unknown>")]
+    pub stimulus: serde_json::Value,
+    /// Screen tint while the label is showing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_color: Option<String>,
+    /// Speech file for the label, relative to the speech folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<String>,
+}
+
+/// One tone in a detection stream.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct DetectTone {
+    pub events: Vec<SoundEvent>,
+    pub target: bool,
+    /// More than an octave from the sung prompt.
+    pub far: bool,
+    pub midi: i32,
+}
+
+/// One detection stream: a named target, then a run of tones to catch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct DetectTrial {
+    pub prompt: String,
+    pub target_class: PitchClass,
+    pub target_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_color: Option<String>,
+    pub prompt_events: Vec<SoundEvent>,
+    pub prompt_ms: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<String>,
+    pub tones: Vec<DetectTone>,
+    pub window_ms: u32,
+    pub marks: DetectMarks,
     #[ts(type = "Record<string, unknown>")]
     pub stimulus: serde_json::Value,
 }
@@ -1917,6 +2180,7 @@ pub enum TrialSpec {
     Pairing(PairingTrial),
     Sung(SungTrial),
     Dictation(DictationTrial),
+    Detect(DetectTrial),
 }
 
 impl TrialSpec {
@@ -1932,6 +2196,7 @@ impl TrialSpec {
             TrialSpec::Pairing(t) => &t.stimulus,
             TrialSpec::Sung(t) => &t.stimulus,
             TrialSpec::Dictation(t) => &t.stimulus,
+            TrialSpec::Detect(t) => &t.stimulus,
         }
     }
 
@@ -1942,6 +2207,7 @@ impl TrialSpec {
             TrialSpec::Pairing(t) => &t.label,
             TrialSpec::Sung(t) => &t.prompt,
             TrialSpec::Dictation(t) => &t.prompt,
+            TrialSpec::Detect(t) => &t.prompt,
         }
     }
 }

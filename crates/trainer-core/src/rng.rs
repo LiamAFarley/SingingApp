@@ -140,7 +140,10 @@ impl<T: Clone + PartialEq> WeightedBag<T> {
     /// `weights` need not sum to one; `cycle` is the number of draws per cycle.
     pub fn new(weights: Vec<(T, f64)>, cycle: usize) -> Self {
         let total: f64 = weights.iter().map(|w| w.1.max(0.0)).sum::<f64>().max(1e-12);
-        let items: Vec<(T, f64)> = weights.into_iter().map(|(t, w)| (t, w.max(0.0) / total)).collect();
+        let items: Vec<(T, f64)> = weights
+            .into_iter()
+            .map(|(t, w)| (t, w.max(0.0) / total))
+            .collect();
         WeightedBag {
             carry: vec![0.0; items.len()],
             items,
@@ -243,7 +246,11 @@ mod tests {
             assert!((share(k) - 0.60 / 11.0).abs() < 0.02, "{k}: {}", share(k));
         }
         // No long streaks of the heavy class.
-        let longest = draws.chunk_by(|a, b| a == b).map(|c| c.len()).max().unwrap();
+        let longest = draws
+            .chunk_by(|a, b| a == b)
+            .map(|c| c.len())
+            .max()
+            .unwrap();
         assert!(longest <= 10, "{longest}");
     }
 }

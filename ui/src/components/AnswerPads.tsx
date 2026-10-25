@@ -76,7 +76,15 @@ export function PianoPad({ choices, enabled, states, onPick, octave, compact, ke
       <button
         key={pc}
         className={`key ${sharp ? "sharp" : ""} ${c ? "" : "inactive"} ${st !== "idle" ? st : ""}`}
-        style={{ gridRow: row, gridColumn: `${col} / span 2`, width: "auto", height: compact ? 44 : 64, fontSize: compact ? 14 : 17 }}
+        style={{
+          gridRow: row,
+          gridColumn: `${col} / span 2`,
+          width: "auto",
+          height: compact ? 44 : 64,
+          fontSize: c && c.label.length > 4 ? 11 : compact ? 14 : 17,
+          background: c?.color && st === "idle" ? `color-mix(in srgb, ${c.color} 32%, ${sharp ? "#1f2328" : "#fff"})` : undefined,
+          borderColor: c?.color,
+        }}
         disabled={!enabled || !c}
         onClick={() => c && onPick(id)}
         tabIndex={c ? 0 : -1}
@@ -144,7 +152,9 @@ export function ChoiceGrid({ choices, enabled, states, onPick }: Omit<PadProps, 
         const st = states[c.id] ?? "idle";
         return (
           <button key={c.id} className={`choice ${st === "correct" || st === "wrong" ? st : ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
+            {c.color && <span className="dot" style={{ background: c.color, width: 14, height: 14, borderRadius: 99, display: "inline-block" }} />}
             <span>{c.label}</span>
+            {c.word && c.word !== c.label && <span className="hint">{c.word}</span>}
             {i < 10 && <span className="kbd">{i === 9 ? 0 : i + 1}</span>}
           </button>
         );

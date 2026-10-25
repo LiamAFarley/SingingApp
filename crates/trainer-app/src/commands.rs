@@ -162,7 +162,10 @@ fn glyphs(name: &str) -> String {
 
 fn library_entry(p: &LibraryPiece) -> LibraryEntry {
     let scores = p.scores().unwrap_or_default();
-    let range = scores.iter().filter_map(|s| s.range()).reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
+    let range = scores
+        .iter()
+        .filter_map(|s| s.range())
+        .reduce(|a, b| (a.0.min(b.0), a.1.max(b.1)));
     // Spelled in the piece's key.
     let spell = |m: i32| match scores.first() {
         Some(s) => glyphs(&s.key.spell(m).name()),
@@ -181,7 +184,11 @@ fn library_entry(p: &LibraryPiece) -> LibraryEntry {
             .parts
             .iter()
             .enumerate()
-            .map(|(k, part)| part.name.clone().unwrap_or_else(|| format!("Part {}", k + 1)))
+            .map(|(k, part)| {
+                part.name
+                    .clone()
+                    .unwrap_or_else(|| format!("Part {}", k + 1))
+            })
             .collect(),
         low: range.map(|r| spell(r.0)),
         high: range.map(|r| spell(r.1)),
@@ -196,7 +203,12 @@ pub fn library_view(state: State<'_, AppState>) -> Res<LibraryView> {
     db.sync_library(&dir).map_err(anyhow_err)?;
     Ok(LibraryView {
         folder: dir.display().to_string(),
-        pieces: db.library().map_err(anyhow_err)?.iter().map(library_entry).collect(),
+        pieces: db
+            .library()
+            .map_err(anyhow_err)?
+            .iter()
+            .map(library_entry)
+            .collect(),
         errors: db
             .library_files()
             .map_err(anyhow_err)?
@@ -209,7 +221,12 @@ pub fn library_view(state: State<'_, AppState>) -> Res<LibraryView> {
 /// Every part of a piece as a score, for the preview.
 #[tauri::command]
 pub fn library_scores(state: State<'_, AppState>, id: String) -> Res<Vec<Score>> {
-    let piece = state.core.db.lock().library_piece(&id).map_err(anyhow_err)?;
+    let piece = state
+        .core
+        .db
+        .lock()
+        .library_piece(&id)
+        .map_err(anyhow_err)?;
     piece.ok_or_else(|| format!("no piece {id}"))?.scores()
 }
 
@@ -231,12 +248,25 @@ pub fn library_import(
                 Ok(rel)
             });
             match written {
-                Ok(rel) => ImportResult { name: f.name, file: Some(rel), error: None },
-                Err(e) => ImportResult { name: f.name, file: None, error: Some(e) },
+                Ok(rel) => ImportResult {
+                    name: f.name,
+                    file: Some(rel),
+                    error: None,
+                },
+                Err(e) => ImportResult {
+                    name: f.name,
+                    file: None,
+                    error: Some(e),
+                },
             }
         })
         .collect();
-    let sync = state.core.db.lock().sync_library(&dir).map_err(anyhow_err)?;
+    let sync = state
+        .core
+        .db
+        .lock()
+        .sync_library(&dir)
+        .map_err(anyhow_err)?;
     for r in &mut out {
         if let Some((_, e)) = sync.errors.iter().find(|(f, _)| Some(f) == r.file.as_ref()) {
             r.error = Some(e.clone());
@@ -250,7 +280,12 @@ pub fn library_import(
 pub fn library_remove_file(state: State<'_, AppState>, file: String) -> Res<()> {
     let dir = state.core.library_dir();
     library::remove_file(&dir, &file)?;
-    state.core.db.lock().sync_library(&dir).map_err(anyhow_err)?;
+    state
+        .core
+        .db
+        .lock()
+        .sync_library(&dir)
+        .map_err(anyhow_err)?;
     state.core.emit("library-changed", ());
     Ok(())
 }
@@ -266,14 +301,22 @@ pub fn library_open_folder(state: State<'_, AppState>) -> Res<()> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(opener).arg(&dir).spawn().map_err(err)?;
+    std::process::Command::new(opener)
+        .arg(&dir)
+        .spawn()
+        .map_err(err)?;
     Ok(())
 }
 
 /// Plays a piece (or one part of it) and returns its length in milliseconds.
 #[tauri::command]
 pub fn library_play(state: State<'_, AppState>, id: String, part: Option<usize>) -> Res<f64> {
-    let piece = state.core.db.lock().library_piece(&id).map_err(anyhow_err)?;
+    let piece = state
+        .core
+        .db
+        .lock()
+        .library_piece(&id)
+        .map_err(anyhow_err)?;
     let scores = piece.ok_or_else(|| format!("no piece {id}"))?.scores()?;
     let events: Vec<SoundEvent> = scores
         .iter()
@@ -281,13 +324,18 @@ pub fn library_play(state: State<'_, AppState>, id: String, part: Option<usize>)
         .filter(|(k, _)| part.is_none_or(|p| p == *k))
         .flat_map(|(_, s)| note_events(&s.notes, s.time, s.tempo_bpm, "gm:0"))
         .collect();
-    let length = events.iter().map(|e| e.start_ms + e.dur_ms).fold(0.0, f64::max);
+    let length = events
+        .iter()
+        .map(|e| e.start_ms + e.dur_ms)
+        .fold(0.0, f64::max);
     let engine = state.core.ensure_engine().map_err(anyhow_err)?;
     if let Some(prev) = state.core.preview.lock().take() {
         engine.stop(prev);
     }
     let buf = state.core.renderer().render_events(&events);
-    let (id, _) = engine.play_now(Arc::new(buf), 1.0, Bus::Prompt).map_err(anyhow_err)?;
+    let (id, _) = engine
+        .play_now(Arc::new(buf), 1.0, Bus::Prompt)
+        .map_err(anyhow_err)?;
     *state.core.preview.lock() = Some(id);
     Ok(length)
 }
@@ -479,13 +527,19 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                 let ctx = core.gen_context();
                 let set = courses::compose_daily_set(&db, &ctx, now()).map_err(anyhow_err)?;
                 (
-                    db.start_new_session(&set.spec, "daily").map_err(anyhow_err)?,
+                    db.start_new_session(&set.spec, "daily")
+                        .map_err(anyhow_err)?,
                     set.spec,
                 )
             }
             StartRequest::CourseLevel { course, level } => {
-                let c = courses::find_course(&course).ok_or_else(|| format!("unknown course {course}"))?;
-                let spec = courses::level_session(&c, level).map_err(anyhow_err)?;
+                let c = courses::find_course(&course)
+                    .ok_or_else(|| format!("unknown course {course}"))?;
+                let mut spec = courses::level_session(&c, level).map_err(anyhow_err)?;
+                courses::apply_session_prefs(
+                    &mut spec,
+                    &courses::ap_prefs(&db).map_err(anyhow_err)?,
+                );
                 (
                     db.start_new_session(&spec, "course").map_err(anyhow_err)?,
                     spec,
@@ -608,7 +662,12 @@ pub fn save_anchor(
     state: State<'_, AppState>,
     anchor: trainer_core::schema::Anchor,
 ) -> Res<trainer_core::schema::Anchor> {
-    state.core.db.lock().save_anchor(&anchor, "manual").map_err(anyhow_err)
+    state
+        .core
+        .db
+        .lock()
+        .save_anchor(&anchor, "manual")
+        .map_err(anyhow_err)
 }
 
 #[tauri::command]
@@ -660,4 +719,36 @@ pub fn set_course_level(state: State<'_, AppState>, course: String, level: u32) 
     courses::set_level(&state.core.db.lock(), &course, level).map_err(anyhow_err)?;
     state.core.emit("courses-changed", ());
     Ok(())
+}
+
+#[tauri::command]
+pub fn ap_prefs(state: State<'_, AppState>) -> Res<courses::ApPrefs> {
+    courses::ap_prefs(&state.core.db.lock()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_ap_prefs(state: State<'_, AppState>, prefs: courses::ApPrefs) -> Res<courses::ApPrefs> {
+    let saved = courses::save_ap_prefs(&state.core.db.lock(), &prefs).map_err(anyhow_err)?;
+    state.core.emit("courses-changed", ());
+    Ok(saved)
+}
+
+#[tauri::command]
+pub fn list_label_sets(state: State<'_, AppState>) -> Res<Vec<trainer_core::labels::LabelSet>> {
+    trainer_core::labels::sets_from_db(&state.core.db.lock()).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn save_label_set(
+    state: State<'_, AppState>,
+    set: trainer_core::labels::LabelSet,
+) -> Res<trainer_core::labels::LabelSet> {
+    trainer_core::labels::save_set(&state.core.db.lock(), &set).map_err(anyhow_err)
+}
+
+#[tauri::command]
+pub fn speech_status(state: State<'_, AppState>) -> trainer_core::speech::SpeechReport {
+    let dir = trainer_core::speech::speech_dir(&state.core.data_dir);
+    let _ = std::fs::create_dir_all(&dir);
+    trainer_core::speech::inspect(&dir)
 }

@@ -12,4 +12,8 @@ naming_trials: number, naming_in_time: number | null, naming_accuracy: number | 
 /**
  * Recent sung trials of this note and the share in the right category.
  */
-singing_trials: number, singing_accuracy: number | null, last_seen: string | null, };
+singing_trials: number, singing_accuracy: number | null, 
+/**
+ * Mean d′ of recent detection streams for this note.
+ */
+detection_d_prime: number | null, last_seen: string | null, };

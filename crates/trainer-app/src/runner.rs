@@ -296,34 +296,52 @@ impl<'a> SessionRun<'a> {
                 }
             }
             self.stream_next = None;
+            let mut trials = trials;
+            let mut requeues: std::collections::BTreeMap<String, u32> =
+                std::collections::BTreeMap::new();
             let recent_label = self
                 .last_labeled
-                .map(|l| (now() - l).to_std().map(|d| d < SCRUB_WITHIN).unwrap_or(true))
+                .map(|l| {
+                    (now() - l)
+                        .to_std()
+                        .map(|d| d < SCRUB_WITHIN)
+                        .unwrap_or(true)
+                })
                 .unwrap_or(false);
             // Only absolute-pitch blocks need pitch memory cleared.
             let ap_block = matches!(
                 block.exercise.kind(),
-                ExerciseKind::PitchId | ExerciseKind::SingPitch | ExerciseKind::TonalCenterId | ExerciseKind::AnchorSong
+                ExerciseKind::PitchId
+                    | ExerciseKind::SingPitch
+                    | ExerciseKind::TonalCenterId
+                    | ExerciseKind::AnchorSong
+                    | ExerciseKind::PitchDetect
+                    | ExerciseKind::ChordColorId
             );
             let scrub = match block.pre_mask {
                 Some(m) => m,
-                None if ap_block && !feedback.shows_trial_result() && recent_label => Mask::ShepardGlissando,
+                None if ap_block && !feedback.shows_trial_result() && recent_label => {
+                    Mask::ShepardGlissando
+                }
                 None => Mask::None,
             };
             self.pre_mask(&engine, scrub)?;
             let grading = |t: &TrialSpec| GradingConfig::resolve(&block.grading, default_mode(t));
-            for (ti, trial) in trials.iter().enumerate() {
+            let mut ti = 0usize;
+            while ti < trials.len() {
+                let trial = trials[ti].clone();
                 let mut attempt = 0u32;
                 // Practice plays the answer along, like a sing-along retry.
                 let mut assisted = trial.is_practice();
+                let mut last_correct: Option<bool> = None;
                 loop {
                     self.set(|st| {
                         st.trial_index = ti as u32;
                         st.phase = Phase::Preparing;
                         st.feedback = None;
                     });
-                    let cfg = grading(trial);
-                    let res = match trial {
+                    let cfg = grading(&trial);
+                    let res = match &trial {
                         TrialSpec::Identify(t) => self.run_identify(&engine, t, feedback, attempt),
                         TrialSpec::SingPitch(t) => {
                             self.run_sing_pitch(&engine, t, &cfg, feedback, attempt, &ctx)
@@ -333,12 +351,14 @@ impl<'a> SessionRun<'a> {
                             self.run_sung(&engine, t, &cfg, feedback, attempt, assisted)
                         }
                         TrialSpec::Dictation(t) => self.run_dictation(&engine, t, attempt),
+                        TrialSpec::Detect(t) => self.run_detect(&engine, t, feedback, attempt),
                     }?;
                     let Some((outcome, extras)) = res else {
                         break; // skipped
                     };
+                    last_correct = outcome.correct;
                     let row = self.store(
-                        block, bi, ti, attempt, assisted, trial, &outcome, &extras, feedback,
+                        block, bi, ti, attempt, assisted, &trial, &outcome, &extras, feedback,
                     )?;
                     if !assisted {
                         self.set(|st| {
@@ -348,7 +368,9 @@ impl<'a> SessionRun<'a> {
                             }
                         });
                     }
-                    match self.feedback(&engine, trial, &outcome, &extras, &row, feedback, &auto)? {
+                    match self
+                        .feedback(&engine, &trial, &outcome, &extras, &row, feedback, &auto)?
+                    {
                         After::Next => break,
                         After::Retry { assisted: a } => {
                             attempt += 1;
@@ -356,6 +378,20 @@ impl<'a> SessionRun<'a> {
                         }
                     }
                 }
+                if last_correct == Some(false) {
+                    let key = requeue_key(&trial);
+                    let n = requeues.entry(key).or_insert(0);
+                    if *n < 2 {
+                        if let Some(extra) = trainer_core::generate::requeue_trial(&trial) {
+                            *n += 1;
+                            let at = (ti + 4).min(trials.len());
+                            trials.insert(at, extra);
+                            let count = trials.len() as u32;
+                            self.set(|st| st.trial_count = count);
+                        }
+                    }
+                }
+                ti += 1;
             }
             let report = session_report(self.db, &self.session_id)?;
             let block_report = report.blocks.get(bi).cloned();
@@ -410,7 +446,11 @@ impl<'a> SessionRun<'a> {
     /// Plays a mask before a block (the clearing glissando), showing how long is left. Skip cuts it
     /// short.
     fn pre_mask(&mut self, engine: &AudioEngine, mask: Mask) -> R<()> {
-        let Some(buf) = self.core.renderer().render_mask(mask, now().timestamp_micros() as u64) else {
+        let Some(buf) = self
+            .core
+            .renderer()
+            .render_mask(mask, now().timestamp_micros() as u64)
+        else {
             return Ok(());
         };
         let at = engine.frame_after_ms(150.0);
@@ -456,6 +496,10 @@ impl<'a> SessionRun<'a> {
             score: None,
             plays: 0,
             max_plays: 0,
+            flash_color: None,
+            detect_total: None,
+            detect_index: None,
+            detect_mark: None,
         }
     }
 
@@ -494,18 +538,23 @@ impl<'a> SessionRun<'a> {
             + Duration::from_secs_f64(onset_frame.saturating_sub(engine.now()) as f64 / sr);
         // Answers open at `answer_after_ms` (after a key-setting cadence). Response times and the
         // deadline count from there, or from a visual cue (incidental pairing) when later.
-        let answer_from = onset + Duration::from_secs_f64(t.answer_after_ms.unwrap_or(0.0).max(0.0) / 1000.0);
-        let cue_delay = Duration::from_millis(t.cue.as_ref().map(|c| c.delay_ms as u64).unwrap_or(0));
+        let answer_from =
+            onset + Duration::from_secs_f64(t.answer_after_ms.unwrap_or(0.0).max(0.0) / 1000.0);
+        let cue_delay =
+            Duration::from_millis(t.cue.as_ref().map(|c| c.delay_ms as u64).unwrap_or(0));
         let rt_from = answer_from.max(onset + cue_delay);
+        let pitch_ids = t
+            .choices
+            .iter()
+            .all(|c| c.id == "other" || c.id.parse::<trainer_core::theory::PitchClass>().is_ok());
+        let long_label = t.choices.iter().any(|c| c.label.chars().count() > 5);
         let layout = match t.exercise {
-            ExerciseKind::IncidentalPairing => ChoiceLayout::Colors,
+            ExerciseKind::IncidentalPairing | ExerciseKind::ChordColorId => ChoiceLayout::Colors,
             ExerciseKind::ScaleDegreeId => ChoiceLayout::Degrees,
-            ExerciseKind::PitchId | ExerciseKind::TonalCenterId
-                if t.choices.iter().all(|c| c.id.parse::<trainer_core::theory::PitchClass>().is_ok()) =>
-            {
+            ExerciseKind::PitchId | ExerciseKind::TonalCenterId if pitch_ids && !long_label => {
                 ChoiceLayout::PitchClasses
             }
-            ExerciseKind::PitchId => ChoiceLayout::Notes,
+            ExerciseKind::PitchId if !pitch_ids => ChoiceLayout::Notes,
             _ => ChoiceLayout::List,
         };
         let mut view = self.base_view(t.exercise, Interaction::Choice, &t.prompt, attempt);
@@ -515,7 +564,9 @@ impl<'a> SessionRun<'a> {
         view.can_replay = deadline_ms.is_none();
         view.can_reference = t.reference.is_some();
         // The countdown starts where response times do.
-        view.response_start_s = Some(secs(engine, onset_frame) + rt_from.saturating_duration_since(onset).as_secs_f64());
+        view.response_start_s = Some(
+            secs(engine, onset_frame) + rt_from.saturating_duration_since(onset).as_secs_f64(),
+        );
         if let Some(c) = &t.cue {
             view.label = Some(c.color.clone());
             view.label_at_s = Some(secs(engine, onset_frame) + c.delay_ms as f64 / 1000.0);
@@ -581,6 +632,136 @@ impl<'a> SessionRun<'a> {
         Ok(Some((outcome, extras)))
     }
 
+    // --- detection ---------------------------------------------------------------------------
+
+    fn run_detect(
+        &mut self,
+        engine: &AudioEngine,
+        t: &trainer_core::schema::DetectTrial,
+        feedback: FeedbackMode,
+        attempt: u32,
+    ) -> R<Option<(TrialOutcome, Extras)>> {
+        let renderer = self.core.renderer();
+        let mut view = self.base_view(
+            ExerciseKind::PitchDetect,
+            Interaction::Detect,
+            &t.prompt,
+            attempt,
+        );
+        view.label = Some(t.target_label.clone());
+        view.flash_color = t.target_color.clone();
+        view.detect_total = Some(t.tones.len() as u32);
+        view.detect_index = Some(0);
+        self.set(|st| {
+            st.phase = Phase::Listening;
+            st.trial = Some(view);
+        });
+        let at = engine.frame_after_ms(80.0);
+        engine.play(
+            Arc::new(renderer.render_events(&t.prompt_events)),
+            at,
+            1.0,
+            Bus::Prompt,
+        )?;
+        if let Some(rel) = &t.speech {
+            self.play_speech(engine, rel, at);
+        }
+        let prompt_end = at + engine.frames_from_ms(t.prompt_ms as f64);
+        if self.wait_until_frame(engine, prompt_end)? {
+            engine.stop_bus(Bus::Prompt);
+            return Ok(None);
+        }
+        engine.stop_bus(Bus::Prompt);
+        let mut presses = Vec::with_capacity(t.tones.len());
+        for (i, tone) in t.tones.iter().enumerate() {
+            let mark_each =
+                t.marks == trainer_core::schema::DetectMarks::Each && feedback.shows_trial_result();
+            self.set(|st| {
+                if let Some(view) = st.trial.as_mut() {
+                    view.detect_index = Some(i as u32 + 1);
+                    view.detect_mark = None;
+                }
+            });
+            let start = engine.frame_after_ms(30.0);
+            engine.play(
+                Arc::new(renderer.render_events(&tone.events)),
+                start,
+                1.0,
+                Bus::Prompt,
+            )?;
+            let onset = Instant::now()
+                + Duration::from_secs_f64(
+                    start.saturating_sub(engine.now()) as f64 / engine.sample_rate() as f64,
+                );
+            let window = Duration::from_millis(t.window_ms as u64);
+            let mut press: Option<f64> = None;
+            loop {
+                let elapsed = Instant::now().saturating_duration_since(onset);
+                if elapsed >= window {
+                    break;
+                }
+                let wake = window.saturating_sub(elapsed);
+                match self.wait(Some(wake.max(Duration::from_millis(1))))? {
+                    Some(RunnerCommand::Tap) | Some(RunnerCommand::Answer { .. })
+                        if press.is_none() =>
+                    {
+                        press = Some(
+                            Instant::now()
+                                .saturating_duration_since(onset)
+                                .as_secs_f64()
+                                * 1000.0,
+                        );
+                        if mark_each {
+                            let mark = if tone.target { "hit" } else { "false" };
+                            self.set(|st| {
+                                if let Some(view) = st.trial.as_mut() {
+                                    view.detect_mark = Some(mark.into());
+                                }
+                            });
+                        }
+                    }
+                    Some(RunnerCommand::Skip) => {
+                        engine.stop_bus(Bus::Prompt);
+                        return Ok(None);
+                    }
+                    None => break,
+                    _ => {}
+                }
+            }
+            if mark_each && press.is_none() && tone.target {
+                self.set(|st| {
+                    if let Some(view) = st.trial.as_mut() {
+                        view.detect_mark = Some("miss".into());
+                    }
+                });
+            }
+            presses.push(press);
+        }
+        engine.stop_bus(Bus::Prompt);
+        let outcome = trainer_core::grade::grade_detect(t, &presses);
+        Ok(Some((
+            outcome,
+            Extras {
+                labeled_reference: true,
+                ..Default::default()
+            },
+        )))
+    }
+
+    /// Plays a speech file if it is in the folder. A missing or unreadable file is skipped.
+    fn play_speech(&self, engine: &AudioEngine, rel: &str, at: u64) {
+        let dir = trainer_core::speech::speech_dir(&self.core.data_dir);
+        let Some(path) = trainer_core::speech::resolve(&dir, rel) else {
+            return;
+        };
+        match trainer_audio::speech::load(&path, engine.sample_rate()) {
+            Ok(buf) => {
+                let _ = engine.play(Arc::new(buf), at, 1.0, Bus::Prompt);
+            }
+            Err(e) => tracing::warn!("speech {}: {e:#}", path.display()),
+        }
+    }
+
     // --- passive pairing ---------------------------------------------------------------------
 
     fn run_pairing(
@@ -600,6 +781,10 @@ impl<'a> SessionRun<'a> {
         );
         view.label = Some(t.label.clone());
         view.label_at_s = Some(secs(engine, at) + 0.35);
+        view.flash_color = t.flash_color.clone();
+        if let Some(rel) = &t.speech {
+            self.play_speech(&engine, rel, at);
+        }
         self.set(|st| {
             st.phase = Phase::Listening;
             st.trial = Some(view);
@@ -778,13 +963,23 @@ impl<'a> SessionRun<'a> {
             k.guide = false;
             k.backing = Backing::None;
             k.count_in_beat = None;
-            k.total_beats = k.reference_beats.iter().map(|n| n.start_beat + n.beats).fold(0.0, f32::max) + 0.5;
+            k.total_beats = k
+                .reference_beats
+                .iter()
+                .map(|n| n.start_beat + n.beats)
+                .fold(0.0, f32::max)
+                + 0.5;
             Arc::new(renderer.render_sung_trial(&k).backing)
         });
         let start = engine.frame_after_ms(150.0);
         engine.play(melody.clone(), start, 1.0, Bus::Prompt)?;
         let mut plays = 1u32;
-        let mut view = self.base_view(ExerciseKind::MelodicDictation, Interaction::Dictation, &t.prompt, attempt);
+        let mut view = self.base_view(
+            ExerciseKind::MelodicDictation,
+            Interaction::Dictation,
+            &t.prompt,
+            attempt,
+        );
         view.score = Some(t.given.clone());
         view.lane = Some(lane_for(&t.playback));
         view.can_replay = true;
@@ -820,7 +1015,12 @@ impl<'a> SessionRun<'a> {
                     }
                 }
                 Some(RunnerCommand::PlayScore { notes }) => {
-                    let ev = note_events(&notes, t.score.time, t.score.tempo_bpm, &t.playback.reference_timbre);
+                    let ev = note_events(
+                        &notes,
+                        t.score.time,
+                        t.score.tempo_bpm,
+                        &t.playback.reference_timbre,
+                    );
                     engine.stop_bus(Bus::Guide);
                     engine.play_now(Arc::new(renderer.render_events(&ev)), 1.0, Bus::Guide)?;
                 }
@@ -857,7 +1057,7 @@ impl<'a> SessionRun<'a> {
         feedback: FeedbackMode,
     ) -> R<TrialRow> {
         let id = new_id();
-        let kind = block.exercise.kind();
+        let kind = stored_kind(block, trial);
         let mut tags: Vec<String> = kind.default_tags().iter().map(|s| s.to_string()).collect();
         for t in &block.tags {
             if !tags.contains(t) {
@@ -879,7 +1079,10 @@ impl<'a> SessionRun<'a> {
         // also pairs sound with note names.
         let labeled = extras.labeled_reference
             || (feedback.shows_trial_result()
-                && matches!(trial, TrialSpec::Identify(_) | TrialSpec::SingPitch(_) | TrialSpec::Dictation(_)))
+                && matches!(
+                    trial,
+                    TrialSpec::Identify(_) | TrialSpec::SingPitch(_) | TrialSpec::Dictation(_)
+                ))
             || matches!(trial, TrialSpec::Sung(t) if t.score.is_some() && !t.reference_beats.is_empty());
         let row = TrialRow {
             id: id.clone(),
@@ -954,7 +1157,11 @@ impl<'a> SessionRun<'a> {
             .unwrap_or(0.0) as f32;
         // A line sung in another octave is drawn in the octave of the targets it was graded against.
         let octave_shift = 12.0
-            * outcome.metrics.get("octave_offset").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            * outcome
+                .metrics
+                .get("octave_offset")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0) as f32;
         let trace: Vec<(f32, Option<f32>)> = if show {
             extras
                 .track
@@ -984,10 +1191,32 @@ impl<'a> SessionRun<'a> {
             _ => None,
         };
         let passive = matches!(trial, TrialSpec::Pairing(_));
+        let correct_label = match trial {
+            TrialSpec::Identify(t) => t
+                .choices
+                .iter()
+                .find(|c| c.id == t.correct)
+                .map(|c| c.label.clone())
+                .unwrap_or_else(|| t.correct.clone()),
+            _ => String::new(),
+        };
+        let answered_id = outcome.response.get("answer").and_then(|a| a.as_str());
+        let shown = trainer_core::grade::present_feedback(
+            feedback,
+            outcome.correct,
+            &outcome.summary,
+            answered_id,
+            &correct_label,
+        );
+        let flash = match trial {
+            TrialSpec::Identify(t) if show => t.flash_color.clone(),
+            _ => None,
+        };
         // A stream moves on in time for the next tone's slot.
         let stream_ms = match (trial, self.stream_next) {
             (TrialSpec::Identify(t), Some(next)) if t.pace_ms.is_some() => {
-                let left = next.saturating_sub(engine.now()) as f64 * 1000.0 / engine.sample_rate() as f64;
+                let left =
+                    next.saturating_sub(engine.now()) as f64 * 1000.0 / engine.sample_rate() as f64;
                 Some((left - 120.0).max(100.0) as u32)
             }
             _ => None,
@@ -998,27 +1227,21 @@ impl<'a> SessionRun<'a> {
             Some(200)
         } else if !show {
             Some(700)
+        } else if shown.errorless {
+            Some(settings.auto_advance_ms.max(900))
         } else if is_identify && outcome.correct == Some(true) && settings.auto_advance_correct {
             Some(settings.auto_advance_ms)
         } else {
             None
         };
         let fv = FeedbackView {
-            correct: if show { outcome.correct } else { None },
-            summary: if show {
-                outcome.summary.clone()
-            } else {
-                String::new()
-            },
+            correct: shown.correct,
+            summary: shown.summary.clone(),
             correct_choice: match trial {
                 TrialSpec::Identify(t) if show => Some(t.correct.clone()),
                 _ => None,
             },
-            answered: outcome
-                .response
-                .get("answer")
-                .and_then(|a| a.as_str())
-                .map(String::from),
+            answered: shown.answered.clone(),
             dictation,
             cents: outcome
                 .metrics
@@ -1050,6 +1273,8 @@ impl<'a> SessionRun<'a> {
             },
             auto_advance_ms: auto_ms,
             hidden: !show,
+            errorless: shown.errorless,
+            flash_color: flash,
         };
         self.set(|st| {
             st.phase = Phase::Feedback;
@@ -1067,7 +1292,17 @@ impl<'a> SessionRun<'a> {
         if let TrialSpec::Identify(t) = trial {
             if let (true, Some(after)) = (show, &t.after_answer) {
                 engine.stop_bus(Bus::Prompt);
-                engine.play(Arc::new(renderer.render_events(after)), engine.frame_after_ms(250.0), 1.0, Bus::Prompt)?;
+                engine.play(
+                    Arc::new(renderer.render_events(after)),
+                    engine.frame_after_ms(250.0),
+                    1.0,
+                    Bus::Prompt,
+                )?;
+            } else if shown.errorless {
+                if let Some(events) = t.choice_sound(&t.correct) {
+                    engine.stop_bus(Bus::Prompt);
+                    engine.play_now(Arc::new(renderer.render_events(events)), 1.0, Bus::Prompt)?;
+                }
             }
         }
         let mut interacted = false;
@@ -1113,12 +1348,20 @@ impl<'a> SessionRun<'a> {
                         TrialSpec::Dictation(t) => {
                             engine.stop_bus(Bus::Prompt);
                             engine.stop_bus(Bus::Guide);
-                            engine.play_now(Arc::new(dictation_audio(&renderer, &t.playback)), 1.0, Bus::Prompt)?;
+                            engine.play_now(
+                                Arc::new(dictation_audio(&renderer, &t.playback)),
+                                1.0,
+                                Bus::Prompt,
+                            )?;
                         }
                         TrialSpec::Identify(t) => {
                             if let Some(after) = &t.after_answer {
                                 engine.stop_bus(Bus::Prompt);
-                                engine.play_now(Arc::new(renderer.render_events(after)), 1.0, Bus::Prompt)?;
+                                engine.play_now(
+                                    Arc::new(renderer.render_events(after)),
+                                    1.0,
+                                    Bus::Prompt,
+                                )?;
                             }
                         }
                         _ => {}
@@ -1127,7 +1370,12 @@ impl<'a> SessionRun<'a> {
                 Some(RunnerCommand::PlayAnswer) if is_dictation => {
                     interacted = true;
                     if let TrialSpec::Dictation(t) = trial {
-                        let ev = note_events(&written, t.score.time, t.score.tempo_bpm, &t.playback.reference_timbre);
+                        let ev = note_events(
+                            &written,
+                            t.score.time,
+                            t.score.tempo_bpm,
+                            &t.playback.reference_timbre,
+                        );
                         engine.stop_bus(Bus::Prompt);
                         engine.stop_bus(Bus::Guide);
                         engine.play_now(Arc::new(renderer.render_events(&ev)), 1.0, Bus::Guide)?;
@@ -1138,22 +1386,37 @@ impl<'a> SessionRun<'a> {
                     if let Some((samples, sr)) = &extras.capture {
                         // From just before singing starts (sung trials), so the lead-in is skipped.
                         let skip = match trial {
-                            TrialSpec::Sung(t) => ((t.sing_start_ms() - 300.0).max(0.0) / 1000.0 * *sr as f64) as usize,
+                            TrialSpec::Sung(t) => {
+                                ((t.sing_start_ms() - 300.0).max(0.0) / 1000.0 * *sr as f64)
+                                    as usize
+                            }
                             _ => 0,
                         };
                         let voice = &samples[skip.min(samples.len())..];
                         let peak = voice.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-                        let gain = if peak > 0.0 { (0.7 / peak).min(8.0) } else { 1.0 };
+                        let gain = if peak > 0.0 {
+                            (0.7 / peak).min(8.0)
+                        } else {
+                            1.0
+                        };
                         let mono: Vec<f32> = voice.iter().map(|s| s * gain).collect();
                         engine.stop_bus(Bus::Guide);
-                        engine.play_now(Arc::new(SoundBuffer::from_mono(*sr, &mono)), 1.0, Bus::Guide)?;
+                        engine.play_now(
+                            Arc::new(SoundBuffer::from_mono(*sr, &mono)),
+                            1.0,
+                            Bus::Guide,
+                        )?;
                     }
                 }
                 Some(RunnerCommand::PlayChoice { choice }) if show => {
                     interacted = true;
                     if let Some(events) = trial_choice_sound(trial, &choice) {
                         engine.stop_bus(Bus::Prompt);
-                        engine.play_now(Arc::new(renderer.render_events(events)), 1.0, Bus::Prompt)?;
+                        engine.play_now(
+                            Arc::new(renderer.render_events(events)),
+                            1.0,
+                            Bus::Prompt,
+                        )?;
                         // A named sound: it counts as exposure to a labelled reference.
                         self.last_labeled = Some(now());
                     }
@@ -1181,6 +1444,30 @@ fn trial_choice_sound<'t>(trial: &'t TrialSpec, choice: &str) -> Option<&'t [Sou
     match trial {
         TrialSpec::Identify(t) => t.choice_sound(choice),
         _ => None,
+    }
+}
+
+/// The exercise stored for a trial. A note pulled out of a chord is a `pitch_id` trial.
+fn stored_kind(block: &BlockSpec, trial: &TrialSpec) -> ExerciseKind {
+    match trial {
+        TrialSpec::Identify(t) => t.exercise,
+        TrialSpec::SingPitch(t) => t.exercise,
+        TrialSpec::Sung(t) => t.exercise,
+        TrialSpec::Detect(_) => ExerciseKind::PitchDetect,
+        TrialSpec::Pairing(_) | TrialSpec::Dictation(_) => block.exercise.kind(),
+    }
+}
+
+fn requeue_key(trial: &TrialSpec) -> String {
+    match trial {
+        TrialSpec::Identify(t) => t
+            .stimulus
+            .get("pitch_class")
+            .or_else(|| t.stimulus.get("chord"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(t.correct.as_str())
+            .to_string(),
+        _ => String::new(),
     }
 }
 
@@ -1256,7 +1543,10 @@ fn lane_for(t: &SungTrial) -> LaneSpec {
 }
 
 /// A dictation's playback: cadence, count-in clicks and the melody in one buffer.
-fn dictation_audio(renderer: &trainer_audio::render::Renderer, playback: &SungTrial) -> SoundBuffer {
+fn dictation_audio(
+    renderer: &trainer_audio::render::Renderer,
+    playback: &SungTrial,
+) -> SoundBuffer {
     let audio = renderer.render_sung_trial(playback);
     let mut mix = audio.backing;
     mix.mix(&audio.guide, 0, 0.9);
@@ -1265,7 +1555,11 @@ fn dictation_audio(renderer: &trainer_audio::render::Renderer, playback: &SungTr
 }
 
 /// The answer and the melody with a mark per note, from the stored grading metrics.
-fn dictation_view(t: &DictationTrial, written: &[ScoreNote], metrics: &serde_json::Value) -> DictationView {
+fn dictation_view(
+    t: &DictationTrial,
+    written: &[ScoreNote],
+    metrics: &serde_json::Value,
+) -> DictationView {
     let notes: Vec<trainer_core::grade::DictationNote> = metrics
         .get("notes")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
@@ -1352,7 +1646,10 @@ mod tests {
             "type": "melodic_dictation", "count": 1, "params": {}
         }))
         .unwrap();
-        match generate_block(&block, 5, &GenContext::default()).unwrap().remove(0) {
+        match generate_block(&block, 5, &GenContext::default())
+            .unwrap()
+            .remove(0)
+        {
             TrialSpec::Dictation(t) => t,
             _ => panic!("not dictation"),
         }
@@ -1374,7 +1671,12 @@ mod tests {
         let first: Vec<ScoreNote> = t.given.notes.clone();
         let o = grade_dictation(&t, &first, 2);
         let v = dictation_view(&t, &first, &o.metrics);
-        let missed = v.target_marks.iter().flatten().filter(|m| *m == "missed").count();
+        let missed = v
+            .target_marks
+            .iter()
+            .flatten()
+            .filter(|m| *m == "missed")
+            .count();
         assert_eq!(missed, t.score.pitched().count() - 1);
         assert_eq!(v.answer_marks.iter().flatten().count(), 1);
     }
@@ -1386,7 +1688,10 @@ mod tests {
         }))
         .unwrap();
         let ctx = trainer_core::generate::GenContext::default();
-        let TrialSpec::Sung(t) = trainer_core::generate::generate_block(&block, 5, &ctx).unwrap().remove(0) else {
+        let TrialSpec::Sung(t) = trainer_core::generate::generate_block(&block, 5, &ctx)
+            .unwrap()
+            .remove(0)
+        else {
             panic!("not sung")
         };
         let lane = lane_for(&t);

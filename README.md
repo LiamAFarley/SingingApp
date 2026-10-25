@@ -54,7 +54,7 @@ Your range is set by hand in **Settings**. Rhythm is trained inside sight singin
 
 ## Melody library
 
-Every `.json`, `.mid` and `.midi` file in `%APPDATA%\SingingTrainer\library` is read into the **Library** page, and a subfolder is a collection. Changes to the folder are picked up within two seconds.
+Every `.json`, `.mid` and `.midi` file in the app's `data\library` folder is read into the **Library** page, and a subfolder is a collection. Changes to the folder are picked up within two seconds.
 
 From the Library page you can:
 
@@ -116,11 +116,13 @@ It reads and writes the same database as the app, whether or not the window is o
 - **OpenCode:** `opencode.json`, under `mcp` with `"type": "local"`.
 - **Hermes Agent:** `config.yaml`, under `mcp_servers`.
 
-Data lives in `%APPDATA%\SingingTrainer`, which holds `trainer.sqlite`, `recordings\`, `soundfonts\` and `library\`. Set `SINGING_TRAINER_DATA_DIR` to move it.
+Data lives in the app's `data` folder (`SingingApp\data` when you run the build under `target`), which holds `trainer.sqlite`, `recordings\`, `soundfonts\`, `library\` and `speech\`. Set `SINGING_TRAINER_DATA_DIR` to move it.
 
 ## Sounds
 
-You can add extra `.sf2` banks to `%APPDATA%\SingingTrainer\soundfonts` and restart the app. Exercises refer to them as `sf:<file name without .sf2>:<program>`. General MIDI programs are `gm:<0-127>`. The built-in sounds are `synth:<wave>` and `shepard`. SFZ and Kontakt libraries are not supported.
+You can add extra `.sf2` banks to the app's `data\soundfonts` folder and restart the app. Exercises refer to them as `sf:<file name without .sf2>:<program>`; only presets on bank 0 are reachable. General MIDI programs are `gm:<0-127>`. The built-in sounds are `synth:<wave>` and `shepard`. SFZ and Kontakt libraries are not supported.
+
+A curated set of 16 extra banks (piano, saxophone, guitar, harp, organ, violin, viola, cello, flute, horn, trombone, solo male/female voices and choirs) is installed by `scripts/fetch-extra-soundfonts.ps1`. See `docs/SOUNDFONTS.md` for the timbre IDs, measured pitch ranges, licences and the candidates that were rejected.
 
 ## Development
 

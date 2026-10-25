@@ -2,9 +2,11 @@
 //! trial generation, pitch analysis, grading, storage and statistics. Used by the desktop app and
 //! by the MCP server, so both always agree on what an exercise is and how it is graded.
 
+pub mod ap_courses;
 pub mod courses;
 pub mod generate;
 pub mod grade;
+pub mod labels;
 pub mod library;
 pub mod melody;
 pub mod metrics;
@@ -12,8 +14,9 @@ pub mod pitch;
 pub mod presets;
 pub mod reports;
 pub mod rng;
-pub mod score;
 pub mod schema;
+pub mod score;
+pub mod speech;
 pub mod stats;
 pub mod storage;
 pub mod theory;

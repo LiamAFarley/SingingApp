@@ -96,6 +96,11 @@ pub fn run() {
             commands::preview_daily_set,
             commands::save_daily_plan,
             commands::set_course_level,
+            commands::ap_prefs,
+            commands::save_ap_prefs,
+            commands::list_label_sets,
+            commands::save_label_set,
+            commands::speech_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Singing Trainer");

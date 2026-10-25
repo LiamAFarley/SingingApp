@@ -31,4 +31,12 @@ hidden: boolean,
 /**
  * Dictation: the written answer and the melody, with a mark per note.
  */
-dictation: DictationView | null, };
+dictation: DictationView | null, 
+/**
+ * A wrong answer is not marked. The right answer is still shown.
+ */
+errorless: boolean, 
+/**
+ * Tint behind the result, the colour of the note that played.
+ */
+flash_color: string | null, };

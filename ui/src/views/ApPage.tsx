@@ -220,6 +220,7 @@ function NoteTile({ c }: { c: ClassProgress }) {
       </div>
       <div className="small muted" style={{ marginTop: 4 }}>
         Sung {c.singing_trials > 0 ? `${pct(c.singing_accuracy)} of ${c.singing_trials}` : "–"}
+        {c.detection_d_prime != null ? ` · d′ ${c.detection_d_prime.toFixed(1)}` : ""}
       </div>
     </div>
   );

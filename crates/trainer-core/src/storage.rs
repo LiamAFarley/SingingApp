@@ -11,9 +11,9 @@ use rusqlite_migration::{M, Migrations};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use ts_rs::TS;
 
-use crate::pitch::{PitchFrame, PitchTrack};
 use crate::generate::GenContext;
 use crate::library::{self, LibraryPiece};
+use crate::pitch::{PitchFrame, PitchTrack};
 use crate::schema::{Anchor, NoteRange, SessionSpec};
 use crate::theory::Note;
 
@@ -210,17 +210,63 @@ pub fn new_id() -> String {
     uuid::Uuid::now_v7().to_string()
 }
 
-/// `%APPDATA%\SingingTrainer` on Windows (or the platform equivalent), overridable with
-/// `SINGING_TRAINER_DATA_DIR`.
+/// The app's own `data` folder, overridable with `SINGING_TRAINER_DATA_DIR`.
+///
+/// A build launched from `target\release` or `target\debug` keeps its files in the project
+/// folder (`SingingApp\data`). A copy of the exe keeps them in `data` beside that exe.
+/// An older folder in `%APPDATA%\SingingTrainer` is moved across on first use.
 pub fn default_data_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("SINGING_TRAINER_DATA_DIR") {
         if !dir.trim().is_empty() {
             return PathBuf::from(dir);
         }
     }
-    dirs::data_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("SingingTrainer")
+    let dir = data_dir_for_exe(
+        &std::env::current_exe().unwrap_or_else(|_| PathBuf::from("singing-trainer.exe")),
+    );
+    adopt_legacy_appdata(&dir);
+    dir
+}
+
+/// `data` under the project when `exe` lives in a Cargo `target` directory, otherwise `data`
+/// beside the exe.
+pub fn data_dir_for_exe(exe: &Path) -> PathBuf {
+    for ancestor in exe.ancestors().skip(1) {
+        if ancestor.file_name().and_then(|n| n.to_str()) == Some("target") {
+            if let Some(root) = ancestor.parent().filter(|p| !p.as_os_str().is_empty()) {
+                return root.join("data");
+            }
+        }
+    }
+    exe.parent().unwrap_or_else(|| Path::new(".")).join("data")
+}
+
+/// Copies an existing `%APPDATA%\SingingTrainer` tree into `dest` when `dest` has no database yet,
+/// then removes the AppData copy.
+fn adopt_legacy_appdata(dest: &Path) {
+    let Some(src) = dirs::data_dir().map(|d| d.join("SingingTrainer")) else {
+        return;
+    };
+    if src == dest || !src.join("trainer.sqlite").exists() || dest.join("trainer.sqlite").exists() {
+        return;
+    }
+    if copy_tree(&src, dest).is_ok() && dest.join("trainer.sqlite").exists() {
+        let _ = std::fs::remove_dir_all(&src);
+    }
+}
+
+fn copy_tree(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_tree(&entry.path(), &to)?;
+        } else if !to.exists() {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn db_path(data_dir: &Path) -> PathBuf {
@@ -1061,7 +1107,9 @@ impl Db {
         let mut out = Vec::new();
         for row in rows {
             let (id, title, first, melody, created_at, source) = row?;
-            let Ok(first_note) = first.parse() else { continue };
+            let Ok(first_note) = first.parse() else {
+                continue;
+            };
             out.push(Anchor {
                 id,
                 title,
@@ -1082,16 +1130,24 @@ impl Db {
         if let Some(m) = &a.melody {
             crate::score::Score::from_compact(m, 90.0).map_err(|e| anyhow!("melody: {e}"))?;
         }
-        let existing = self
-            .anchors()?
-            .into_iter()
-            .find(|x| (!a.id.is_empty() && x.id == a.id) || (a.id.is_empty() && x.title.eq_ignore_ascii_case(a.title.trim())));
+        let existing = self.anchors()?.into_iter().find(|x| {
+            (!a.id.is_empty() && x.id == a.id)
+                || (a.id.is_empty() && x.title.eq_ignore_ascii_case(a.title.trim()))
+        });
         let saved = Anchor {
-            id: existing.as_ref().map(|x| x.id.clone()).unwrap_or_else(|| if a.id.is_empty() { new_id() } else { a.id.clone() }),
+            id: existing.as_ref().map(|x| x.id.clone()).unwrap_or_else(|| {
+                if a.id.is_empty() {
+                    new_id()
+                } else {
+                    a.id.clone()
+                }
+            }),
             title: a.title.trim().to_string(),
             first_note: a.first_note,
             melody: a.melody.clone(),
-            created_at: existing.map(|x| x.created_at).unwrap_or_else(|| now().to_rfc3339()),
+            created_at: existing
+                .map(|x| x.created_at)
+                .unwrap_or_else(|| now().to_rfc3339()),
             source: source.to_string(),
         };
         self.conn.execute(
@@ -1111,7 +1167,10 @@ impl Db {
     }
 
     pub fn remove_anchor(&self, id: &str) -> Result<bool> {
-        Ok(self.conn.execute("DELETE FROM anchors WHERE id = ?1", params![id])? > 0)
+        Ok(self
+            .conn
+            .execute("DELETE FROM anchors WHERE id = ?1", params![id])?
+            > 0)
     }
 
     /// Everything trial generation needs from the database: range, stimulus pools, anchors and
@@ -1122,6 +1181,7 @@ impl Db {
             pools: self.get_setting("stimulus_pools")?.unwrap_or_default(),
             anchors: self.anchors()?,
             library: self.library()?,
+            labels: crate::labels::sets_from_db(self)?,
         })
     }
 
@@ -1144,14 +1204,20 @@ impl Db {
     pub fn library_piece(&self, id: &str) -> Result<Option<LibraryPiece>> {
         let json: Option<String> = self
             .conn
-            .query_row("SELECT piece_json FROM library_pieces WHERE id = ?1", params![id], |r| r.get(0))
+            .query_row(
+                "SELECT piece_json FROM library_pieces WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
             .optional()?;
         Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
     }
 
     /// Every file of the library folder that was read, with its number of pieces or its error.
     pub fn library_files(&self) -> Result<Vec<LibraryFile>> {
-        let mut stmt = self.conn.prepare("SELECT file, pieces, error, read_at FROM library_files")?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file, pieces, error, read_at FROM library_files")?;
         let rows = stmt.query_map([], |r| {
             Ok(LibraryFile {
                 file: r.get(0)?,
@@ -1172,8 +1238,15 @@ impl Db {
         let on_disk = library::scan(dir);
         let mut known: HashMap<String, (String, bool)> = HashMap::new();
         {
-            let mut stmt = self.conn.prepare("SELECT file, stamp, error IS NOT NULL FROM library_files")?;
-            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, (r.get::<_, String>(1)?, r.get::<_, bool>(2)?))))?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT file, stamp, error IS NOT NULL FROM library_files")?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    (r.get::<_, String>(1)?, r.get::<_, bool>(2)?),
+                ))
+            })?;
             for row in rows {
                 let (file, v) = row?;
                 known.insert(file, v);
@@ -1182,13 +1255,17 @@ impl Db {
         let mut sync = LibrarySync::default();
         for file in known.keys() {
             if !on_disk.iter().any(|(f, _)| f == file) {
-                self.conn.execute("DELETE FROM library_pieces WHERE file = ?1", params![file])?;
-                self.conn.execute("DELETE FROM library_files WHERE file = ?1", params![file])?;
+                self.conn
+                    .execute("DELETE FROM library_pieces WHERE file = ?1", params![file])?;
+                self.conn
+                    .execute("DELETE FROM library_files WHERE file = ?1", params![file])?;
                 sync.removed.push(file.clone());
             }
         }
-        let changed: Vec<&(String, String)> =
-            on_disk.iter().filter(|(f, stamp)| known.get(f).is_none_or(|(s, _)| s != stamp)).collect();
+        let changed: Vec<&(String, String)> = on_disk
+            .iter()
+            .filter(|(f, stamp)| known.get(f).is_none_or(|(s, _)| s != stamp))
+            .collect();
         let retry = !changed.is_empty() || !sync.removed.is_empty();
         for (file, stamp) in &on_disk {
             let failed = known.get(file).is_some_and(|(_, failed)| *failed);
@@ -1199,7 +1276,13 @@ impl Db {
         Ok(sync)
     }
 
-    fn read_library_file(&self, dir: &Path, file: &str, stamp: &str, sync: &mut LibrarySync) -> Result<()> {
+    fn read_library_file(
+        &self,
+        dir: &Path,
+        file: &str,
+        stamp: &str,
+        sync: &mut LibrarySync,
+    ) -> Result<()> {
         let result = std::fs::read(dir.join(file))
             .map_err(|e| e.to_string())
             .and_then(|bytes| library::read_file(file, &bytes))
@@ -1381,11 +1464,24 @@ impl Db {
     /// A course's current level (1-based) and how it got there (`passed` or `manual`).
     pub fn course_level(&self, course: &str) -> Result<Option<(u32, String)>> {
         Ok(self
+            .course_state(course)?
+            .map(|(level, source, _)| (level, source)))
+    }
+
+    /// Level, how it was set, and when that happened.
+    pub fn course_state(&self, course: &str) -> Result<Option<(u32, String, String)>> {
+        Ok(self
             .conn
             .query_row(
-                "SELECT level, source FROM course_state WHERE course = ?1",
+                "SELECT level, source, updated_at FROM course_state WHERE course = ?1",
                 [course],
-                |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, u32>(0)?,
+                        r.get::<_, String>(1)?,
+                        r.get::<_, String>(2)?,
+                    ))
+                },
             )
             .optional()?)
     }
@@ -1400,7 +1496,13 @@ impl Db {
     }
 
     /// Records that `level` was passed (the first time only).
-    pub fn record_course_pass(&self, course: &str, level: u32, source: &str, evidence: &serde_json::Value) -> Result<()> {
+    pub fn record_course_pass(
+        &self,
+        course: &str,
+        level: u32,
+        source: &str,
+        evidence: &serde_json::Value,
+    ) -> Result<()> {
         self.conn.execute(
             "INSERT OR IGNORE INTO course_passes(course, level, passed_at, source, evidence_json) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![course, level, now().to_rfc3339(), source, serde_json::to_string(evidence)?],
@@ -1410,10 +1512,12 @@ impl Db {
 
     /// The levels of a course passed so far: (level, passed_at).
     pub fn course_passes(&self, course: &str) -> Result<Vec<(u32, String)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT level, passed_at FROM course_passes WHERE course = ?1 ORDER BY level")?;
-        let rows = stmt.query_map([course], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?)))?;
+        let mut stmt = self.conn.prepare(
+            "SELECT level, passed_at FROM course_passes WHERE course = ?1 ORDER BY level",
+        )?;
+        let rows = stmt.query_map([course], |r| {
+            Ok((r.get::<_, u32>(0)?, r.get::<_, String>(1)?))
+        })?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
@@ -1493,6 +1597,22 @@ mod tests {
     use super::tests_support::sample_trial;
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn data_stays_in_the_app_directory() {
+        let built = Path::new(r"F:\Documents\music app\SingingApp\target\release\singing-trainer.exe");
+        assert_eq!(
+            data_dir_for_exe(built),
+            PathBuf::from(r"F:\Documents\music app\SingingApp\data")
+        );
+        let tests = Path::new(r"C:\proj\SingingApp\target\debug\deps\trainer_core.exe");
+        assert_eq!(data_dir_for_exe(tests), PathBuf::from(r"C:\proj\SingingApp\data"));
+        let installed = Path::new(r"D:\Apps\Singing Trainer\singing-trainer.exe");
+        assert_eq!(
+            data_dir_for_exe(installed),
+            PathBuf::from(r"D:\Apps\Singing Trainer\data")
+        );
+    }
 
     fn spec() -> SessionSpec {
         SessionSpec::from_json(
@@ -1624,8 +1744,18 @@ mod tests {
         let db = Db::open_in_memory().unwrap();
         assert!(!db.sync_library(&lib).unwrap().changed());
 
-        library::write_file(&lib, "Book/one.json", br#"{"key": "C", "notes": "C4:2 E4:2 | G4:4"}"#).unwrap();
-        library::write_file(&lib, "two.json", br#"[{"key": "G", "notes": "G4:4"}, {"key": "F", "notes": "F4:4"}]"#).unwrap();
+        library::write_file(
+            &lib,
+            "Book/one.json",
+            br#"{"key": "C", "notes": "C4:2 E4:2 | G4:4"}"#,
+        )
+        .unwrap();
+        library::write_file(
+            &lib,
+            "two.json",
+            br#"[{"key": "G", "notes": "G4:4"}, {"key": "F", "notes": "F4:4"}]"#,
+        )
+        .unwrap();
         let sync = db.sync_library(&lib).unwrap();
         assert_eq!(sync.read.len(), 2);
         let ids: Vec<String> = db.library().unwrap().into_iter().map(|p| p.id).collect();
@@ -1635,15 +1765,32 @@ mod tests {
         assert!(!db.sync_library(&lib).unwrap().changed());
 
         // A clashing id is reported and retried once the other file is gone.
-        library::write_file(&lib, "clash.json", br#"{"id": "Book/one", "key": "D", "notes": "D4:4"}"#).unwrap();
+        library::write_file(
+            &lib,
+            "clash.json",
+            br#"{"id": "Book/one", "key": "D", "notes": "D4:4"}"#,
+        )
+        .unwrap();
         let sync = db.sync_library(&lib).unwrap();
-        assert!(sync.errors[0].1.contains("already used in Book/one.json"), "{:?}", sync.errors);
-        assert!(db.library_files().unwrap().iter().any(|f| f.file == "clash.json" && f.error.is_some()));
+        assert!(
+            sync.errors[0].1.contains("already used in Book/one.json"),
+            "{:?}",
+            sync.errors
+        );
+        assert!(
+            db.library_files()
+                .unwrap()
+                .iter()
+                .any(|f| f.file == "clash.json" && f.error.is_some())
+        );
         library::remove_file(&lib, "Book/one.json").unwrap();
         let sync = db.sync_library(&lib).unwrap();
         assert_eq!(sync.removed, ["Book/one.json"]);
         assert!(sync.errors.is_empty());
-        assert_eq!(db.library_piece("Book/one").unwrap().unwrap().key, "D major");
+        assert_eq!(
+            db.library_piece("Book/one").unwrap().unwrap().key,
+            "D major"
+        );
 
         // Hidden temporary files are ignored.
         std::fs::write(lib.join(".x.json.tmp"), "{").unwrap();
@@ -1674,7 +1821,10 @@ mod tests {
         assert_eq!(db.gen_context().unwrap().anchors.len(), 1);
         assert!(db.remove_anchor(&saved.id).unwrap());
         assert!(db.anchors().unwrap().is_empty());
-        let bad = Anchor { title: " ".into(), ..a };
+        let bad = Anchor {
+            title: " ".into(),
+            ..a
+        };
         assert!(db.save_anchor(&bad, "manual").is_err());
     }
 }

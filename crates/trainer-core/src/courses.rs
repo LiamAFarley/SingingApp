@@ -30,9 +30,17 @@ pub enum PassRule {
     Accuracy { min: f32, blocks: u32 },
     /// `passes` check blocks at or above `min`, the last at least `gap_hours` after the one
     /// before it, so a night's sleep separates them (Wong et al.).
-    Verification { min: f32, passes: u32, gap_hours: f32 },
+    Verification {
+        min: f32,
+        passes: u32,
+        gap_hours: f32,
+    },
     /// A test with no pass mark.
     None,
+    /// d′ at least `min_d_prime` on each of the last `streams` detection streams.
+    Detection { min_d_prime: f32, streams: u32 },
+    /// Every active item correct, and at least `days` since this level's item was added (Eguchi).
+    Spacing { min: f32, days: f32 },
 }
 
 /// How a course comes up in the daily set.
@@ -81,23 +89,34 @@ pub const AP_BRADY: &str = "ap_brady";
 pub const AP_WEEKLY: &str = "ap_weekly";
 pub const AP_UCSF_STYLE: &str = "ap_ucsf_style";
 pub const AP_MAINTENANCE: &str = "ap_maintenance";
+pub const AP_SPEED: &str = "ap_speed";
+pub const AP_CHORD_COLORS: &str = "ap_chord_colors";
+pub const AP_NOTE_COLORS: &str = "ap_note_colors";
+pub const AP_CONTRAST: &str = "ap_contrast";
+
+/// On a course block whose errorless feedback is the default, so a setting can turn it off.
+pub const ERRORLESS_DEFAULT_TAG: &str = "ap.errorless_default";
 
 /// The tag on anchor-recall trials ("sing your C from memory").
 pub const ANCHOR_CHECK_TAG: &str = "ap.anchor_check";
 
 /// A block from JSON, tagged with its course level.
-fn block(course: &str, level: u32, verify: bool, mut v: Value) -> BlockSpec {
+pub(crate) fn block(course: &str, level: u32, verify: bool, mut v: Value) -> BlockSpec {
     if let Some(o) = v.as_object_mut() {
         o.entry("params").or_insert_with(|| json!({}));
     }
     let mut b: BlockSpec = serde_json::from_value(v).expect("built-in course block is valid");
-    b.course = Some(CourseRef { course: course.into(), level, verify });
+    b.course = Some(CourseRef {
+        course: course.into(),
+        level,
+        verify,
+    });
     b
 }
 
 const NAMING_LEVELS: u32 = 10;
 /// Training octaves C3–B5: three octaves, so tones can always jump 13 semitones.
-const SPREAD: [i32; 3] = [3, 4, 5];
+pub(crate) const SPREAD: [i32; 3] = [3, 4, 5];
 
 fn naming_course() -> Course {
     let levels = (1..=NAMING_LEVELS)
@@ -159,7 +178,13 @@ fn naming_course() -> Course {
 }
 
 /// Brady's fixed-scale steps: the weight of C and the time between tones.
-const BRADY_STEPS: [(f32, u32); 5] = [(0.40, 5000), (0.30, 4000), (0.20, 3000), (0.12, 2000), (1.0 / 12.0, 1400)];
+const BRADY_STEPS: [(f32, u32); 5] = [
+    (0.40, 5000),
+    (0.30, 4000),
+    (0.20, 3000),
+    (0.12, 2000),
+    (1.0 / 12.0, 1400),
+];
 
 fn brady_course() -> Course {
     let levels = BRADY_STEPS
@@ -287,7 +312,10 @@ fn maintenance_course() -> Course {
 }
 
 pub fn builtin_courses() -> Vec<Course> {
-    vec![naming_course(), brady_course(), weekly_course(), ucsf_course(), maintenance_course()]
+    let mut courses = vec![naming_course(), brady_course()];
+    courses.extend(crate::ap_courses::courses());
+    courses.extend([weekly_course(), ucsf_course(), maintenance_course()]);
+    courses
 }
 
 pub fn find_course(id: &str) -> Option<Course> {
@@ -298,7 +326,11 @@ pub fn find_course(id: &str) -> Option<Course> {
 pub fn level_session(course: &Course, level: u32) -> Result<SessionSpec> {
     let l = course
         .levels
-        .get(level.checked_sub(1).ok_or_else(|| anyhow!("levels start at 1"))? as usize)
+        .get(
+            level
+                .checked_sub(1)
+                .ok_or_else(|| anyhow!("levels start at 1"))? as usize,
+        )
         .ok_or_else(|| anyhow!("{} has {} levels", course.id, course.levels.len()))?;
     let title = if course.levels.len() > 1 {
         format!("{}: level {level} ({})", course.title, l.title)
@@ -330,16 +362,25 @@ pub struct BlockRun {
     pub accuracy: f64,
     /// A check block (the ones pass rules count).
     pub check: bool,
+    /// Set on a detection stream. Each stream is its own run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub d_prime: Option<f64>,
 }
 
 fn parse_time(s: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(s).ok().map(|d| d.with_timezone(&Utc))
+    DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|d| d.with_timezone(&Utc))
 }
 
 /// Unassisted trials tagged with a course (or a course level), newest first.
 fn tagged_trials(db: &Db, tag: &str, limit: u32) -> Result<Vec<TrialRow>> {
     db.query_trials(
-        &TrialFilter { tag: Some(tag.into()), assisted: Some(false), ..Default::default() },
+        &TrialFilter {
+            tag: Some(tag.into()),
+            assisted: Some(false),
+            ..Default::default()
+        },
         limit,
         0,
     )
@@ -347,19 +388,43 @@ fn tagged_trials(db: &Db, tag: &str, limit: u32) -> Result<Vec<TrialRow>> {
 
 /// Every run of a course level's blocks, oldest first.
 pub fn level_runs(db: &Db, course: &str, level: u32) -> Result<Vec<BlockRun>> {
-    let tag = CourseRef { course: course.into(), level, verify: false }.tag();
+    let tag = CourseRef {
+        course: course.into(),
+        level,
+        verify: false,
+    }
+    .tag();
     let trials = tagged_trials(db, &tag, 20_000)?;
-    let mut runs: BTreeMap<(String, u32), BlockRun> = BTreeMap::new();
+    let mut runs: BTreeMap<(String, u32, u32), BlockRun> = BTreeMap::new();
     for t in trials.iter().rev() {
-        let r = runs.entry((t.session_id.clone(), t.block_idx)).or_insert_with(|| BlockRun {
-            session_id: t.session_id.clone(),
-            block_idx: t.block_idx,
-            at: t.started_at.clone(),
-            trials: 0,
-            correct: 0,
-            accuracy: 0.0,
-            check: t.tags.iter().any(|g| g == CHECK_TAG),
-        });
+        if let Some(d) = t.metrics.get("d_prime").and_then(|v| v.as_f64()) {
+            runs.insert(
+                (t.session_id.clone(), t.block_idx, t.trial_idx),
+                BlockRun {
+                    session_id: t.session_id.clone(),
+                    block_idx: t.block_idx,
+                    at: t.started_at.clone(),
+                    trials: 1,
+                    correct: 0,
+                    accuracy: 0.0,
+                    check: t.tags.iter().any(|g| g == CHECK_TAG),
+                    d_prime: Some(d),
+                },
+            );
+            continue;
+        }
+        let r = runs
+            .entry((t.session_id.clone(), t.block_idx, u32::MAX))
+            .or_insert_with(|| BlockRun {
+                session_id: t.session_id.clone(),
+                block_idx: t.block_idx,
+                at: t.started_at.clone(),
+                trials: 0,
+                correct: 0,
+                accuracy: 0.0,
+                check: t.tags.iter().any(|g| g == CHECK_TAG),
+                d_prime: None,
+            });
         if let Some(c) = t.correct {
             r.trials += 1;
             r.correct += c as u32;
@@ -394,16 +459,44 @@ pub struct PassStatus {
     pub next_after: Option<String>,
 }
 
+/// When a pass rule is judged.
+pub struct RuleContext {
+    pub now: DateTime<Utc>,
+    /// When the current level started (when its chord was added, for spacing).
+    pub level_started: Option<DateTime<Utc>>,
+}
+
 /// How far a level's check blocks go towards its pass rule.
 pub fn evaluate(rule: &PassRule, runs: &[BlockRun]) -> PassStatus {
+    evaluate_in(
+        rule,
+        runs,
+        &RuleContext {
+            now: Utc::now(),
+            level_started: None,
+        },
+    )
+}
+
+pub fn evaluate_in(rule: &PassRule, runs: &[BlockRun], ctx: &RuleContext) -> PassStatus {
     let checks: Vec<&BlockRun> = runs.iter().filter(|r| r.check).collect();
     let pct = |m: f32| format!("{:.0}%", m * 100.0);
     match rule {
-        PassRule::None => PassStatus { met: false, summary: String::new(), passes: 0, needed: 0, next_after: None },
+        PassRule::None => PassStatus {
+            met: false,
+            summary: String::new(),
+            passes: 0,
+            needed: 0,
+            next_after: None,
+        },
         PassRule::Accuracy { min, blocks } => {
             let needed = (*blocks).max(1);
             // Consecutive passing checks, counting back from the latest.
-            let streak = checks.iter().rev().take_while(|r| r.accuracy + 1e-9 >= *min as f64).count() as u32;
+            let streak = checks
+                .iter()
+                .rev()
+                .take_while(|r| r.accuracy + 1e-9 >= *min as f64)
+                .count() as u32;
             let passes = streak.min(needed);
             let met = streak >= needed;
             let summary = if met {
@@ -417,14 +510,26 @@ pub fn evaluate(rule: &PassRule, runs: &[BlockRun]) -> PassStatus {
                     pct(checks.last().unwrap().accuracy as f32)
                 )
             };
-            PassStatus { met, summary, passes, needed, next_after: None }
+            PassStatus {
+                met,
+                summary,
+                passes,
+                needed,
+                next_after: None,
+            }
         }
-        PassRule::Verification { min, passes: needed, gap_hours } => {
+        PassRule::Verification {
+            min,
+            passes: needed,
+            gap_hours,
+        } => {
             let needed = (*needed).max(1);
             let gap = Duration::milliseconds((*gap_hours as f64 * 3_600_000.0) as i64);
             let mut times: Vec<DateTime<Utc>> = Vec::new();
             for r in checks.iter().filter(|r| r.accuracy + 1e-9 >= *min as f64) {
-                let Some(at) = parse_time(&r.at) else { continue };
+                let Some(at) = parse_time(&r.at) else {
+                    continue;
+                };
                 if times.len() + 1 == needed as usize {
                     // The last pass only counts after the gap.
                     if at - *times.last().unwrap_or(&at) < gap && !times.is_empty() {
@@ -440,7 +545,10 @@ pub fn evaluate(rule: &PassRule, runs: &[BlockRun]) -> PassStatus {
             let next_after = (!met && passes + 1 == needed && passes > 0)
                 .then(|| (*times.last().unwrap() + gap).to_rfc3339());
             let summary = if met {
-                format!("Passed: {needed} checks at {} or more, the last after a night's sleep.", pct(*min))
+                format!(
+                    "Passed: {needed} checks at {} or more, the last after a night's sleep.",
+                    pct(*min)
+                )
             } else if passes + 1 == needed && passes > 0 {
                 format!(
                     "{passes} of {needed} checks at {} or more. The last one counts from {} on.",
@@ -453,9 +561,102 @@ pub fn evaluate(rule: &PassRule, runs: &[BlockRun]) -> PassStatus {
                     pct(*min)
                 )
             };
-            PassStatus { met, summary, passes, needed, next_after }
+            PassStatus {
+                met,
+                summary,
+                passes,
+                needed,
+                next_after,
+            }
+        }
+        PassRule::Detection {
+            min_d_prime,
+            streams,
+        } => {
+            let needed = (*streams).max(1);
+            let scored: Vec<&&BlockRun> = checks.iter().filter(|r| r.d_prime.is_some()).collect();
+            let streak = scored
+                .iter()
+                .rev()
+                .take_while(|r| r.d_prime.unwrap_or(0.0) + 1e-9 >= *min_d_prime as f64)
+                .count() as u32;
+            let met = streak >= needed;
+            let last = scored.last().and_then(|r| r.d_prime);
+            let summary = if met {
+                format!("Passed: {needed} streams in a row with d′ at least {min_d_prime:.1}.")
+            } else if let Some(d) = last {
+                format!(
+                    "{streak} of {needed} streams in a row with d′ at least {min_d_prime:.1} (last: {d:.1})."
+                )
+            } else {
+                format!("Needs {needed} streams with d′ at least {min_d_prime:.1}.")
+            };
+            PassStatus {
+                met,
+                summary,
+                passes: streak.min(needed),
+                needed,
+                next_after: None,
+            }
+        }
+        PassRule::Spacing { min, days } => {
+            let last = checks.last();
+            let acc_ok = last
+                .map(|r| r.accuracy + 1e-9 >= *min as f64)
+                .unwrap_or(false);
+            let started = ctx
+                .level_started
+                .or_else(|| checks.first().and_then(|r| parse_time(&r.at)));
+            let wait = Duration::seconds((*days as f64 * 86_400.0).round() as i64);
+            let due = started.map(|t| t + wait);
+            let time_ok = due.map(|d| ctx.now >= d).unwrap_or(false);
+            let met = acc_ok && time_ok;
+            let next_after = (acc_ok && !time_ok).then(|| due.unwrap().to_rfc3339());
+            let summary = if met {
+                format!(
+                    "Passed: {} and {days:.0} days since this chord was added.",
+                    pct(*min)
+                )
+            } else if let Some(at) = next_after.as_deref() {
+                format!("Next chord due {}.", local_date(at))
+            } else if let Some(r) = last {
+                format!(
+                    "Needs {} on the active chords (last: {}).",
+                    pct(*min),
+                    pct(r.accuracy as f32)
+                )
+            } else {
+                format!(
+                    "Needs {} on the active chords, then {days:.0} days before the next chord.",
+                    pct(*min)
+                )
+            };
+            PassStatus {
+                met,
+                summary,
+                passes: u32::from(acc_ok),
+                needed: 1,
+                next_after,
+            }
         }
     }
+}
+
+fn local_date(rfc: &str) -> String {
+    parse_time(rfc)
+        .map(|t| t.with_timezone(&Local).format("%a %e %b").to_string())
+        .unwrap_or_default()
+}
+
+fn rule_context(db: &Db, course: &str, level: u32, now: DateTime<Utc>) -> Result<RuleContext> {
+    let started = match db.course_state(course)? {
+        Some((lvl, _, at)) if lvl == level => parse_time(&at),
+        _ => None,
+    };
+    Ok(RuleContext {
+        now,
+        level_started: started,
+    })
 }
 
 fn local_time(rfc: &str) -> String {
@@ -467,7 +668,11 @@ fn local_time(rfc: &str) -> String {
 /// A course's current level (1-based; `levels + 1` when complete).
 pub fn current_level(db: &Db, course: &Course) -> Result<u32> {
     let n = course.levels.len() as u32;
-    Ok(db.course_level(&course.id)?.map(|(l, _)| l).unwrap_or(1).clamp(1, n + 1))
+    Ok(db
+        .course_level(&course.id)?
+        .map(|(l, _)| l)
+        .unwrap_or(1)
+        .clamp(1, n + 1))
 }
 
 /// Moves every ladder course on past the levels whose pass rule is now met.
@@ -479,11 +684,20 @@ pub fn refresh_progress(db: &Db) -> Result<()> {
         let mut level = current_level(db, &c)?;
         while (level as usize) <= c.levels.len() {
             let l = &c.levels[level as usize - 1];
-            let status = evaluate(&l.pass, &level_runs(db, &c.id, level)?);
+            let status = evaluate_in(
+                &l.pass,
+                &level_runs(db, &c.id, level)?,
+                &rule_context(db, &c.id, level, Utc::now())?,
+            );
             if !status.met {
                 break;
             }
-            db.record_course_pass(&c.id, level, "passed", &json!({ "summary": status.summary }))?;
+            db.record_course_pass(
+                &c.id,
+                level,
+                "passed",
+                &json!({ "summary": status.summary }),
+            )?;
             level += 1;
             db.set_course_level(&c.id, level, "passed")?;
         }
@@ -496,7 +710,10 @@ pub fn set_level(db: &Db, course: &str, level: u32) -> Result<()> {
     let c = find_course(course).ok_or_else(|| anyhow!("unknown course {course}"))?;
     let n = c.levels.len() as u32;
     if !(1..=n + 1).contains(&level) {
-        return Err(anyhow!("{course} has levels 1–{n} ({} means complete)", n + 1));
+        return Err(anyhow!(
+            "{course} has levels 1–{n} ({} means complete)",
+            n + 1
+        ));
     }
     db.set_course_level(course, level, "manual")
 }
@@ -524,10 +741,94 @@ impl Default for DailyPlan {
     fn default() -> Self {
         DailyPlan {
             courses: vec![
-                PlanCourse { course: AP_NAMING.into(), minutes: 15.0, active: true },
-                PlanCourse { course: AP_BRADY.into(), minutes: 10.0, active: true },
+                PlanCourse {
+                    course: AP_NAMING.into(),
+                    minutes: 15.0,
+                    active: true,
+                },
+                PlanCourse {
+                    course: AP_BRADY.into(),
+                    minutes: 10.0,
+                    active: true,
+                },
             ],
             test_day: 6,
+        }
+    }
+}
+
+fn suggested_minutes(id: &str) -> f32 {
+    match id {
+        AP_SPEED => 4.0,
+        AP_CHORD_COLORS => 3.0,
+        AP_NOTE_COLORS => 8.0,
+        AP_CONTRAST => 6.0,
+        _ => 10.0,
+    }
+}
+
+/// Preferences that change how course defaults are started.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ApPrefs {
+    /// Early colour, chord and contrast levels use errorless feedback.
+    #[serde(default = "d_pref_true")]
+    pub errorless_early: bool,
+    /// Label set for the contrast course (`gervain_names` or `my_colors`).
+    #[serde(default = "d_gervain")]
+    pub contrast_labels: String,
+}
+
+fn d_pref_true() -> bool {
+    true
+}
+fn d_gervain() -> String {
+    crate::labels::GERVAIN_NAMES.into()
+}
+
+impl Default for ApPrefs {
+    fn default() -> Self {
+        serde_json::from_str("{}").unwrap()
+    }
+}
+
+const PREFS_KEY: &str = "ap_prefs";
+
+pub fn ap_prefs(db: &Db) -> Result<ApPrefs> {
+    Ok(db.get_setting(PREFS_KEY)?.unwrap_or_default())
+}
+
+pub fn save_ap_prefs(db: &Db, prefs: &ApPrefs) -> Result<ApPrefs> {
+    if crate::labels::builtin_set(&prefs.contrast_labels).is_none()
+        && db
+            .get_setting::<crate::labels::LabelSet>(&format!(
+                "label_set:{}",
+                prefs.contrast_labels
+            ))?
+            .is_none()
+    {
+        return Err(anyhow!("unknown label set {}", prefs.contrast_labels));
+    }
+    let mut prefs = prefs.clone();
+    if prefs.contrast_labels.is_empty() {
+        prefs.contrast_labels = d_gervain();
+    }
+    db.set_setting(PREFS_KEY, &prefs)?;
+    Ok(prefs)
+}
+
+/// Turns off default errorless feedback, and points the contrast course at the chosen label set.
+pub fn apply_session_prefs(spec: &mut SessionSpec, prefs: &ApPrefs) {
+    for b in &mut spec.blocks {
+        if !prefs.errorless_early
+            && b.feedback == crate::schema::FeedbackMode::Errorless
+            && b.tags.iter().any(|t| t == ERRORLESS_DEFAULT_TAG)
+        {
+            b.feedback = crate::schema::FeedbackMode::AfterTrial;
+        }
+        if b.tags.iter().any(|t| t == "ap.contrast") {
+            if let crate::schema::Exercise::PitchId(p) = &mut b.exercise {
+                p.labels = Some(prefs.contrast_labels.clone());
+            }
         }
     }
 }
@@ -539,7 +840,12 @@ pub fn daily_plan(db: &Db) -> Result<DailyPlan> {
     // Ladder courses added since the plan was saved start inactive.
     for c in builtin_courses() {
         if c.schedule == Schedule::Ladder && !plan.courses.iter().any(|p| p.course == c.id) {
-            plan.courses.push(PlanCourse { course: c.id, minutes: 10.0, active: false });
+            let minutes = suggested_minutes(&c.id);
+            plan.courses.push(PlanCourse {
+                course: c.id,
+                minutes,
+                active: false,
+            });
         }
     }
     Ok(plan)
@@ -552,7 +858,10 @@ pub fn save_daily_plan(db: &Db, plan: &DailyPlan) -> Result<()> {
     for p in &plan.courses {
         let c = find_course(&p.course).ok_or_else(|| anyhow!("unknown course {}", p.course))?;
         if c.schedule != Schedule::Ladder {
-            return Err(anyhow!("{} is a test; tests come up on their own schedule", p.course));
+            return Err(anyhow!(
+                "{} is a test; tests come up on their own schedule",
+                p.course
+            ));
         }
         if !(1.0..=90.0).contains(&p.minutes) {
             return Err(anyhow!("minutes for {} must be 1–90", p.course));
@@ -591,10 +900,19 @@ pub struct CourseStatus {
 }
 
 fn days_since(at: Option<&str>, now: DateTime<Utc>) -> Option<f64> {
-    at.and_then(parse_time).map(|t| (now - t).num_minutes() as f64 / 1440.0)
+    at.and_then(parse_time)
+        .map(|t| (now - t).num_minutes() as f64 / 1440.0)
 }
 
-const WEEKDAYS: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const WEEKDAYS: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
 
 /// Whether a recurring course is due, and a note saying why or when.
 fn recurring_due(
@@ -617,17 +935,47 @@ fn recurring_due(
         // A missed test day is made up as soon as it is a day overdue.
         let overdue = since.map(|d| d >= days as f64 + 1.0).unwrap_or(false);
         if interval_ok && (is_test_day || overdue) {
-            (true, if since.is_none() { "Due: first run.".into() } else { "Due today.".into() })
+            (
+                true,
+                if since.is_none() {
+                    "Due: first run.".into()
+                } else {
+                    "Due today.".into()
+                },
+            )
         } else if !interval_ok {
-            let next = last.and_then(parse_time).map(|t| t + Duration::days(days.round() as i64));
-            (false, format!("Next on the {} test day{}.", day, next.map(|n| format!(" from {}", n.with_timezone(&Local).format("%e %b"))).unwrap_or_default()))
+            let next = last
+                .and_then(parse_time)
+                .map(|t| t + Duration::days(days.round() as i64));
+            (
+                false,
+                format!(
+                    "Next on the {} test day{}.",
+                    day,
+                    next.map(|n| format!(" from {}", n.with_timezone(&Local).format("%e %b")))
+                        .unwrap_or_default()
+                ),
+            )
         } else {
             (false, format!("Next on {day}."))
         }
     } else if interval_ok {
-        (true, if since.is_none() { "Due: first run.".into() } else { format!("Due: last run {:.0} days ago.", since.unwrap()) })
+        (
+            true,
+            if since.is_none() {
+                "Due: first run.".into()
+            } else {
+                format!("Due: last run {:.0} days ago.", since.unwrap())
+            },
+        )
     } else {
-        (false, format!("Next due in {:.0} days.", (days as f64 - since.unwrap_or(0.0)).max(0.5).ceil()))
+        (
+            false,
+            format!(
+                "Next due in {:.0} days.",
+                (days as f64 - since.unwrap_or(0.0)).max(0.5).ceil()
+            ),
+        )
     }
 }
 
@@ -647,19 +995,30 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
         let n = c.levels.len() as u32;
         let complete = level > n;
         let current = (!complete).then(|| &c.levels[level as usize - 1]);
-        let last = tagged_trials(db, &format!("course.{}", c.id), 1)?.first().map(|t| t.started_at.clone());
+        let last = tagged_trials(db, &format!("course.{}", c.id), 1)?
+            .first()
+            .map(|t| t.started_at.clone());
         let pass = match (current, &c.schedule) {
-            (Some(l), Schedule::Ladder) => Some(evaluate(&l.pass, &level_runs(db, &c.id, level)?)),
+            (Some(l), Schedule::Ladder) => Some(evaluate_in(
+                &l.pass,
+                &level_runs(db, &c.id, level)?,
+                &rule_context(db, &c.id, level, now)?,
+            )),
             _ => None,
         };
         let (due, due_note) = match &c.schedule {
             Schedule::Ladder => (false, None),
-            Schedule::Recurring { days, on_test_day, after } => {
+            Schedule::Recurring {
+                days,
+                on_test_day,
+                after,
+            } => {
                 let after_ok = match after {
                     Some(a) => complete_of(a)?,
                     None => true,
                 };
-                let (d, note) = recurring_due(*days, *on_test_day, after_ok, last.as_deref(), &plan, now);
+                let (d, note) =
+                    recurring_due(*days, *on_test_day, after_ok, last.as_deref(), &plan, now);
                 (d, Some(note))
             }
         };
@@ -679,7 +1038,10 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
             level_title: current.map(|l| l.title.clone()),
             level_summary: current.map(|l| l.summary.clone()),
             level_titles: c.levels.iter().map(|l| l.title.clone()).collect(),
-            level_set_manually: db.course_level(&c.id)?.map(|(_, s)| s == "manual").unwrap_or(false),
+            level_set_manually: db
+                .course_level(&c.id)?
+                .map(|(_, s)| s == "manual")
+                .unwrap_or(false),
             pass,
             last_practised: last,
             due,
@@ -716,17 +1078,34 @@ pub struct DailySet {
 /// Seconds a block takes, from its generated trials.
 fn block_seconds(b: &BlockSpec, ctx: &GenContext) -> f64 {
     let trials = generate_block(b, block_seed(1, 0, b), ctx).unwrap_or_default();
-    trials.iter().map(|t| estimate_trial_seconds(t) as f64).sum::<f64>() + b.pre_mask.map(|m| m.seconds() as f64).unwrap_or(0.0)
+    trials
+        .iter()
+        .map(|t| estimate_trial_seconds(t) as f64)
+        .sum::<f64>()
+        + b.pre_mask.map(|m| m.seconds() as f64).unwrap_or(0.0)
 }
 
 /// A level's blocks fitted to `minutes`: check blocks and single trials keep their size, the
 /// practice blocks are scaled.
 fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockSpec> {
-    let fixed = |b: &BlockSpec| b.course.as_ref().map(|c| c.verify).unwrap_or(false) || b.count <= 3;
-    let fixed_s: f64 = blocks.iter().filter(|b| fixed(b)).map(|b| block_seconds(b, ctx)).sum();
-    let scalable_s: f64 = blocks.iter().filter(|b| !fixed(b)).map(|b| block_seconds(b, ctx)).sum();
+    let fixed =
+        |b: &BlockSpec| b.course.as_ref().map(|c| c.verify).unwrap_or(false) || b.count <= 3;
+    let fixed_s: f64 = blocks
+        .iter()
+        .filter(|b| fixed(b))
+        .map(|b| block_seconds(b, ctx))
+        .sum();
+    let scalable_s: f64 = blocks
+        .iter()
+        .filter(|b| !fixed(b))
+        .map(|b| block_seconds(b, ctx))
+        .sum();
     let budget = (minutes as f64 * 60.0 - fixed_s).max(60.0);
-    let scale = if scalable_s > 0.0 { budget / scalable_s } else { 1.0 };
+    let scale = if scalable_s > 0.0 {
+        budget / scalable_s
+    } else {
+        1.0
+    };
     blocks
         .iter()
         .map(|b| {
@@ -738,7 +1117,11 @@ fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockS
             if b.count > 3 && fixed(&b) && scalable_s == 0.0 {
                 let s = block_seconds(&b, ctx);
                 if s > 0.0 {
-                    b.count = ((b.count as f64 * minutes as f64 * 60.0 / s).round() as u32).clamp(20, 400);
+                    // A detection stream is one long trial; a naming tone is a short one.
+                    let per = s / b.count as f64;
+                    let (min_n, max_n) = if per > 8.0 { (2, 24) } else { (20, 400) };
+                    b.count = ((b.count as f64 * minutes as f64 * 60.0 / s).round() as u32)
+                        .clamp(min_n, max_n);
                 }
             }
             b
@@ -752,12 +1135,21 @@ pub fn compose_daily_set(db: &Db, ctx: &GenContext, now: DateTime<Utc>) -> Resul
     let courses = builtin_courses();
     let mut items = Vec::new();
     let mut blocks: Vec<BlockSpec> = Vec::new();
-    let mut add = |c: &Course, level: u32, blocks_in: Vec<BlockSpec>, reason: String, test: bool, items: &mut Vec<DailyItem>| {
+    let mut add = |c: &Course,
+                   level: u32,
+                   blocks_in: Vec<BlockSpec>,
+                   reason: String,
+                   test: bool,
+                   items: &mut Vec<DailyItem>| {
         let minutes: f64 = blocks_in.iter().map(|b| block_seconds(b, ctx)).sum::<f64>() / 60.0;
         let lvl = &c.levels[level as usize - 1];
         items.push(DailyItem {
             course: c.id.clone(),
-            title: if c.levels.len() > 1 { format!("{}: level {level} ({})", c.title, lvl.title) } else { c.title.clone() },
+            title: if c.levels.len() > 1 {
+                format!("{}: level {level} ({})", c.title, lvl.title)
+            } else {
+                c.title.clone()
+            },
             level: (c.levels.len() > 1).then_some(level),
             minutes: (minutes * 10.0).round() / 10.0,
             reason,
@@ -771,7 +1163,14 @@ pub fn compose_daily_set(db: &Db, ctx: &GenContext, now: DateTime<Utc>) -> Resul
     // Tests that are due come first, while nothing has been named yet today.
     for s in statuses.iter().filter(|s| s.kind == "recurring" && s.due) {
         let c = courses.iter().find(|c| c.id == s.id).unwrap();
-        add(c, 1, c.levels[0].blocks.clone(), s.due_note.clone().unwrap_or_default(), true, &mut items);
+        add(
+            c,
+            1,
+            c.levels[0].blocks.clone(),
+            s.due_note.clone().unwrap_or_default(),
+            true,
+            &mut items,
+        );
     }
     // Then each active ladder course at its current level, in an order that rotates daily.
     let mut ladder: Vec<(&Course, &PlanCourse, &CourseStatus)> = plan
@@ -792,28 +1191,55 @@ pub fn compose_daily_set(db: &Db, ctx: &GenContext, now: DateTime<Utc>) -> Resul
     for (c, p, s) in ladder {
         let l = &c.levels[s.level as usize - 1];
         let reason = match &s.pass {
-            Some(ps) if !ps.summary.is_empty() => format!("Level {} of {}. {}", s.level, s.levels, ps.summary),
+            Some(ps) if !ps.summary.is_empty() => {
+                format!("Level {} of {}. {}", s.level, s.levels, ps.summary)
+            }
             _ => format!("Level {} of {}.", s.level, s.levels),
         };
-        add(c, s.level, fit_level(&l.blocks, p.minutes, ctx), reason, false, &mut items);
+        add(
+            c,
+            s.level,
+            fit_level(&l.blocks, p.minutes, ctx),
+            reason,
+            false,
+            &mut items,
+        );
     }
     if blocks.is_empty() {
-        return Err(anyhow!("Nothing to practise: turn on a course in the daily plan."));
+        return Err(anyhow!(
+            "Nothing to practise: turn on a course in the daily plan."
+        ));
     }
     // Clear pitch memory before anything is heard.
     if blocks[0].pre_mask.is_none() {
         blocks[0].pre_mask = Some(Mask::ShepardGlissando);
     }
-    let minutes = items.iter().map(|i| i.minutes).sum::<f64>() + if items.first().map(|i| i.test).unwrap_or(false) { 0.0 } else { 20.0 / 60.0 };
-    let spec = SessionSpec {
+    let minutes = items.iter().map(|i| i.minutes).sum::<f64>()
+        + if items.first().map(|i| i.test).unwrap_or(false) {
+            0.0
+        } else {
+            20.0 / 60.0
+        };
+    let mut spec = SessionSpec {
         title: "Absolute pitch: today's set".into(),
         protocol: Some("ap_daily_set".into()),
         planned_minutes: Some(minutes as f32),
-        notes: Some(items.iter().map(|i| i.title.clone()).collect::<Vec<_>>().join(" · ")),
+        notes: Some(
+            items
+                .iter()
+                .map(|i| i.title.clone())
+                .collect::<Vec<_>>()
+                .join(" · "),
+        ),
         seed: None,
         blocks,
     };
-    Ok(DailySet { spec, items, minutes: (minutes * 10.0).round() / 10.0 })
+    apply_session_prefs(&mut spec, &ap_prefs(db)?);
+    Ok(DailySet {
+        spec,
+        items,
+        minutes: (minutes * 10.0).round() / 10.0,
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -839,6 +1265,8 @@ pub struct ClassProgress {
     /// Recent sung trials of this note and the share in the right category.
     pub singing_trials: u32,
     pub singing_accuracy: Option<f64>,
+    /// Mean d′ of recent detection streams for this note.
+    pub detection_d_prime: Option<f64>,
     pub last_seen: Option<String>,
 }
 
@@ -886,7 +1314,10 @@ pub struct ApDashboard {
 }
 
 fn is_out_of_set(t: &TrialRow) -> bool {
-    t.stimulus.get("out_of_set").and_then(Value::as_bool).unwrap_or(false)
+    t.stimulus
+        .get("out_of_set")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn test_runs(db: &Db, course: &str) -> Result<Vec<TestRun>> {
@@ -902,26 +1333,45 @@ fn test_runs(db: &Db, course: &str) -> Result<Vec<TestRun>> {
         .map(|(sid, rows)| {
             let n = rows.len() as f64;
             let correct = rows.iter().filter(|t| t.correct == Some(true)).count() as f64;
-            let points: f64 = rows.iter().filter_map(|t| t.metrics.get("ucsf_points").and_then(Value::as_f64)).sum();
-            let errs: Vec<f64> =
-                rows.iter().filter_map(|t| t.metrics.get("class_error").and_then(Value::as_f64)).map(f64::abs).collect();
+            let points: f64 = rows
+                .iter()
+                .filter_map(|t| t.metrics.get("ucsf_points").and_then(Value::as_f64))
+                .sum();
+            let errs: Vec<f64> = rows
+                .iter()
+                .filter_map(|t| t.metrics.get("class_error").and_then(Value::as_f64))
+                .map(f64::abs)
+                .collect();
             let mut timbres: BTreeMap<String, (u32, u32)> = BTreeMap::new();
             for t in &rows {
-                let k = t.stimulus.get("timbre").and_then(Value::as_str).unwrap_or("?").to_string();
+                let k = t
+                    .stimulus
+                    .get("timbre")
+                    .and_then(Value::as_str)
+                    .unwrap_or("?")
+                    .to_string();
                 let e = timbres.entry(k).or_default();
                 e.0 += 1;
                 e.1 += (t.correct == Some(true)) as u32;
             }
             TestRun {
                 session_id: sid,
-                at: rows.iter().map(|t| t.started_at.clone()).min().unwrap_or_default(),
+                at: rows
+                    .iter()
+                    .map(|t| t.started_at.clone())
+                    .min()
+                    .unwrap_or_default(),
                 trials: n as u32,
                 accuracy: correct / n,
                 ucsf_points: points / n,
                 mad: (!errs.is_empty()).then(|| errs.iter().sum::<f64>() / errs.len() as f64),
                 by_timbre: timbres
                     .into_iter()
-                    .map(|(timbre, (k, c))| TimbreAccuracy { timbre, trials: k, accuracy: c as f64 / k as f64 })
+                    .map(|(timbre, (k, c))| TimbreAccuracy {
+                        timbre,
+                        trials: k,
+                        accuracy: c as f64 / k as f64,
+                    })
                     .collect(),
             }
         })
@@ -934,16 +1384,41 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
     let courses = course_statuses(db, now)?;
     let since = (now - Duration::days(90)).to_rfc3339();
     let naming = db.query_trials(
-        &TrialFilter { types: vec!["pitch_id".into()], assisted: Some(false), since: Some(since.clone()), ..Default::default() },
+        &TrialFilter {
+            types: vec!["pitch_id".into()],
+            assisted: Some(false),
+            since: Some(since.clone()),
+            ..Default::default()
+        },
         30_000,
         0,
     )?;
     let singing = db.query_trials(
-        &TrialFilter { types: vec!["sing_pitch".into()], assisted: Some(false), since: Some(since), ..Default::default() },
+        &TrialFilter {
+            types: vec!["sing_pitch".into()],
+            assisted: Some(false),
+            since: Some(since.clone()),
+            ..Default::default()
+        },
         10_000,
         0,
     )?;
-    let class_of = |t: &TrialRow| t.stimulus.get("pitch_class").and_then(Value::as_str).map(String::from);
+    let detecting = db.query_trials(
+        &TrialFilter {
+            types: vec!["pitch_detect".into()],
+            assisted: Some(false),
+            since: Some(since),
+            ..Default::default()
+        },
+        5_000,
+        0,
+    )?;
+    let class_of = |t: &TrialRow| {
+        t.stimulus
+            .get("pitch_class")
+            .and_then(Value::as_str)
+            .map(String::from)
+    };
     let classes: Vec<ClassProgress> = PitchClass::ALL
         .iter()
         .map(|pc| {
@@ -951,7 +1426,9 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
             // Newest first, as queried.
             let named: Vec<&TrialRow> = naming
                 .iter()
-                .filter(|t| t.correct.is_some() && !is_out_of_set(t) && class_of(t).as_deref() == Some(id))
+                .filter(|t| {
+                    t.correct.is_some() && !is_out_of_set(t) && class_of(t).as_deref() == Some(id)
+                })
                 .take(MASTERY_WINDOW)
                 .collect();
             let sung: Vec<&TrialRow> = singing
@@ -959,10 +1436,19 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
                 .filter(|t| t.correct.is_some() && class_of(t).as_deref() == Some(id))
                 .take(MASTERY_WINDOW / 2)
                 .collect();
+            let detected: Vec<f64> = detecting
+                .iter()
+                .filter(|t| class_of(t).as_deref() == Some(id))
+                .filter_map(|t| t.metrics.get("d_prime").and_then(|v| v.as_f64()))
+                .take(8)
+                .collect();
             let share = |rows: &[&TrialRow], f: &dyn Fn(&TrialRow) -> bool| {
-                (!rows.is_empty()).then(|| rows.iter().filter(|t| f(t)).count() as f64 / rows.len() as f64)
+                (!rows.is_empty())
+                    .then(|| rows.iter().filter(|t| f(t)).count() as f64 / rows.len() as f64)
             };
-            let in_time = share(&named, &|t| t.correct == Some(true) && t.rt_ms.map(|r| r <= MASTERY_RT_MS).unwrap_or(false));
+            let in_time = share(&named, &|t| {
+                t.correct == Some(true) && t.rt_ms.map(|r| r <= MASTERY_RT_MS).unwrap_or(false)
+            });
             ClassProgress {
                 pitch_class: id.to_string(),
                 name: pc.display_name().to_string(),
@@ -972,6 +1458,8 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
                 mastered: named.len() >= MASTERY_MIN_TRIALS && in_time.unwrap_or(0.0) >= 0.9,
                 singing_trials: sung.len() as u32,
                 singing_accuracy: share(&sung, &|t| t.correct == Some(true)),
+                detection_d_prime: (!detected.is_empty())
+                    .then(|| detected.iter().sum::<f64>() / detected.len() as f64),
                 last_seen: named.first().or(sung.first()).map(|t| t.started_at.clone()),
             }
         })
@@ -981,12 +1469,20 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
         .iter()
         .filter_map(|t| {
             let c = t.metrics.get("cents_error").and_then(Value::as_f64)?;
-            Some(AnchorPoint { at: t.started_at.clone(), cents: c })
+            Some(AnchorPoint {
+                at: t.started_at.clone(),
+                cents: c,
+            })
         })
         .collect();
     anchor.reverse();
     let anchor_median_abs_cents = {
-        let mut v: Vec<f64> = anchor.iter().rev().take(10).map(|a| a.cents.abs()).collect();
+        let mut v: Vec<f64> = anchor
+            .iter()
+            .rev()
+            .take(10)
+            .map(|a| a.cents.abs())
+            .collect();
         v.sort_by(|a, b| a.total_cmp(b));
         (!v.is_empty()).then(|| v[v.len() / 2])
     };
@@ -994,7 +1490,12 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
     let minutes_this_week = db
         .list_sessions(Some(SessionStatus::Completed), 200)?
         .iter()
-        .filter(|s| s.protocol.as_deref().map(|p| p.starts_with("ap")).unwrap_or(false))
+        .filter(|s| {
+            s.protocol
+                .as_deref()
+                .map(|p| p.starts_with("ap"))
+                .unwrap_or(false)
+        })
         .filter_map(|s| {
             let a = parse_time(s.started_at.as_deref()?)?;
             let b = parse_time(s.completed_at.as_deref()?)?;
@@ -1034,14 +1535,35 @@ mod tests {
             correct: (accuracy * 20.0).round() as u32,
             accuracy,
             check,
+            d_prime: None,
         }
     }
 
     /// `n` trials of one block of a course level, `correct_share` of them right.
-    fn add_block(db: &Db, course: &str, level: u32, check: bool, when: DateTime<Utc>, n: u32, correct_share: f64) {
-        let spec = SessionSpec { title: "t".into(), protocol: Some(course.into()), planned_minutes: None, notes: None, seed: None, blocks: vec![] };
+    fn add_block(
+        db: &Db,
+        course: &str,
+        level: u32,
+        check: bool,
+        when: DateTime<Utc>,
+        n: u32,
+        correct_share: f64,
+    ) {
+        let spec = SessionSpec {
+            title: "t".into(),
+            protocol: Some(course.into()),
+            planned_minutes: None,
+            notes: None,
+            seed: None,
+            blocks: vec![],
+        };
         let sid = db.start_new_session(&spec, "test").unwrap();
-        let tag = CourseRef { course: course.into(), level, verify: check }.tag();
+        let tag = CourseRef {
+            course: course.into(),
+            level,
+            verify: check,
+        }
+        .tag();
         for i in 0..n {
             let mut t = sample_trial(&sid, i, (i as f64) < correct_share * n as f64);
             t.tags = vec!["ap.id".into(), tag.clone()];
@@ -1061,24 +1583,45 @@ mod tests {
                 let spec = level_session(&c, n).unwrap();
                 let r = validate_session(&spec, &ctx);
                 assert!(r.ok, "{} level {n}: {:?}", c.id, r.errors);
-                assert!(r.warnings.is_empty(), "{} level {n}: {:?}", c.id, r.warnings);
+                assert!(
+                    r.warnings.is_empty(),
+                    "{} level {n}: {:?}",
+                    c.id,
+                    r.warnings
+                );
                 for b in &spec.blocks {
                     let cr = b.course.as_ref().expect("course blocks are tagged");
                     assert_eq!((cr.course.as_str(), cr.level), (c.id.as_str(), n));
                 }
                 // Every level has something its pass rule can count.
-                assert!(spec.blocks.iter().any(|b| b.course.as_ref().unwrap().verify), "{} level {n}", c.id);
+                assert!(
+                    spec.blocks
+                        .iter()
+                        .any(|b| b.course.as_ref().unwrap().verify),
+                    "{} level {n}",
+                    c.id
+                );
             }
         }
         let naming = find_course(AP_NAMING).unwrap();
         assert_eq!(naming.levels.len(), 10);
-        assert!(matches!(naming.levels[9].pass, PassRule::Verification { passes: 4, .. }));
+        assert!(matches!(
+            naming.levels[9].pass,
+            PassRule::Verification { passes: 4, .. }
+        ));
     }
 
     #[test]
     fn accuracy_rule_needs_consecutive_checks() {
-        let rule = PassRule::Accuracy { min: 0.9, blocks: 2 };
-        let runs = vec![run(at(1, 9, 0), 0.95, true), run(at(2, 9, 0), 0.5, false), run(at(2, 9, 10), 0.85, true)];
+        let rule = PassRule::Accuracy {
+            min: 0.9,
+            blocks: 2,
+        };
+        let runs = vec![
+            run(at(1, 9, 0), 0.95, true),
+            run(at(2, 9, 0), 0.5, false),
+            run(at(2, 9, 10), 0.85, true),
+        ];
         assert!(!evaluate(&rule, &runs).met);
         let mut more = runs.clone();
         more.push(run(at(3, 9, 0), 0.9, true));
@@ -1089,8 +1632,38 @@ mod tests {
     }
 
     #[test]
+    fn spacing_needs_fourteen_days_after_a_perfect_check() {
+        let rule = PassRule::Spacing {
+            min: 1.0,
+            days: 14.0,
+        };
+        let runs = vec![run(at(1, 9, 0), 1.0, true)];
+        let ctx = |day| RuleContext {
+            now: at(day, 9, 0),
+            level_started: Some(at(1, 9, 0)),
+        };
+        let early = evaluate_in(&rule, &runs, &ctx(14));
+        assert!(!early.met, "13 days is not enough: {early:?}");
+        assert!(
+            early.summary.contains("Next chord due"),
+            "{}",
+            early.summary
+        );
+        assert!(early.next_after.is_some());
+        assert!(evaluate_in(&rule, &runs, &ctx(15)).met);
+        let short = vec![run(at(1, 9, 0), 0.95, true)];
+        let later = evaluate_in(&rule, &short, &ctx(20));
+        assert!(!later.met, "{later:?}");
+        assert!(later.next_after.is_none());
+    }
+
+    #[test]
     fn the_last_verification_needs_the_overnight_gap() {
-        let rule = PassRule::Verification { min: 0.9, passes: 4, gap_hours: 12.0 };
+        let rule = PassRule::Verification {
+            min: 0.9,
+            passes: 4,
+            gap_hours: 12.0,
+        };
         let mut runs = vec![
             run(at(1, 9, 0), 0.95, true),
             run(at(1, 10, 0), 0.6, true),
@@ -1099,7 +1672,10 @@ mod tests {
         ];
         let s = evaluate(&rule, &runs);
         assert_eq!(s.passes, 3);
-        assert_eq!(s.next_after.as_deref(), Some(at(2, 0, 0).to_rfc3339().as_str()));
+        assert_eq!(
+            s.next_after.as_deref(),
+            Some(at(2, 0, 0).to_rfc3339().as_str())
+        );
         runs.push(run(at(1, 23, 59), 0.97, true));
         assert!(!evaluate(&rule, &runs).met, "11 h 59 min is not enough");
         runs.push(run(at(2, 0, 0), 0.91, true));
@@ -1114,7 +1690,11 @@ mod tests {
         add_block(&db, AP_NAMING, 1, false, at(1, 9, 0), 40, 0.5);
         add_block(&db, AP_NAMING, 1, true, at(1, 9, 30), 24, 0.95);
         refresh_progress(&db).unwrap();
-        assert_eq!(current_level(&db, &naming).unwrap(), 1, "one check is not enough");
+        assert_eq!(
+            current_level(&db, &naming).unwrap(),
+            1,
+            "one check is not enough"
+        );
         add_block(&db, AP_NAMING, 1, true, at(2, 9, 30), 24, 0.92);
         refresh_progress(&db).unwrap();
         assert_eq!(current_level(&db, &naming).unwrap(), 2);
@@ -1133,7 +1713,10 @@ mod tests {
         let courses: Vec<&str> = sunday.items.iter().map(|i| i.course.as_str()).collect();
         assert_eq!(&courses[..2], [AP_WEEKLY, AP_UCSF_STYLE]);
         assert!(courses.contains(&AP_NAMING) && courses.contains(&AP_BRADY));
-        assert!(!courses.contains(&AP_MAINTENANCE), "maintenance waits for naming to be complete");
+        assert!(
+            !courses.contains(&AP_MAINTENANCE),
+            "maintenance waits for naming to be complete"
+        );
         assert_eq!(sunday.spec.blocks[0].pre_mask, Some(Mask::ShepardGlissando));
         assert!(sunday.spec.blocks.iter().all(|b| b.course.is_some()));
         assert!(validate_session(&sunday.spec, &ctx).ok);
@@ -1152,7 +1735,11 @@ mod tests {
         let next = compose_daily_set(&db, &ctx, at(25, 18, 0)).unwrap();
         assert!(!next.items.iter().any(|i| i.course == AP_WEEKLY));
         let week_later = compose_daily_set(&db, &ctx, at(1, 12, 0) + Duration::days(31)).unwrap();
-        assert!(week_later.items.iter().any(|i| i.course == AP_WEEKLY), "{:?}", week_later.items);
+        assert!(
+            week_later.items.iter().any(|i| i.course == AP_WEEKLY),
+            "{:?}",
+            week_later.items
+        );
 
         // Nothing active, nothing due: no set.
         let mut plan = daily_plan(&db).unwrap();
@@ -1166,7 +1753,14 @@ mod tests {
     #[test]
     fn the_dashboard_pools_naming_per_note() {
         let db = Db::open_in_memory().unwrap();
-        let spec = SessionSpec { title: "t".into(), protocol: Some("ap_naming".into()), planned_minutes: None, notes: None, seed: None, blocks: vec![] };
+        let spec = SessionSpec {
+            title: "t".into(),
+            protocol: Some("ap_naming".into()),
+            planned_minutes: None,
+            notes: None,
+            seed: None,
+            blocks: vec![],
+        };
         let sid = db.start_new_session(&spec, "test").unwrap();
         let now = at(26, 12, 0);
         for i in 0..60u32 {
@@ -1185,7 +1779,10 @@ mod tests {
         let c = d.classes.iter().find(|c| c.pitch_class == "C").unwrap();
         let e = d.classes.iter().find(|c| c.pitch_class == "E").unwrap();
         assert!(c.mastered && c.naming_in_time == Some(1.0), "{c:?}");
-        assert!(!e.mastered && e.naming_accuracy == Some(1.0) && e.naming_in_time == Some(0.0), "{e:?}");
+        assert!(
+            !e.mastered && e.naming_accuracy == Some(1.0) && e.naming_in_time == Some(0.0),
+            "{e:?}"
+        );
         assert_eq!(d.classes_mastered, 1);
         assert_eq!(d.courses.len(), builtin_courses().len());
     }

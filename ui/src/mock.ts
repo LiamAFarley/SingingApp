@@ -164,6 +164,10 @@ function choiceTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -191,6 +195,10 @@ function singPitchTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -217,6 +225,10 @@ function pairingTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -294,6 +306,10 @@ function sightTrial(phaseOffset: number): TrialView {
     score: sightScore(),
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -348,7 +364,7 @@ function sightFeedback(): FeedbackView {
     tuner: null,
     auto_advance_ms: null,
     hidden: false,
-    dictation: null,
+    dictation: null, errorless: false, flash_color: null,
   };
 }
 
@@ -396,6 +412,10 @@ function dictationTrial(): TrialView {
     score: dictationScore([DICTATION_TARGET[0]]),
     plays: dictationPlays,
     max_plays: 4,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -427,6 +447,8 @@ function dictationFeedback(answer: ScoreNote[]): FeedbackView {
     auto_advance_ms: null,
     hidden: false,
     dictation: { target, answer: { ...target, notes: answer }, target_marks, answer_marks },
+    errorless: false,
+    flash_color: null,
   };
 }
 
@@ -459,6 +481,10 @@ function colorTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -486,6 +512,10 @@ function degreeTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -591,6 +621,10 @@ function sungTrial(): TrialView {
     score: null,
     plays: 0,
     max_plays: 0,
+    flash_color: null,
+    detect_total: null,
+    detect_index: null,
+    detect_mark: null,
   };
 }
 
@@ -649,7 +683,7 @@ function sungFeedback(): FeedbackView {
     tuner: null,
     auto_advance_ms: null,
     hidden: false,
-    dictation: null,
+    dictation: null, errorless: false, flash_color: null,
   };
 }
 
@@ -705,7 +739,7 @@ function startScenario() {
     emit({ phase: "feedback", feedback: {
       correct: false, summary: "Sang G3 (80 cents flat), did not settle", correct_choice: null, answered: null, cents: -80,
       notes: [], trace: [], can_retry: false, can_sing_along: false, can_listen: true, can_show_answer: false,
-      can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null,
+      can_play_answer: false, can_hear_choices: false, auto_advance_ms: null, hidden: false, dictation: null, errorless: false, flash_color: null,
       tuner: { pitch_class: 8, midi: null, name: "A♭", reference_midi: 56 },
     } });
   } else if (scenario === "sing-pitch") {
@@ -751,7 +785,7 @@ function startScenario() {
           tuner: null,
           auto_advance_ms: null,
           hidden: false,
-          dictation: null,
+          dictation: null, errorless: false, flash_color: null,
         },
       });
     }
@@ -808,7 +842,7 @@ function runnerCommand(c: RunnerCommand) {
           can_play_answer: false,
           can_hear_choices: true,
           tuner: null,
-          dictation: null,
+          dictation: null, errorless: false, flash_color: null,
           auto_advance_ms: correct ? 900 : null,
           hidden: false,
         },
@@ -1007,6 +1041,24 @@ export function mockBackend(): Backend {
     setCourseLevel: async (course, level) => {
       courseLevels[course] = level;
     },
+    apPrefs: async () => ({ errorless_early: true, contrast_labels: "gervain_names" }),
+    saveApPrefs: async (prefs) => prefs,
+    listLabelSets: async () => [
+      {
+        id: "my_colors",
+        title: "My colours",
+        description: "Your own colour or word for each note.",
+        kind: "pitch_class",
+        entries: {},
+      },
+    ],
+    saveLabelSet: async (set) => set,
+    speechStatus: async () => ({
+      dir: "%APPDATA%\\SingingTrainer\\speech",
+      missing: ["digits/0.wav", "notes/C.wav"],
+      present: 0,
+      disabled: ["Spoken digit span", "Spoken note names"],
+    }),
     subscribeLive: async (onBatch) => {
       let t0 = clock();
       setInterval(() => {
@@ -1147,6 +1199,7 @@ function mockDashboard(): ApDashboard {
       mastered: naming[i] >= 0.9 && trials[i] >= 20,
       singing_trials: i % 3 === 0 ? 12 : 4,
       singing_accuracy: i % 3 === 0 ? 0.75 : 0.5,
+      detection_d_prime: i === 0 ? 1.8 : null,
       last_seen: daysAgo(1),
     })),
     classes_mastered: naming.filter((n, i) => n >= 0.9 && trials[i] >= 20).length,

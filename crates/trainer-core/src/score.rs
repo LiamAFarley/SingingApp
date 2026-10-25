@@ -183,7 +183,8 @@ pub struct KeySig {
 
 impl KeySig {
     pub fn new(tonic: &str, mode: KeyMode) -> Result<Self, String> {
-        let (step, alter, rest) = parse_step(tonic.trim()).ok_or_else(|| format!("invalid key tonic `{tonic}`"))?;
+        let (step, alter, rest) =
+            parse_step(tonic.trim()).ok_or_else(|| format!("invalid key tonic `{tonic}`"))?;
         if !rest.trim().is_empty() {
             return Err(format!("invalid key tonic `{tonic}`"));
         }
@@ -306,7 +307,11 @@ impl KeySig {
                 let cost = if alter == sig {
                     0
                 } else {
-                    let direction_penalty = if (alter > 0) == (self.fifths >= 0) { 0 } else { 1 };
+                    let direction_penalty = if (alter > 0) == (self.fifths >= 0) {
+                        0
+                    } else {
+                        1
+                    };
                     10 * (alter as i32).abs() + direction_penalty + 1
                 };
                 let octave = ((midi - base - alter as i32) / 12 - 1) as i8;
@@ -319,7 +324,8 @@ impl KeySig {
                 }
             }
         }
-        best.map(|(_, p)| p).unwrap_or_else(|| Pitch::from_diatonic(0, 0))
+        best.map(|(_, p)| p)
+            .unwrap_or_else(|| Pitch::from_diatonic(0, 0))
     }
 
     fn spell_degree_altered(&self, midi: i32, degree: i32, raise: i8) -> Pitch {
@@ -416,10 +422,18 @@ impl FromStr for TimeSig {
             .trim()
             .split_once('/')
             .ok_or_else(|| format!("invalid time signature `{s}`"))?;
-        let beats: u32 = a.trim().parse().map_err(|_| format!("invalid time signature `{s}`"))?;
-        let unit: u32 = b.trim().parse().map_err(|_| format!("invalid time signature `{s}`"))?;
+        let beats: u32 = a
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid time signature `{s}`"))?;
+        let unit: u32 = b
+            .trim()
+            .parse()
+            .map_err(|_| format!("invalid time signature `{s}`"))?;
         if !(1..=12).contains(&beats) || ![2, 4, 8].contains(&unit) {
-            return Err(format!("unsupported time signature `{s}` (use 1–12 beats of 2, 4 or 8)"));
+            return Err(format!(
+                "unsupported time signature `{s}` (use 1–12 beats of 2, 4 or 8)"
+            ));
         }
         Ok(TimeSig { beats, unit })
     }
@@ -645,7 +659,12 @@ impl Score {
 }
 
 /// Sound events for notes on the tick grid (to play back a written melody).
-pub fn note_events(notes: &[ScoreNote], time: TimeSig, tempo_bpm: f32, timbre: &str) -> Vec<SoundEvent> {
+pub fn note_events(
+    notes: &[ScoreNote],
+    time: TimeSig,
+    tempo_bpm: f32,
+    timbre: &str,
+) -> Vec<SoundEvent> {
     let beat_ms = 60_000.0 / tempo_bpm.max(20.0) as f64;
     let tick_ms = beat_ms / time.beat_ticks() as f64;
     notes
@@ -699,7 +718,14 @@ mod tests {
 
     #[test]
     fn pitches_parse_and_print() {
-        for (s, midi) in [("Eb4", 63), ("F#3", 54), ("Cb4", 59), ("B#3", 60), ("C-1", 0), ("Bbb2", 45)] {
+        for (s, midi) in [
+            ("Eb4", 63),
+            ("F#3", 54),
+            ("Cb4", 59),
+            ("B#3", 60),
+            ("C-1", 0),
+            ("Bbb2", 45),
+        ] {
             let p: Pitch = s.parse().unwrap();
             assert_eq!(p.midi(), midi, "{s}");
             assert_eq!(p.name(), s);

@@ -157,7 +157,7 @@ Identification and detection trials record `in_time`. Mastery counts correct, in
 
 ### 3.7 Speech samples folder
 
-- **Location and format.** `%APPDATA%\SingingTrainer\speech\`, with files named by what they say:
+- **Location and format.** The app's `data\speech\` folder, with files named by what they say:
 
   ```
   speech/digits/0.wav … 9.wav
@@ -410,7 +410,17 @@ Built 24 October 2026 as planned, with these details:
 - `verification_4x` due times show correctly;
 - no two consecutive tones in a verification block are within 12 semitones.
 
-### AP-2: colours, labels, detection (M)
+### AP-2: colours, labels, detection (M) — built
+
+Built 24 October 2026 as planned, with these details:
+
+- Label sets live in the database over the built-in ones (`note_names`, `taneda_colors`, `gervain_names`, `my_colors`, `eguchi_chords`). Settings and `set_label_set` edit them. Buttons show the word and colour; `hide_note_names` drops the letter; `color_flash` tints the screen after the answer, or while a pairing label is up.
+- `feedback: errorless` stores the real result and shows no error mark. The right answer lights up and is played, and `requeue_misses` asks that class again later, in another octave when the block has one. A setting, "Errorless early levels", turns the course defaults off. Blocks tagged `ap.errorless_default` are the ones it affects.
+- Speech files live in the app's `data\speech` folder. WAV, FLAC and MP3 are trimmed, normalised and resampled on load. Missing files are listed in Settings and only the speaking features stay off. `tools/speech_file_list.py` writes the list to generate.
+- `pitch_detect` is one stream per trial: choir prompt, then 16 tones, Space to catch the target. The summary is d′ (log-linear) and median hit time. Targets more than an octave from the prompt are counted apart.
+- `chord_color_id` uses the 14 fixed Eguchi voicings. `single_note_after` stores the following note as `pitch_id` with `context: chord_extraction`.
+- Courses `ap_speed`, `ap_note_colors`, `ap_chord_colors` and `ap_contrast` are in the daily plan, switched off until turned on. Chord levels pass on 100% and 14 days, shown as "Next chord due …". Contrast uses Gervain names unless Settings points it at another set.
+- The old naming course is unchanged. Past progressive results still count on the note tiles only.
 
 - Label and colour sets with `color_flash` (§3.3).
 - Errorless mode and requeue (§3.4).

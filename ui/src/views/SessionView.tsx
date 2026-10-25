@@ -24,11 +24,13 @@ const FEEDBACK_TEXT: Record<string, string> = {
   after_block: "Results at the end of the block",
   end_of_session: "Results at the end of the session",
   none: "No feedback (assessment)",
+  errorless: "The right answer lights up. A miss is not marked.",
 };
 
 export function SessionView({ runner, onClose }: { runner: RunnerState; onClose: () => void }) {
   const phase = runner.phase;
   const trial = runner.trial;
+  useAnimationFrame(trial?.interaction === "pairing" || trial?.interaction === "detect");
   const [confirmEnd, setConfirmEnd] = useState(false);
 
   useEffect(() => {
@@ -59,6 +61,11 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
       }
       if (e.repeat) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if ((k === " " || k === "enter") && trial?.interaction === "detect" && (phase === "listening" || phase === "answering")) {
+        e.preventDefault();
+        command({ kind: "tap" });
+        return;
+      }
       if (k === " " || k === "enter") {
         e.preventDefault();
         if (phase === "block_intro") command({ kind: "begin" });
@@ -97,8 +104,14 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
         ? (runner.trial_index + (phase === "feedback" ? 1 : 0)) / runner.trial_count
         : 0;
 
+  const flash =
+    (phase === "feedback" && runner.feedback?.flash_color) ||
+    (trial?.interaction === "pairing" && trial.flash_color && trial.label_at_s != null && live.now() >= trial.label_at_s
+      ? trial.flash_color
+      : null) ||
+    (trial?.interaction === "detect" ? trial.flash_color : null);
   return (
-    <div className="session">
+    <div className="session" style={flash ? { background: `color-mix(in srgb, ${flash} 16%, var(--bg))` } : undefined}>
       <div className="session-head">
         <div>
           <h1>{runner.title}</h1>
@@ -243,6 +256,8 @@ function KindHelp({ kind }: { kind: string | null }) {
     scale_degree_id: "A cadence sets the key, then one note plays. Name its scale degree (number keys 1–7). Afterwards the note walks to the tonic so you hear where it wants to go.",
     interval_comparison: "Two intervals play. Is the first or the second larger, or are they the same? Number keys pick answers.",
     harmony: "The key and your first note are played, then a bar is counted in. Sing your part in time while the other voice plays.",
+    pitch_detect: "The target note is named and sung. Then a stream of tones. Press Space whenever you hear that note, in any octave.",
+    chord_color_id: "A chord plays. Name its colour. Number keys pick colours. Inversions of the same chord have different colours.",
   };
   return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
 }
@@ -252,7 +267,7 @@ function keyStates(runner: RunnerState, picked: string | null): Record<string, K
   const states: Record<string, KeyState> = {};
   if (runner.phase === "feedback" && fb && !fb.hidden) {
     if (fb.correct_choice) states[fb.correct_choice] = "correct";
-    if (fb.answered && fb.answered !== fb.correct_choice) states[fb.answered] = "wrong";
+    if (fb.answered && fb.answered !== fb.correct_choice && !fb.errorless) states[fb.answered] = "wrong";
   } else if (picked) {
     states[picked] = "picked";
   }
@@ -271,6 +286,8 @@ function TrialStage({ runner, trial }: { runner: RunnerState; trial: TrialView }
       return <SungStage runner={runner} trial={trial} />;
     case "dictation":
       return <DictationStage runner={runner} trial={trial} />;
+    case "detect":
+      return <DetectStage runner={runner} trial={trial} />;
   }
 }
 
@@ -455,6 +472,39 @@ function PairingStage({ trial }: { trial: TrialView }) {
 }
 
 /** Incidental pairing: the colour appears shortly after the tone; press it. */
+function DetectStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const phase = runner.phase;
+  const listening = phase === "listening" || phase === "answering";
+  const fb = runner.feedback;
+  const mark =
+    trial.detect_mark === "hit" ? "Yes" : trial.detect_mark === "false" ? "Not the target" : trial.detect_mark === "miss" ? "Missed" : "";
+  return (
+    <div className="section" style={{ alignItems: "center", gap: 18, margin: "auto 0" }}>
+      <div className="prompt-sub">Listen for</div>
+      <div className="big-label" style={trial.flash_color ? { color: trial.flash_color } : undefined}>
+        {trial.label ?? trial.prompt}
+      </div>
+      {trial.detect_total != null && (
+        <div className="prompt-sub num">
+          {trial.detect_index && trial.detect_index > 0 ? `Tone ${trial.detect_index} of ${trial.detect_total}` : "Get ready"}
+        </div>
+      )}
+      {listening && (
+        <button className="btn primary" style={{ fontSize: 20, padding: "16px 32px" }} onClick={() => command({ kind: "tap" })}>
+          Target <span className="kbd">Space</span>
+        </button>
+      )}
+      {mark && <div className="prompt-sub">{mark}</div>}
+      {phase === "feedback" && (
+        <>
+          <Result runner={runner} />
+          <NextButton auto={fb?.auto_advance_ms ?? null} />
+        </>
+      )}
+    </div>
+  );
+}
+
 function ColorTask({ trial, enabled, states, onPick }: { trial: TrialView; enabled: boolean; states: Record<string, KeyState>; onPick: (id: string) => void }) {
   useAnimationFrame(trial.label_at_s != null);
   const shown = trial.label != null && trial.label_at_s != null && live.now() >= trial.label_at_s ? trial.label : null;
@@ -462,8 +512,8 @@ function ColorTask({ trial, enabled, states, onPick }: { trial: TrialView; enabl
     if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
-      const n = parseInt(e.key, 10);
-      if (!Number.isNaN(n) && n >= 1 && n <= trial.choices.length) {
+      const n = e.key === "0" ? 10 : parseInt(e.key, 10);
+      if (!Number.isNaN(n) && n >= 1 && n <= trial.choices.length && n <= 10) {
         e.preventDefault();
         onPick(trial.choices[n - 1].id);
       }
@@ -473,13 +523,16 @@ function ColorTask({ trial, enabled, states, onPick }: { trial: TrialView; enabl
   });
   return (
     <div className="section" style={{ alignItems: "center", gap: 18 }}>
-      <div className="swatch" style={{ background: shown ? PAIRING_COLORS[shown] : "var(--surface-muted)" }} />
-      <div className="row" style={{ gap: 10 }}>
+      {trial.label_at_s != null && <div className="swatch" style={{ background: shown ? PAIRING_COLORS[shown] ?? shown : "var(--surface-muted)" }} />}
+      <div className="row wrap" style={{ gap: 10, justifyContent: "center" }}>
         {trial.choices.map((c, i) => (
           <button key={c.id} className={`color-key ${states[c.id] ?? ""}`} disabled={!enabled} onClick={() => onPick(c.id)}>
-            <span className="dot" style={{ background: PAIRING_COLORS[c.id] }} />
-            {c.label}
-            <span className="kbd">{i + 1}</span>
+            <span className="dot" style={{ background: c.color ?? PAIRING_COLORS[c.id] ?? "#ccc" }} />
+            <span>
+              {c.label}
+              {c.word && c.word !== c.label ? <span className="hint"> {c.word}</span> : null}
+            </span>
+            {i < 10 && <span className="kbd">{i === 9 ? 0 : i + 1}</span>}
           </button>
         ))}
       </div>
@@ -790,6 +843,12 @@ function BlockSummary({ report }: { report: BlockReport | null }) {
           Practice: your part played along, so these {report.assisted} attempts are not scored. Sing it on your own to
           see your accuracy.
         </p>
+      ) : report && report.kind === "pitch_detect" ? (
+        <div className="grid cols-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+          <Stat label="Mean d′" value={report.mean_score == null ? "–" : report.mean_score.toFixed(2)} />
+          <Stat label="Streams" value={String(report.trials)} />
+          <Stat label="Median hit" value={fmtMs(report.median_rt_ms)} />
+        </div>
       ) : report ? (
         <>
           <div className="grid cols-3" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>

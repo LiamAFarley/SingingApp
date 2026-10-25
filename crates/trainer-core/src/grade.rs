@@ -9,8 +9,8 @@ use crate::metrics::{
 };
 use crate::pitch::PitchTrack;
 use crate::schema::{
-    DictationTrial, ExerciseKind, GradingOverrides, IdentifyTrial, PitchRefMode, SingPitchTrial,
-    SungTrial, Tuning,
+    DetectTrial, DictationTrial, ExerciseKind, FeedbackMode, GradingOverrides, IdentifyTrial,
+    PitchRefMode, SingPitchTrial, SungTrial, Tuning,
 };
 use crate::score::{Pitch, ScoreNote};
 use crate::theory::{Note, PitchClass};
@@ -123,7 +123,12 @@ pub fn grade_choice(
     }
     // Error in pitch classes, folded to −6..5: UCSF-style points (1 exact, 0.75 a semitone off)
     // and the absolute error that mean absolute deviation is built from.
-    let class_error = match (trial.exercise, metrics.get("signed_error").and_then(serde_json::Value::as_i64)) {
+    let class_error = match (
+        trial.exercise,
+        metrics
+            .get("signed_error")
+            .and_then(serde_json::Value::as_i64),
+    ) {
         (ExerciseKind::PitchId, Some(e)) => Some(((e + 6).rem_euclid(12)) - 6),
         _ => None,
     };
@@ -151,6 +156,171 @@ pub fn grade_choice(
         response: json!({ "answer": answer }),
         metrics,
         summary,
+    }
+}
+
+/// What the feedback screen shows. Errorless mode keeps the stored result and hides the error.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ShownFeedback {
+    pub correct: Option<bool>,
+    pub summary: String,
+    pub answered: Option<String>,
+    pub errorless: bool,
+}
+
+pub fn present_feedback(
+    mode: FeedbackMode,
+    stored_correct: Option<bool>,
+    summary: &str,
+    answered: Option<&str>,
+    correct_label: &str,
+) -> ShownFeedback {
+    let errorless = mode.is_errorless();
+    if !mode.shows_trial_result() {
+        return ShownFeedback {
+            correct: None,
+            summary: String::new(),
+            answered: None,
+            errorless: false,
+        };
+    }
+    if errorless && stored_correct == Some(false) {
+        return ShownFeedback {
+            correct: None,
+            summary: format!("It was {correct_label}."),
+            answered: None,
+            errorless: true,
+        };
+    }
+    ShownFeedback {
+        correct: stored_correct,
+        summary: summary.to_string(),
+        answered: answered.map(str::to_string),
+        errorless,
+    }
+}
+
+/// Log-linear correction (Hautus 1995): add ½ to each count and 1 to each total, so d′ stays
+/// finite when every target is caught or there are no false alarms.
+pub fn d_prime(hits: u32, misses: u32, false_alarms: u32, correct_rejections: u32) -> f64 {
+    let n_signal = hits + misses;
+    let n_noise = false_alarms + correct_rejections;
+    if n_signal == 0 || n_noise == 0 {
+        return 0.0;
+    }
+    let hit_rate = (hits as f64 + 0.5) / (n_signal as f64 + 1.0);
+    let fa_rate = (false_alarms as f64 + 0.5) / (n_noise as f64 + 1.0);
+    inv_norm(hit_rate) - inv_norm(fa_rate)
+}
+
+/// Inverse of the standard normal CDF (Acklam's approximation).
+fn inv_norm(p: f64) -> f64 {
+    let p = p.clamp(1e-12, 1.0 - 1e-12);
+    const A: [f64; 6] = [
+        -3.969683028665376e+01,
+        2.209460984245205e+02,
+        -2.759285104469687e+02,
+        1.383577518672690e+02,
+        -3.066479806614716e+01,
+        2.506628277459239e+00,
+    ];
+    const B: [f64; 5] = [
+        -5.447609879822406e+01,
+        1.615858368580409e+02,
+        -1.556989798598866e+02,
+        6.680131188771972e+01,
+        -1.328068155288572e+01,
+    ];
+    const C: [f64; 6] = [
+        -7.784894002430293e-03,
+        -3.223964580411365e-01,
+        -2.400758277161838e+00,
+        -2.549732539343734e+00,
+        4.374664141464968e+00,
+        2.938163982698783e+00,
+    ];
+    const D: [f64; 4] = [
+        7.784695709041462e-03,
+        3.224671290700398e-01,
+        2.445134137142996e+00,
+        3.754408661907416e+00,
+    ];
+    let plow = 0.02425;
+    if p < plow {
+        let q = (-2.0 * p.ln()).sqrt();
+        (((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else if p > 1.0 - plow {
+        let q = (-2.0 * (1.0 - p).ln()).sqrt();
+        -(((((C[0] * q + C[1]) * q + C[2]) * q + C[3]) * q + C[4]) * q + C[5])
+            / ((((D[0] * q + D[1]) * q + D[2]) * q + D[3]) * q + 1.0)
+    } else {
+        let q = p - 0.5;
+        let r = q * q;
+        (((((A[0] * r + A[1]) * r + A[2]) * r + A[3]) * r + A[4]) * r + A[5]) * q
+            / (((((B[0] * r + B[1]) * r + B[2]) * r + B[3]) * r + B[4]) * r + 1.0)
+    }
+}
+
+/// Score one detection stream. `presses_ms` is the response time from each tone's onset, or none.
+pub fn grade_detect(trial: &DetectTrial, presses_ms: &[Option<f64>]) -> TrialOutcome {
+    let mut hits = 0u32;
+    let mut misses = 0u32;
+    let mut false_alarms = 0u32;
+    let mut correct_rejections = 0u32;
+    let mut far_targets = 0u32;
+    let mut far_hits = 0u32;
+    let mut hit_latencies = Vec::new();
+    for (tone, press) in trial.tones.iter().zip(presses_ms.iter()) {
+        let pressed = press.is_some();
+        if tone.far && tone.target {
+            far_targets += 1;
+        }
+        match (tone.target, pressed) {
+            (true, true) => {
+                hits += 1;
+                if let Some(ms) = press {
+                    hit_latencies.push(*ms);
+                }
+                if tone.far {
+                    far_hits += 1;
+                }
+            }
+            (true, false) => misses += 1,
+            (false, true) => false_alarms += 1,
+            (false, false) => correct_rejections += 1,
+        }
+    }
+    let d = d_prime(hits, misses, false_alarms, correct_rejections);
+    hit_latencies.sort_by(|a, b| a.total_cmp(b));
+    let median = (!hit_latencies.is_empty()).then(|| hit_latencies[hit_latencies.len() / 2]);
+    let far_note = if far_targets > 0 {
+        format!(" {far_hits} of {far_targets} targets were more than an octave from the prompt.")
+    } else {
+        String::new()
+    };
+    let latency = median
+        .map(|m| format!("{m:.0} ms"))
+        .unwrap_or_else(|| "—".into());
+    TrialOutcome {
+        // A stream is not a single right or wrong answer. d′ is the score.
+        correct: None,
+        score: Some(d as f32),
+        rt_ms: median,
+        response: json!({ "presses_ms": presses_ms }),
+        metrics: json!({
+            "hits": hits,
+            "misses": misses,
+            "false_alarms": false_alarms,
+            "correct_rejections": correct_rejections,
+            "d_prime": d,
+            "median_hit_ms": median,
+            "far_targets": far_targets,
+            "far_hits": far_hits,
+        }),
+        summary: format!(
+            "d′ {d:.2}. {hits} hits, {misses} misses, {false_alarms} false alarms. Median hit {latency}.{far_note}"
+        ),
     }
 }
 
@@ -378,7 +548,9 @@ fn register_offset(expected: &[Expected], segs: &[NoteSegment]) -> f32 {
     let diffs: Vec<f32> = expected
         .iter()
         .filter_map(|e| {
-            let overlap = |s: &NoteSegment| (s.offset_s.min(e.onset + e.dur) - s.onset_s.max(e.onset)).max(0.0);
+            let overlap = |s: &NoteSegment| {
+                (s.offset_s.min(e.onset + e.dur) - s.onset_s.max(e.onset)).max(0.0)
+            };
             segs.iter()
                 .filter(|s| overlap(s) > 0.0)
                 .max_by(|a, b| overlap(a).total_cmp(&overlap(b)))
@@ -433,7 +605,10 @@ pub fn grade_sung(
     };
     let expected: Vec<Expected> = expected
         .into_iter()
-        .map(|e| Expected { midi: e.midi + octave_shift, ..e })
+        .map(|e| Expected {
+            midi: e.midi + octave_shift,
+            ..e
+        })
         .collect();
 
     let single = expected.len() == 1;
@@ -701,7 +876,13 @@ pub fn grade_dictation(trial: &DictationTrial, answer: &[ScoreNote], plays: u32)
     let sim = |i: usize, j: usize| -> f32 {
         let (tp, ts, td) = target[i];
         let (wp, ws, wd) = written[j];
-        let pitch = if tp.midi() == wp.midi() { 2.0 } else if tp.step == wp.step { 0.5 } else { 0.0 };
+        let pitch = if tp.midi() == wp.midi() {
+            2.0
+        } else if tp.step == wp.step {
+            0.5
+        } else {
+            0.0
+        };
         let onset = if ts == ws { 1.0 } else { 0.0 };
         let len = if td == wd { 0.5 } else { 0.0 };
         pitch + onset + len - 1.2
@@ -778,7 +959,10 @@ pub fn grade_dictation(trial: &DictationTrial, answer: &[ScoreNote], plays: u32)
     if !all {
         let mut parts = Vec::new();
         if trial.grade_rhythm && pitch_right > right {
-            parts.push(format!("{} with the right pitch but a different rhythm", pitch_right - right));
+            parts.push(format!(
+                "{} with the right pitch but a different rhythm",
+                pitch_right - right
+            ));
         }
         if extra > 0 {
             parts.push(format!("{extra} extra"));
@@ -792,9 +976,7 @@ pub fn grade_dictation(trial: &DictationTrial, answer: &[ScoreNote], plays: u32)
         summary.push('.');
     }
     if respelled > 0 {
-        summary.push_str(&format!(
-            " {respelled} spelled differently from the score."
-        ));
+        summary.push_str(&format!(" {respelled} spelled differently from the score."));
     }
     TrialOutcome {
         correct: Some(all),
@@ -819,7 +1001,9 @@ mod tests {
     use super::*;
     use crate::pitch::synth::*;
     use crate::pitch::{TrackOptions, track};
-    use crate::schema::{Backing, Choice, LaneTargets, Mask, TargetNote};
+    use crate::schema::{
+        Backing, Choice, DetectMarks, DetectTone, DetectTrial, LaneTargets, Mask, TargetNote,
+    };
 
     const SR: f32 = 48_000.0;
 
@@ -836,15 +1020,13 @@ mod tests {
             mask_before: Mask::None,
             choices: PitchClass::ALL
                 .iter()
-                .map(|p| Choice {
-                    id: p.name().into(),
-                    label: p.display_name().into(),
-                })
+                .map(|p| Choice::new(p.name(), p.display_name()))
                 .collect(),
             correct: correct.into(),
             deadline_ms: None,
             reference: None,
             stimulus: json!({}),
+            ..IdentifyTrial::skeleton()
         }
     }
 
@@ -852,7 +1034,10 @@ mod tests {
     fn naming_scores_ucsf_points_on_the_pitch_class_circle() {
         let points = |correct: &str, answer: Option<&str>| {
             let o = grade_choice(&id_trial(correct), answer, Some(900.0));
-            (o.metrics.get("class_error").and_then(|v| v.as_i64()), o.metrics.get("ucsf_points").and_then(|v| v.as_f64()))
+            (
+                o.metrics.get("class_error").and_then(|v| v.as_i64()),
+                o.metrics.get("ucsf_points").and_then(|v| v.as_f64()),
+            )
         };
         assert_eq!(points("C", Some("C")), (Some(0), Some(1.0)));
         assert_eq!(points("C", Some("C#")), (Some(1), Some(0.75)));
@@ -1039,20 +1224,46 @@ mod tests {
     #[test]
     fn any_octave_forgives_a_melody_sung_an_octave_down() {
         // C5 D5 E5 sung as C4 D4 E4, the middle note 30 cents sharp.
-        let trial = sung_trial(&[(72, 0.0, 1.0), (74, 1.0, 1.0), (76, 2.0, 1.0)], 120.0, ExerciseKind::SightSing);
-        let sung = |t: f32| if t < 0.5 { 60.0 } else if t < 1.0 { 62.3 } else { 64.0 };
+        let trial = sung_trial(
+            &[(72, 0.0, 1.0), (74, 1.0, 1.0), (76, 2.0, 1.0)],
+            120.0,
+            ExerciseKind::SightSing,
+        );
+        let sung = |t: f32| {
+            if t < 0.5 {
+                60.0
+            } else if t < 1.0 {
+                62.3
+            } else {
+                64.0
+            }
+        };
         let mut sig = silence(SR, 1.0);
         sig.extend(harmonic_tone(SR, 1.5, 440.0, sung));
         sig.extend(silence(SR, 0.5));
         let tr = track(&sig, &TrackOptions::new(SR));
-        let grade = |mode| grade_sung(&trial, &tr, &GradingConfig::resolve(&GradingOverrides::default(), mode), 1.0);
+        let grade = |mode| {
+            grade_sung(
+                &trial,
+                &tr,
+                &GradingConfig::resolve(&GradingOverrides::default(), mode),
+                1.0,
+            )
+        };
 
         let o = grade(PitchRefMode::AnyOctave);
         assert_eq!(o.correct, Some(true), "{:?}", o.metrics);
         assert_eq!(o.metrics["octave_offset"], json!(-1));
-        assert!(o.summary.ends_with("(sung an octave lower)"), "{}", o.summary);
+        assert!(
+            o.summary.ends_with("(sung an octave lower)"),
+            "{}",
+            o.summary
+        );
         let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
-        assert_eq!(notes.iter().map(|n| n.target_midi).collect::<Vec<_>>(), [72, 74, 76]);
+        assert_eq!(
+            notes.iter().map(|n| n.target_midi).collect::<Vec<_>>(),
+            [72, 74, 76]
+        );
         let c = notes[1].cents_error.unwrap();
         assert!((c - 30.0).abs() < 3.0, "{c}");
 
@@ -1063,7 +1274,11 @@ mod tests {
     #[test]
     fn just_tuning_moves_the_targets_by_the_trial_offsets() {
         // E4 and G4 over a C: the pure third is 13.7 cents flat, the fifth 2 cents sharp.
-        let mut trial = sung_trial(&[(64, 0.0, 2.0), (67, 2.0, 2.0)], 120.0, ExerciseKind::Harmony);
+        let mut trial = sung_trial(
+            &[(64, 0.0, 2.0), (67, 2.0, 2.0)],
+            120.0,
+            ExerciseKind::Harmony,
+        );
         trial.just_cents = vec![-13.7, 2.0];
         let sung = |t: f32| if t < 1.0 { 63.863 } else { 67.02 };
         let mut sig = silence(SR, 1.0);
@@ -1071,14 +1286,29 @@ mod tests {
         sig.extend(silence(SR, 0.5));
         let tr = track(&sig, &TrackOptions::new(SR));
         let errors = |tuning: Tuning| -> Vec<f64> {
-            let overrides = GradingOverrides { tuning: Some(tuning), ..GradingOverrides::default() };
-            let o = grade_sung(&trial, &tr, &GradingConfig::resolve(&overrides, PitchRefMode::Absolute), 1.0);
-            let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+            let overrides = GradingOverrides {
+                tuning: Some(tuning),
+                ..GradingOverrides::default()
+            };
+            let o = grade_sung(
+                &trial,
+                &tr,
+                &GradingConfig::resolve(&overrides, PitchRefMode::Absolute),
+                1.0,
+            );
+            let notes: Vec<NoteResult> =
+                serde_json::from_value(o.metrics["notes"].clone()).unwrap();
             assert_eq!(notes[0].target_midi, 64);
-            notes.iter().map(|n| n.cents_error.unwrap() as f64).collect()
+            notes
+                .iter()
+                .map(|n| n.cents_error.unwrap() as f64)
+                .collect()
         };
         let equal = errors(Tuning::Equal);
-        assert!((equal[0] + 13.7).abs() < 2.0 && (equal[1] - 2.0).abs() < 2.0, "{equal:?}");
+        assert!(
+            (equal[0] + 13.7).abs() < 2.0 && (equal[1] - 2.0).abs() < 2.0,
+            "{equal:?}"
+        );
         let just = errors(Tuning::Just);
         assert!(just.iter().all(|e| e.abs() < 2.0), "{just:?}");
     }
@@ -1092,7 +1322,11 @@ mod tests {
         let mut score = crate::score::Score::from_compact(&m, 80.0).unwrap();
         score.notes = notes
             .iter()
-            .map(|(p, s, d)| ScoreNote { pitch: Some(p.parse().unwrap()), start: *s, dur: *d })
+            .map(|(p, s, d)| ScoreNote {
+                pitch: Some(p.parse().unwrap()),
+                start: *s,
+                dur: *d,
+            })
             .collect();
         score.bars = 2;
         DictationTrial {
@@ -1109,7 +1343,11 @@ mod tests {
     fn written(notes: &[(&str, u32, u32)]) -> Vec<ScoreNote> {
         notes
             .iter()
-            .map(|(p, s, d)| ScoreNote { pitch: Some(p.parse().unwrap()), start: *s, dur: *d })
+            .map(|(p, s, d)| ScoreNote {
+                pitch: Some(p.parse().unwrap()),
+                start: *s,
+                dur: *d,
+            })
             .collect()
     }
 
@@ -1133,10 +1371,17 @@ mod tests {
         let notes: Vec<DictationNote> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
         assert!(notes.iter().all(|n| n.pitch_ok));
         assert_eq!(notes.iter().filter(|n| n.correct).count(), 1);
-        assert!(o.summary.contains("right pitch but a different rhythm"), "{}", o.summary);
+        assert!(
+            o.summary.contains("right pitch but a different rhythm"),
+            "{}",
+            o.summary
+        );
         // Without rhythm grading the same answer is right.
         let t2 = dictation(&melody, false);
-        assert_eq!(grade_dictation(&t2, &written(&answer), 1).correct, Some(true));
+        assert_eq!(
+            grade_dictation(&t2, &written(&answer), 1).correct,
+            Some(true)
+        );
     }
 
     #[test]
@@ -1148,10 +1393,91 @@ mod tests {
         assert!(notes[1].correct && notes[1].respelled);
         assert!(!notes[2].correct);
         assert_eq!(o.metrics["extra_notes"], 1);
-        assert_eq!(o.metrics["answer_marks"], json!(["correct", "correct", "wrong", "extra"]));
+        assert_eq!(
+            o.metrics["answer_marks"],
+            json!(["correct", "correct", "wrong", "extra"])
+        );
         assert!(o.summary.contains("spelled differently"), "{}", o.summary);
         let empty = grade_dictation(&dictation(&melody, true), &[], 1);
         assert_eq!(empty.score, Some(0.0));
         assert!(empty.summary.contains("nothing written"));
+    }
+
+    #[test]
+    fn errorless_hides_the_error_and_keeps_the_true_result() {
+        let outcome = grade_choice(&id_trial("E"), Some("C"), Some(800.0));
+        assert_eq!(outcome.correct, Some(false));
+        let shown = present_feedback(
+            FeedbackMode::Errorless,
+            outcome.correct,
+            &outcome.summary,
+            Some("C"),
+            "E",
+        );
+        assert_ne!(shown.correct, Some(false));
+        assert!(shown.answered.is_none());
+        assert!(shown.errorless);
+        assert!(
+            !shown.summary.to_ascii_lowercase().contains("wrong"),
+            "{}",
+            shown.summary
+        );
+        assert!(shown.summary.contains('E'));
+        let honest = present_feedback(
+            FeedbackMode::AfterTrial,
+            outcome.correct,
+            &outcome.summary,
+            Some("C"),
+            "E",
+        );
+        assert_eq!(honest.correct, Some(false));
+        assert_eq!(honest.answered.as_deref(), Some("C"));
+    }
+
+    #[test]
+    fn detection_d_prime_matches_the_log_linear_correction() {
+        // 4 hits, 0 misses, 0 false alarms, 12 correct rejections:
+        // h = 4.5/5, f = 0.5/13, d′ = z(h) − z(f).
+        let d = d_prime(4, 0, 0, 12);
+        assert!((d - 3.050376604).abs() < 1e-4, "{d}");
+        assert!(d.is_finite(), "all hits and no false alarms stay finite");
+        let miss = d_prime(0, 4, 12, 0);
+        assert!((miss + d).abs() < 1e-6, "{miss}");
+        let eight = d_prime(8, 0, 2, 6);
+        assert!((eight - 2.182674616).abs() < 1e-4, "{eight}");
+
+        let tone = |target, far| DetectTone {
+            events: vec![],
+            target,
+            far,
+            midi: if far { 48 } else { 60 },
+        };
+        let trial = DetectTrial {
+            prompt: "Listen for C".into(),
+            target_class: PitchClass::new(0),
+            target_label: "C".into(),
+            target_color: None,
+            prompt_events: vec![],
+            prompt_ms: 1500,
+            speech: None,
+            tones: vec![
+                tone(true, false),
+                tone(false, false),
+                tone(true, true),
+                tone(false, false),
+            ],
+            window_ms: 1750,
+            marks: DetectMarks::Summary,
+            stimulus: json!({}),
+        };
+        let o = grade_detect(&trial, &[Some(400.0), Some(200.0), None, None]);
+        assert!(o.correct.is_none());
+        assert_eq!(o.metrics["hits"], 1);
+        assert_eq!(o.metrics["misses"], 1);
+        assert_eq!(o.metrics["false_alarms"], 1);
+        assert_eq!(o.metrics["far_targets"], 1);
+        assert_eq!(o.metrics["far_hits"], 0);
+        assert_eq!(o.rt_ms, Some(400.0));
+        assert!(o.summary.contains("d′"), "{}", o.summary);
     }
 }

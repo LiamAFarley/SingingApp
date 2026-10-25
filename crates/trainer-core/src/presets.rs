@@ -30,16 +30,30 @@ pub const DEGREE_LEVELS: u32 = 8;
 /// mode and the chromatic degrees.
 pub fn scale_degree_level(n: u32) -> SessionSpec {
     let n = n.clamp(1, DEGREE_LEVELS);
-    const CHROMATIC: [&str; 12] = ["1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7"];
+    const CHROMATIC: [&str; 12] = [
+        "1", "b2", "2", "b3", "3", "4", "#4", "5", "b6", "6", "b7", "7",
+    ];
     let (summary, params) = match n {
-        1 => ("Degrees 1, 2 and 3 in C major.", json!({ "degrees": ["1", "2", "3"] })),
-        2 => ("Degrees 1 to 5 in C major.", json!({ "degrees": ["1", "2", "3", "4", "5"] })),
-        3 => ("All seven degrees of C major, over two octaves.", json!({ "octaves": [-1, 0] })),
+        1 => (
+            "Degrees 1, 2 and 3 in C major.",
+            json!({ "degrees": ["1", "2", "3"] }),
+        ),
+        2 => (
+            "Degrees 1 to 5 in C major.",
+            json!({ "degrees": ["1", "2", "3", "4", "5"] }),
+        ),
+        3 => (
+            "All seven degrees of C major, over two octaves.",
+            json!({ "octaves": [-1, 0] }),
+        ),
         4 => (
             "All seven degrees; the major key changes every question.",
             json!({ "keys": "all", "key_change": "per_trial", "octaves": [-1, 0] }),
         ),
-        5 => ("All seven degrees of C minor.", json!({ "modes": ["minor"], "octaves": [-1, 0] })),
+        5 => (
+            "All seven degrees of C minor.",
+            json!({ "modes": ["minor"], "octaves": [-1, 0] }),
+        ),
         6 => (
             "Major and minor keys; the key changes every question.",
             json!({ "keys": "all", "modes": ["major", "minor"], "key_change": "per_trial", "octaves": [-1, 0] }),
@@ -342,7 +356,9 @@ mod tests {
     fn harmony_levels_practise_then_sing_by_ear() {
         for n in 1..=HARMONY_LEVELS.len() as u32 {
             let spec = harmony_level(n);
-            let [practice, test] = &spec.blocks[..] else { panic!("two blocks") };
+            let [practice, test] = &spec.blocks[..] else {
+                panic!("two blocks")
+            };
             match (&practice.exercise, &test.exercise) {
                 (Exercise::Harmony(a), Exercise::Harmony(b)) => {
                     assert!(a.practice && !b.practice);

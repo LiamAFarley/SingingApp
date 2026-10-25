@@ -331,7 +331,10 @@ impl Renderer {
         let sigma = 1.4;
         let n = (seconds * sr) as usize;
         let envelope = |pos: f64| (-0.5 * ((pos - centre) / sigma).powi(2)).exp();
-        let norm: f64 = (0..OCTAVES).map(|k| envelope(k as f64 + 0.5)).sum::<f64>().max(1e-9);
+        let norm: f64 = (0..OCTAVES)
+            .map(|k| envelope(k as f64 + 0.5))
+            .sum::<f64>()
+            .max(1e-9);
         let amp = db_to_gain(-10.0) as f64 / norm;
         let mut phase = [0.0f64; OCTAVES];
         let mut mono = vec![0.0f32; n];
@@ -389,7 +392,9 @@ impl Renderer {
                     .collect();
                 Some(SoundBuffer::from_mono(self.sample_rate, &mono))
             }
-            Mask::ShepardGlissando => Some(self.shepard_glissando(SHEPARD_GLISSANDO_S as f64, GLISSANDO_S_PER_OCTAVE)),
+            Mask::ShepardGlissando => {
+                Some(self.shepard_glissando(SHEPARD_GLISSANDO_S as f64, GLISSANDO_S_PER_OCTAVE))
+            }
             Mask::ChromaticCluster => {
                 let events: Vec<SoundEvent> = (0..24)
                     .map(|k| SoundEvent {
@@ -536,7 +541,10 @@ pub fn harmonize(t: &SungTrial) -> Vec<(f32, f32, Vec<i32>)> {
         }
         None => {
             let tonic = t.notes[0].midi;
-            (tonic, t.notes.iter().any(|n| (n.midi - tonic).rem_euclid(12) == 3))
+            (
+                tonic,
+                t.notes.iter().any(|n| (n.midi - tonic).rem_euclid(12) == 3),
+            )
         }
     };
     let scale = if minor {
@@ -751,16 +759,28 @@ mod tests {
         assert!(b.peak() > 0.05 && b.peak() <= 0.95, "{}", b.peak());
         let mono = mono_of(&b);
         // No clicks: neighbouring samples never jump.
-        let jump = mono.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        let jump = mono
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max);
         assert!(jump < 0.2, "{jump}");
         // Whatever partial the tracker follows, it keeps falling (octave hops aside).
         let tr = track(&mono[16_000..80_000], &TrackOptions::new(16_000.0));
         let v: Vec<f32> = tr.frames.iter().filter_map(|f| f.midi).collect();
-        let steps: Vec<f32> = v.windows(2).map(|w| w[1] - w[0]).filter(|d| d.abs() < 3.0).collect();
+        let steps: Vec<f32> = v
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .filter(|d| d.abs() < 3.0)
+            .collect();
         assert!(steps.len() > 50, "{}", steps.len());
         let falling = steps.iter().filter(|d| **d < 0.0).count() as f32 / steps.len() as f32;
         assert!(falling > 0.8, "{falling}");
-        assert!(r.render_mask(Mask::ShepardGlissando, 1).unwrap().duration_s() >= 19.9);
+        assert!(
+            r.render_mask(Mask::ShepardGlissando, 1)
+                .unwrap()
+                .duration_s()
+                >= 19.9
+        );
     }
 
     #[test]
@@ -819,13 +839,26 @@ mod tests {
         h.backing = Backing::None;
         h.backing_volume = 0.0;
         h.reference_beats.clear();
-        h.accompaniment = h.notes.iter().map(|n| TargetNote { midi: n.midi + 4, ..n.clone() }).collect();
+        h.accompaniment = h
+            .notes
+            .iter()
+            .map(|n| TargetNote {
+                midi: n.midi + 4,
+                ..n.clone()
+            })
+            .collect();
         let a = r.render_sung_trial(&h);
         let sing_frame = r.frames(4000.0);
         assert!(a.accompaniment.peak() > 0.01);
         let before = &a.backing.data[..sing_frame * 2];
         let after = &a.backing.data[sing_frame * 2..];
-        assert!(before.iter().all(|v| v.abs() < 1e-4), "silent before singing");
-        assert!(after.iter().any(|v| v.abs() > 0.01), "the other voice is in the backing");
+        assert!(
+            before.iter().all(|v| v.abs() < 1e-4),
+            "silent before singing"
+        );
+        assert!(
+            after.iter().any(|v| v.abs() > 0.01),
+            "the other voice is in the backing"
+        );
     }
 }

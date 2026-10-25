@@ -2,7 +2,10 @@ import { useEffect, useRef } from "react";
 import type { Anchor } from "./bindings/Anchor";
 import type { ApDashboard } from "./bindings/ApDashboard";
 import type { DailyPlan } from "./bindings/DailyPlan";
+import type { ApPrefs } from "./bindings/ApPrefs";
 import type { DailySet } from "./bindings/DailySet";
+import type { LabelSet } from "./bindings/LabelSet";
+import type { SpeechReport } from "./bindings/SpeechReport";
 import type { AppInfo } from "./bindings/AppInfo";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { AudioView } from "./bindings/AudioView";
@@ -63,6 +66,11 @@ export interface Backend {
   previewDailySet(): Promise<DailySet>;
   saveDailyPlan(plan: DailyPlan): Promise<void>;
   setCourseLevel(course: string, level: number): Promise<void>;
+  apPrefs(): Promise<ApPrefs>;
+  saveApPrefs(prefs: ApPrefs): Promise<ApPrefs>;
+  listLabelSets(): Promise<LabelSet[]>;
+  saveLabelSet(set: LabelSet): Promise<LabelSet>;
+  speechStatus(): Promise<SpeechReport>;
   subscribeLive(onBatch: (b: LiveBatch) => void): Promise<void>;
   listen<T>(event: string, cb: (payload: T) => void): Promise<() => void>;
 }
@@ -112,6 +120,11 @@ async function tauriBackend(): Promise<Backend> {
     previewDailySet: () => call("preview_daily_set"),
     saveDailyPlan: (plan) => call("save_daily_plan", { plan }),
     setCourseLevel: (course, level) => call("set_course_level", { course, level }),
+    apPrefs: () => call("ap_prefs"),
+    saveApPrefs: (prefs) => call("save_ap_prefs", { prefs }),
+    listLabelSets: () => call("list_label_sets"),
+    saveLabelSet: (set) => call("save_label_set", { set }),
+    speechStatus: () => call("speech_status"),
     subscribeLive: async (onBatch) => {
       const channel = new core.Channel<LiveBatch>();
       channel.onmessage = onBatch;

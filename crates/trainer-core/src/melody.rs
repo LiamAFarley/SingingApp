@@ -117,23 +117,62 @@ fn cells_for(beat_ticks: u32) -> Vec<Cell> {
     use NoteValue::*;
     if beat_ticks == TICKS_PER_QUARTER {
         vec![
-            Cell { values: &[Quarter], weight: 6 },
-            Cell { values: &[Eighth, Eighth], weight: 4 },
-            Cell { values: &[Sixteenth, Sixteenth, Sixteenth, Sixteenth], weight: 1 },
-            Cell { values: &[Eighth, Sixteenth, Sixteenth], weight: 1 },
-            Cell { values: &[Sixteenth, Sixteenth, Eighth], weight: 1 },
-            Cell { values: &[Half], weight: 4 },
-            Cell { values: &[DottedQuarter, Eighth], weight: 2 },
-            Cell { values: &[DottedHalf], weight: 1 },
-            Cell { values: &[Whole], weight: 1 },
+            Cell {
+                values: &[Quarter],
+                weight: 6,
+            },
+            Cell {
+                values: &[Eighth, Eighth],
+                weight: 4,
+            },
+            Cell {
+                values: &[Sixteenth, Sixteenth, Sixteenth, Sixteenth],
+                weight: 1,
+            },
+            Cell {
+                values: &[Eighth, Sixteenth, Sixteenth],
+                weight: 1,
+            },
+            Cell {
+                values: &[Sixteenth, Sixteenth, Eighth],
+                weight: 1,
+            },
+            Cell {
+                values: &[Half],
+                weight: 4,
+            },
+            Cell {
+                values: &[DottedQuarter, Eighth],
+                weight: 2,
+            },
+            Cell {
+                values: &[DottedHalf],
+                weight: 1,
+            },
+            Cell {
+                values: &[Whole],
+                weight: 1,
+            },
         ]
     } else {
         // Eighth-note beats (x/8): groups of a dotted quarter.
         vec![
-            Cell { values: &[DottedQuarter], weight: 4 },
-            Cell { values: &[Quarter, Eighth], weight: 4 },
-            Cell { values: &[Eighth, Eighth, Eighth], weight: 3 },
-            Cell { values: &[DottedHalf], weight: 1 },
+            Cell {
+                values: &[DottedQuarter],
+                weight: 4,
+            },
+            Cell {
+                values: &[Quarter, Eighth],
+                weight: 4,
+            },
+            Cell {
+                values: &[Eighth, Eighth, Eighth],
+                weight: 3,
+            },
+            Cell {
+                values: &[DottedHalf],
+                weight: 1,
+            },
         ]
     }
 }
@@ -143,13 +182,7 @@ fn cell_ticks(c: &Cell) -> u32 {
 }
 
 /// Fills `ticks` starting at bar position `pos` with allowed cells; returns note durations.
-fn fill(
-    ticks: u32,
-    pos: u32,
-    meter: TimeSig,
-    allowed: &[NoteValue],
-    rng: &mut Rng,
-) -> Vec<u32> {
+fn fill(ticks: u32, pos: u32, meter: TimeSig, allowed: &[NoteValue], rng: &mut Rng) -> Vec<u32> {
     let bt = meter.beat_ticks();
     let group = if bt == TICKS_PER_QUARTER { bt } else { bt * 3 };
     let cells = cells_for(bt);
@@ -280,7 +313,11 @@ pub fn generate_melody(
     if p.start_degrees.iter().any(|d| !(1..=7).contains(d)) {
         return Err("start_degrees must be 1–7".into());
     }
-    let modes = if p.modes.is_empty() { d_major() } else { p.modes.clone() };
+    let modes = if p.modes.is_empty() {
+        d_major()
+    } else {
+        p.modes.clone()
+    };
     let mode = *rng.choose(&modes).unwrap();
     let tonic = if p.keys.is_empty() {
         let list: &[&str] = match mode {
@@ -292,7 +329,11 @@ pub fn generate_melody(
         rng.choose(&p.keys).unwrap().clone()
     };
     let key = KeySig::new(&tonic, mode)?;
-    let meters = if p.meters.is_empty() { d_meters() } else { p.meters.clone() };
+    let meters = if p.meters.is_empty() {
+        d_meters()
+    } else {
+        p.meters.clone()
+    };
     let meter = *rng.choose(&meters).unwrap();
     if meter.unit == 2 {
         return Err("generated melodies support x/4 and x/8 meters".into());
@@ -312,7 +353,10 @@ pub fn generate_melody(
         })
         .collect();
     if allowed.len() < 5 {
-        return Err(format!("the range {}–{} leaves too few notes in {key}", range.low, range.high));
+        return Err(format!(
+            "the range {}–{} leaves too few notes in {key}",
+            range.low, range.high
+        ));
     }
 
     let bars = rhythm(p.bars, meter, &p.rhythms, rng);
@@ -329,7 +373,9 @@ pub fn generate_melody(
         }
     }
     let sung: Vec<usize> = (0..n).filter(|i| !rest[*i]).collect();
-    let degrees = walk(p, &allowed, sung.len(), rng, |d| key.degree(d, octave).midi())?;
+    let degrees = walk(p, &allowed, sung.len(), rng, |d| {
+        key.degree(d, octave).midi()
+    })?;
 
     let mut notes = Vec::with_capacity(n);
     let mut t = 0u32;
@@ -388,7 +434,17 @@ fn plain_interval(a: Pitch, b: Pitch) -> bool {
     let semis = (hi.midi() - lo.midi()).rem_euclid(12);
     matches!(
         (steps, semis),
-        (0, 0) | (1, 1) | (1, 2) | (2, 3) | (2, 4) | (3, 5) | (4, 7) | (5, 8) | (5, 9) | (6, 10) | (6, 11)
+        (0, 0)
+            | (1, 1)
+            | (1, 2)
+            | (2, 3)
+            | (2, 4)
+            | (3, 5)
+            | (4, 7)
+            | (5, 8)
+            | (5, 9)
+            | (6, 10)
+            | (6, 11)
     )
 }
 
@@ -410,8 +466,13 @@ fn walk(
     let inside = |d: i32| d >= lo && d <= hi;
     let max_leap = p.max_leap as i32;
     let tritone = |a: i32, b: i32| (midi_of(a) - midi_of(b)).abs() == 6;
-    let leap_ok = |a: i32, b: i32| (b - a).abs() <= max_leap && !((b - a).abs() > 1 && tritone(a, b));
-    let tonics: Vec<i32> = allowed.iter().copied().filter(|d| d.rem_euclid(7) == 0).collect();
+    let leap_ok =
+        |a: i32, b: i32| (b - a).abs() <= max_leap && !((b - a).abs() > 1 && tritone(a, b));
+    let tonics: Vec<i32> = allowed
+        .iter()
+        .copied()
+        .filter(|d| d.rem_euclid(7) == 0)
+        .collect();
     if p.end_on_tonic && tonics.is_empty() {
         return Err("the range contains no tonic".into());
     }
@@ -431,7 +492,11 @@ fn walk(
     }
 
     // Notes before the ending: all of them, or all but the approach and the final tonic.
-    let body = if p.end_on_tonic { n.saturating_sub(2).max(1) } else { n };
+    let body = if p.end_on_tonic {
+        n.saturating_sub(2).max(1)
+    } else {
+        n
+    };
     for _attempt in 0..200 {
         let first = ranked[rng.below(ranked.len().min(3))];
         let mut out = vec![first];
@@ -516,7 +581,10 @@ fn walk(
         out.push(tonic);
         return Ok(out);
     }
-    Err("could not build a melody with these constraints; widen the range or allow larger leaps".into())
+    Err(
+        "could not build a melody with these constraints; widen the range or allow larger leaps"
+            .into(),
+    )
 }
 
 #[cfg(test)]
@@ -543,10 +611,17 @@ mod tests {
             for n in &s.notes {
                 assert!([4, 8].contains(&n.dur), "seed {seed}: duration {}", n.dur);
             }
-            assert_eq!(s.notes.last().unwrap().dur, 8, "seed {seed}: the last note is a half note");
+            assert_eq!(
+                s.notes.last().unwrap().dur,
+                8,
+                "seed {seed}: the last note is a half note"
+            );
             let first = s.notes[0].pitch.unwrap();
             let rel = (first.midi() - s.key.tonic_pc()).rem_euclid(12);
-            assert!([0, 4, 7].contains(&rel), "seed {seed}: starts {rel} semitones above the tonic");
+            assert!(
+                [0, 4, 7].contains(&rel),
+                "seed {seed}: starts {rel} semitones above the tonic"
+            );
         }
     }
 
@@ -572,7 +647,12 @@ mod tests {
     #[test]
     fn same_seed_same_melody() {
         let p = MelodyParams {
-            rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Half, NoteValue::DottedQuarter],
+            rhythms: vec![
+                NoteValue::Quarter,
+                NoteValue::Eighth,
+                NoteValue::Half,
+                NoteValue::DottedQuarter,
+            ],
             meters: vec!["3/4".parse().unwrap(), TimeSig::COMMON],
             modes: vec![KeyMode::Major, KeyMode::Minor],
             rest_rate: 0.1,
@@ -620,7 +700,12 @@ mod tests {
             let s = make(&p, seed);
             let ps: Vec<Pitch> = s.pitched().map(|(_, p)| p).collect();
             for w in ps.windows(2) {
-                assert!(plain_interval(w[0], w[1]), "seed {seed}: {} to {}", w[0], w[1]);
+                assert!(
+                    plain_interval(w[0], w[1]),
+                    "seed {seed}: {} to {}",
+                    w[0],
+                    w[1]
+                );
             }
         }
     }
@@ -629,7 +714,12 @@ mod tests {
     fn compound_meters_and_eighths() {
         let p = MelodyParams {
             meters: vec!["6/8".parse().unwrap()],
-            rhythms: vec![NoteValue::DottedQuarter, NoteValue::Quarter, NoteValue::Eighth, NoteValue::DottedHalf],
+            rhythms: vec![
+                NoteValue::DottedQuarter,
+                NoteValue::Quarter,
+                NoteValue::Eighth,
+                NoteValue::DottedHalf,
+            ],
             ..MelodyParams::default()
         };
         for seed in 0..50 {
@@ -651,7 +741,6 @@ mod tests {
     }
 }
 
-
 #[cfg(test)]
 mod gallery {
     use super::*;
@@ -661,17 +750,84 @@ mod gallery {
     #[ignore]
     fn write_gallery() {
         let cases: Vec<(MelodyParams, NoteRange, u64)> = vec![
-            (MelodyParams { keys: vec!["D".into()], ..MelodyParams::default() }, NoteRange::new(43, 60), 3),
-            (MelodyParams { keys: vec!["Bb".into()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Half], ..MelodyParams::default() }, NoteRange::new(48, 67), 5),
-            (MelodyParams { keys: vec!["B".into()], modes: vec![KeyMode::Minor], meters: vec!["3/4".parse().unwrap()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::DottedHalf, NoteValue::DottedQuarter, NoteValue::Half], max_leap: 4, ..MelodyParams::default() }, NoteRange::new(57, 76), 8),
-            (MelodyParams { keys: vec!["Eb".into()], meters: vec!["6/8".parse().unwrap()], rhythms: vec![NoteValue::DottedQuarter, NoteValue::Quarter, NoteValue::Eighth, NoteValue::DottedHalf], bars: 4, ..MelodyParams::default() }, NoteRange::new(60, 79), 2),
-            (MelodyParams { keys: vec!["E".into()], rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Sixteenth, NoteValue::Half], bars: 8, rest_rate: 0.08, max_leap: 4, step_rate: 0.6, ..MelodyParams::default() }, NoteRange::new(50, 69), 11),
+            (
+                MelodyParams {
+                    keys: vec!["D".into()],
+                    ..MelodyParams::default()
+                },
+                NoteRange::new(43, 60),
+                3,
+            ),
+            (
+                MelodyParams {
+                    keys: vec!["Bb".into()],
+                    rhythms: vec![NoteValue::Quarter, NoteValue::Eighth, NoteValue::Half],
+                    ..MelodyParams::default()
+                },
+                NoteRange::new(48, 67),
+                5,
+            ),
+            (
+                MelodyParams {
+                    keys: vec!["B".into()],
+                    modes: vec![KeyMode::Minor],
+                    meters: vec!["3/4".parse().unwrap()],
+                    rhythms: vec![
+                        NoteValue::Quarter,
+                        NoteValue::Eighth,
+                        NoteValue::DottedHalf,
+                        NoteValue::DottedQuarter,
+                        NoteValue::Half,
+                    ],
+                    max_leap: 4,
+                    ..MelodyParams::default()
+                },
+                NoteRange::new(57, 76),
+                8,
+            ),
+            (
+                MelodyParams {
+                    keys: vec!["Eb".into()],
+                    meters: vec!["6/8".parse().unwrap()],
+                    rhythms: vec![
+                        NoteValue::DottedQuarter,
+                        NoteValue::Quarter,
+                        NoteValue::Eighth,
+                        NoteValue::DottedHalf,
+                    ],
+                    bars: 4,
+                    ..MelodyParams::default()
+                },
+                NoteRange::new(60, 79),
+                2,
+            ),
+            (
+                MelodyParams {
+                    keys: vec!["E".into()],
+                    rhythms: vec![
+                        NoteValue::Quarter,
+                        NoteValue::Eighth,
+                        NoteValue::Sixteenth,
+                        NoteValue::Half,
+                    ],
+                    bars: 8,
+                    rest_rate: 0.08,
+                    max_leap: 4,
+                    step_rate: 0.6,
+                    ..MelodyParams::default()
+                },
+                NoteRange::new(50, 69),
+                11,
+            ),
         ];
         let scores: Vec<Score> = cases
             .into_iter()
             .map(|(p, r, seed)| generate_melody(&p, r, 80.0, &mut Rng::new(seed)).unwrap())
             .collect();
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../ui/src/notation/gallery.json");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../ui/src/notation/gallery.json"
+        );
         std::fs::write(path, serde_json::to_string_pretty(&scores).unwrap()).unwrap();
     }
 }

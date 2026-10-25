@@ -45,6 +45,8 @@ pub enum Interaction {
     Sung,
     /// Write a heard melody in the score editor.
     Dictation,
+    /// Press when the target note appears in a stream.
+    Detect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -141,6 +143,14 @@ pub struct TrialView {
     /// Dictation: hearings so far and the limit (0 for none).
     pub plays: u32,
     pub max_plays: u32,
+    /// Screen tint for the played note (pairing, or the detection target).
+    pub flash_color: Option<String>,
+    /// Detection: how many tones are in the stream.
+    pub detect_total: Option<u32>,
+    /// Detection: the tone playing now, 1-based; 0 during the prompt.
+    pub detect_index: Option<u32>,
+    /// A mark during a detection stream: `hit`, `miss` or `false`.
+    pub detect_mark: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -170,6 +180,10 @@ pub struct FeedbackView {
     pub hidden: bool,
     /// Dictation: the written answer and the melody, with a mark per note.
     pub dictation: Option<DictationView>,
+    /// A wrong answer is not marked. The right answer is still shown.
+    pub errorless: bool,
+    /// Tint behind the result, the colour of the note that played.
+    pub flash_color: Option<String>,
 }
 
 /// The note to lock on to with the tuner after singing a single note.
@@ -261,7 +275,9 @@ impl Default for RunnerState {
 #[ts(export)]
 pub enum RunnerCommand {
     Begin,
-    Answer { choice: String },
+    Answer {
+        choice: String,
+    },
     Next,
     Replay,
     Reference,
@@ -270,11 +286,19 @@ pub enum RunnerCommand {
     /// Play back the recording of the attempt (or the written answer in dictation).
     PlayAnswer,
     /// Dictation: check the written melody.
-    SubmitScore { notes: Vec<ScoreNote> },
+    SubmitScore {
+        notes: Vec<ScoreNote>,
+    },
     /// Dictation: play the written notes.
-    PlayScore { notes: Vec<ScoreNote> },
+    PlayScore {
+        notes: Vec<ScoreNote>,
+    },
     /// After answering: play what an answer sounds like.
-    PlayChoice { choice: String },
+    PlayChoice {
+        choice: String,
+    },
+    /// Detection: the target just played.
+    Tap,
     SingAlong,
     Retry,
     Skip,
@@ -464,5 +488,9 @@ mod export_more {
         trainer_core::schema::Anchor::export_all(&cfg).unwrap();
         trainer_core::courses::ApDashboard::export_all(&cfg).unwrap();
         trainer_core::courses::DailySet::export_all(&cfg).unwrap();
+        trainer_core::courses::ApPrefs::export_all(&cfg).unwrap();
+        trainer_core::labels::LabelSet::export_all(&cfg).unwrap();
+        trainer_core::speech::SpeechReport::export_all(&cfg).unwrap();
+        crate::views::RunnerState::export_all(&cfg).unwrap();
     }
 }

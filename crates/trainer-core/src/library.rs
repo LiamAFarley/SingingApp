@@ -71,8 +71,15 @@ impl LibraryPiece {
     pub fn scores(&self) -> Result<Vec<Score>, String> {
         (0..self.parts.len())
             .map(|k| {
-                Score::from_compact(&self.melody(k), self.tempo_bpm.unwrap_or(CHECK_TEMPO))
-                    .map_err(|e| if self.parts.len() > 1 { format!("parts[{k}]: {e}") } else { e })
+                Score::from_compact(&self.melody(k), self.tempo_bpm.unwrap_or(CHECK_TEMPO)).map_err(
+                    |e| {
+                        if self.parts.len() > 1 {
+                            format!("parts[{k}]: {e}")
+                        } else {
+                            e
+                        }
+                    },
+                )
             })
             .collect()
     }
@@ -80,7 +87,9 @@ impl LibraryPiece {
     /// Normalises the key, checks every part and pads shorter parts with a rest to the length of
     /// the longest.
     fn finish(&mut self) -> Result<(), String> {
-        self.key = KeySig::parse(&self.key).map_err(|e| format!("key: {e}"))?.to_string();
+        self.key = KeySig::parse(&self.key)
+            .map_err(|e| format!("key: {e}"))?
+            .to_string();
         if self.parts.is_empty() {
             return Err("a piece needs at least one part".into());
         }
@@ -92,11 +101,17 @@ impl LibraryPiece {
                 return Err(format!("tempo_bpm {t} is outside 20–300"));
             }
         }
-        let lengths: Vec<f32> = self.parts.iter().map(|p| p.notes.iter().map(note_beats).sum()).collect();
+        let lengths: Vec<f32> = self
+            .parts
+            .iter()
+            .map(|p| p.notes.iter().map(note_beats).sum())
+            .collect();
         let longest = lengths.iter().copied().fold(0.0, f32::max);
         for (part, len) in self.parts.iter_mut().zip(lengths) {
             if longest - len > 1e-4 {
-                part.notes.push(CompactNote::Rest { rest: longest - len });
+                part.notes.push(CompactNote::Rest {
+                    rest: longest - len,
+                });
             }
         }
         self.scores()?;
@@ -106,9 +121,12 @@ impl LibraryPiece {
     /// One line per piece for lists: id, title, key, metre, bars and parts.
     pub fn summary(&self) -> Value {
         let scores = self.scores().unwrap_or_default();
-        let range = scores.iter().filter_map(|s| s.range()).fold(None, |acc: Option<(i32, i32)>, (lo, hi)| {
-            Some(acc.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))))
-        });
+        let range = scores.iter().filter_map(|s| s.range()).fold(
+            None,
+            |acc: Option<(i32, i32)>, (lo, hi)| {
+                Some(acc.map_or((lo, hi), |(a, b)| (a.min(lo), b.max(hi))))
+            },
+        );
         json!({
             "id": self.id,
             "title": self.title,
@@ -148,14 +166,18 @@ fn note_beats(n: &CompactNote) -> f32 {
 /// `"parts": [{"name", "clef", "notes"}, …]` instead of `notes`. Notes are a list
 /// (`[{"note": "Eb4", "beats": 1}, {"rest": 0.5}]`) or text (`"Eb4:1 F4:.5 G4 | Ab4:2~ | Ab4:1 R:1"`).
 pub fn parse_json(text: &str) -> Result<Vec<LibraryPiece>, String> {
-    let v: Value =
-        serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("invalid JSON: {e}"))?;
+    let v: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|e| format!("invalid JSON: {e}"))?;
     let (items, collection, tags): (Vec<&Value>, Option<String>, Vec<String>) = match &v {
         Value::Array(a) => (a.iter().collect(), None, Vec::new()),
         Value::Object(o) if o.contains_key("pieces") || o.contains_key("melodies") => {
             let list = o.get("pieces").or_else(|| o.get("melodies")).unwrap();
             let a = list.as_array().ok_or("`pieces` must be a list")?;
-            (a.iter().collect(), opt_string(o.get("collection"), "collection")?, strings(o.get("tags"), "tags")?)
+            (
+                a.iter().collect(),
+                opt_string(o.get("collection"), "collection")?,
+                strings(o.get("tags"), "tags")?,
+            )
         }
         Value::Object(_) => (vec![&v], None, Vec::new()),
         _ => return Err("expected a piece, a list of pieces or {\"pieces\": […]}".into()),
@@ -168,7 +190,8 @@ pub fn parse_json(text: &str) -> Result<Vec<LibraryPiece>, String> {
         .iter()
         .enumerate()
         .map(|(k, item)| {
-            let mut p = parse_piece(item).map_err(|e| if many { format!("pieces[{k}]: {e}") } else { e })?;
+            let mut p = parse_piece(item)
+                .map_err(|e| if many { format!("pieces[{k}]: {e}") } else { e })?;
             if p.collection.is_none() {
                 p.collection = collection.clone();
             }
@@ -194,7 +217,10 @@ fn opt_string(v: Option<&Value>, field: &str) -> Result<Option<String>, String> 
 fn opt_number(v: Option<&Value>, field: &str) -> Result<Option<f64>, String> {
     match v {
         None | Some(Value::Null) => Ok(None),
-        Some(x) => x.as_f64().map(Some).ok_or_else(|| format!("`{field}` must be a number")),
+        Some(x) => x
+            .as_f64()
+            .map(Some)
+            .ok_or_else(|| format!("`{field}` must be a number")),
     }
 }
 
@@ -204,7 +230,11 @@ fn strings(v: Option<&Value>, field: &str) -> Result<Vec<String>, String> {
         Some(Value::String(s)) => Ok(vec![s.trim().to_string()]),
         Some(Value::Array(a)) => a
             .iter()
-            .map(|x| x.as_str().map(|s| s.trim().to_string()).ok_or_else(|| format!("`{field}` must be a list of text")))
+            .map(|x| {
+                x.as_str()
+                    .map(|s| s.trim().to_string())
+                    .ok_or_else(|| format!("`{field}` must be a list of text"))
+            })
             .collect(),
         Some(_) => Err(format!("`{field}` must be a list of text")),
     }
@@ -213,7 +243,8 @@ fn strings(v: Option<&Value>, field: &str) -> Result<Vec<String>, String> {
 fn parse_clef(v: Option<&Value>) -> Result<ClefChoice, String> {
     match v {
         None | Some(Value::Null) => Ok(ClefChoice::Auto),
-        Some(x) => serde_json::from_value(x.clone()).map_err(|_| "`clef` must be auto, treble, treble8vb or bass".into()),
+        Some(x) => serde_json::from_value(x.clone())
+            .map_err(|_| "`clef` must be auto, treble, treble8vb or bass".into()),
     }
 }
 
@@ -267,7 +298,9 @@ fn parse_piece(v: &Value) -> Result<LibraryPiece, String> {
 }
 
 fn parse_part(v: &Value, time: TimeSig, pickup: Option<f32>) -> Result<LibraryPart, String> {
-    let o = v.as_object().ok_or("expected {\"name\": …, \"notes\": …}")?;
+    let o = v
+        .as_object()
+        .ok_or("expected {\"name\": …, \"notes\": …}")?;
     Ok(LibraryPart {
         name: opt_string(o.get("name"), "name")?,
         clef: parse_clef(o.get("clef"))?,
@@ -296,7 +329,9 @@ fn parse_notes(v: &Value, time: TimeSig, pickup: Option<f32>) -> Result<Vec<Comp
     if let Some(p) = pickup.or(found_pickup) {
         let bar = time.beats as f32;
         if p <= 0.0 || p >= bar {
-            return Err(format!("a pickup of {p} beats must be shorter than a bar of {time}"));
+            return Err(format!(
+                "a pickup of {p} beats must be shorter than a bar of {time}"
+            ));
         }
         notes.insert(0, CompactNote::Rest { rest: bar - p });
     }
@@ -311,10 +346,16 @@ fn parse_note_object(v: &Value) -> Result<CompactNote, String> {
         return Ok(CompactNote::Rest { rest });
     }
     let note = o.get("note").or_else(|| o.get("pitch")).ok_or(SHAPE)?;
-    let beats = o.get("beats").and_then(Value::as_f64).ok_or("missing `beats`")? as f32;
+    let beats = o
+        .get("beats")
+        .and_then(Value::as_f64)
+        .ok_or("missing `beats`")? as f32;
     match note {
         Value::Null => Ok(CompactNote::Rest { rest: beats }),
-        Value::String(s) => Ok(CompactNote::Note { note: s.parse()?, beats }),
+        Value::String(s) => Ok(CompactNote::Note {
+            note: s.parse()?,
+            beats,
+        }),
         _ => Err("`note` must be a pitch like \"Eb4\"".into()),
     }
 }
@@ -335,7 +376,10 @@ fn parse_note_text(text: &str, time: TimeSig) -> Result<(Vec<CompactNote>, Optio
     let mut in_bar = 0.0f32;
     let mut barlines = 0;
     let mut pickup = None;
-    for token in text.split(|c: char| c.is_whitespace() || c == ',').filter(|t| !t.is_empty()) {
+    for token in text
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|t| !t.is_empty())
+    {
         if token.chars().all(|c| c == '|') {
             if in_bar == 0.0 && notes.is_empty() {
                 continue;
@@ -372,15 +416,26 @@ fn parse_note_text(text: &str, time: TimeSig) -> Result<(Vec<CompactNote>, Optio
         }
         if name.eq_ignore_ascii_case("r") || name.eq_ignore_ascii_case("rest") {
             if tie {
-                return Err(format!("`{token}`: a tie joins two notes of the same pitch"));
+                return Err(format!(
+                    "`{token}`: a tie joins two notes of the same pitch"
+                ));
             }
             notes.push(CompactNote::Rest { rest: dur });
         } else {
             let pitch: Pitch = name.parse().map_err(|e| format!("`{token}`: {e}"))?;
             match (tie, notes.last_mut()) {
-                (true, Some(CompactNote::Note { note, beats })) if note.midi() == pitch.midi() => *beats += dur,
-                (true, _) => return Err(format!("`{token}`: a tie joins two notes of the same pitch")),
-                (false, _) => notes.push(CompactNote::Note { note: pitch, beats: dur }),
+                (true, Some(CompactNote::Note { note, beats })) if note.midi() == pitch.midi() => {
+                    *beats += dur
+                }
+                (true, _) => {
+                    return Err(format!(
+                        "`{token}`: a tie joins two notes of the same pitch"
+                    ));
+                }
+                (false, _) => notes.push(CompactNote::Note {
+                    note: pitch,
+                    beats: dur,
+                }),
             }
         }
         tie = tied;
@@ -422,7 +477,9 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
     let tpq = match smf.header.timing {
         Timing::Metrical(t) if t.as_int() > 0 => t.as_int() as f64,
         Timing::Metrical(_) => return Err("the file has no timing".into()),
-        Timing::Timecode(..) => return Err("MIDI files timed in SMPTE frames are not supported".into()),
+        Timing::Timecode(..) => {
+            return Err("MIDI files timed in SMPTE frames are not supported".into());
+        }
     };
     let q = |tick: u64| (tick as f64 * 4.0 / tpq).round() as i64;
     let mut tempo: Option<(u64, u32)> = None;
@@ -443,7 +500,9 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
                         tempo = Some((t, us.as_int()));
                     }
                 }
-                TrackEventKind::Meta(MetaMessage::TimeSignature(n, d, _, _)) => time_sigs.push((t, n, d)),
+                TrackEventKind::Meta(MetaMessage::TimeSignature(n, d, _, _)) => {
+                    time_sigs.push((t, n, d))
+                }
                 TrackEventKind::Meta(MetaMessage::KeySignature(sf, minor)) => {
                     if key_sig.is_none_or(|(t0, ..)| t < t0) {
                         key_sig = Some((t, sf, minor));
@@ -451,7 +510,8 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
                 }
                 TrackEventKind::Meta(MetaMessage::TrackName(b)) => {
                     if name.is_none() {
-                        name = Some(String::from_utf8_lossy(b).trim().to_string()).filter(|s| !s.is_empty());
+                        name = Some(String::from_utf8_lossy(b).trim().to_string())
+                            .filter(|s| !s.is_empty());
                     }
                 }
                 TrackEventKind::Midi { channel, message } => {
@@ -489,7 +549,12 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
             let at = match voices.iter().position(|v| v.track == ti && v.channel == ch) {
                 Some(i) => i,
                 None => {
-                    voices.push(Voice { track: ti, channel: ch, name: name.clone(), notes: Vec::new() });
+                    voices.push(Voice {
+                        track: ti,
+                        channel: ch,
+                        name: name.clone(),
+                        notes: Vec::new(),
+                    });
                     voices.len() - 1
                 }
             };
@@ -534,8 +599,13 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
     voices.truncate(MAX_PARTS);
     let mean = |v: &Voice| v.notes.iter().map(|n| n.2 as f64).sum::<f64>() / v.notes.len() as f64;
     voices.sort_by(|a, b| mean(b).partial_cmp(&mean(a)).unwrap_or(Ordering::Equal));
-    let mut lines: Vec<Vec<Sixteenths>> = voices.iter().map(|v| top_line(&v.notes, shift)).collect();
-    let first = lines.iter().filter_map(|l| l.first().map(|n| n.0)).min().unwrap_or(0);
+    let mut lines: Vec<Vec<Sixteenths>> =
+        voices.iter().map(|v| top_line(&v.notes, shift)).collect();
+    let first = lines
+        .iter()
+        .filter_map(|l| l.first().map(|n| n.0))
+        .min()
+        .unwrap_or(0);
     let drop = first.div_euclid(bar) * bar;
     for l in &mut lines {
         for n in l.iter_mut() {
@@ -546,12 +616,22 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
 
     let all: Vec<Sixteenths> = lines.iter().flatten().copied().collect();
     let key = match key_sig {
-        Some((_, sf, minor)) => {
-            KeySig::from_fifths(sf as i32, if minor { KeyMode::Minor } else { KeyMode::Major })?
-        }
+        Some((_, sf, minor)) => KeySig::from_fifths(
+            sf as i32,
+            if minor {
+                KeyMode::Minor
+            } else {
+                KeyMode::Major
+            },
+        )?,
         None => {
             let last = lines.first().and_then(|l| l.last()).map(|n| n.2);
-            estimate_key(&all.iter().map(|n| (n.2, (n.1 - n.0) as f32)).collect::<Vec<_>>(), last)
+            estimate_key(
+                &all.iter()
+                    .map(|n| (n.2, (n.1 - n.0) as f32))
+                    .collect::<Vec<_>>(),
+                last,
+            )
         }
     };
     let beat = time.beat_ticks() as f32;
@@ -563,12 +643,21 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
             let mut cursor = 0;
             for &(s, e, m) in line {
                 if s > cursor {
-                    notes.push(CompactNote::Rest { rest: (s - cursor) as f32 / beat });
+                    notes.push(CompactNote::Rest {
+                        rest: (s - cursor) as f32 / beat,
+                    });
                 }
-                notes.push(CompactNote::Note { note: key.spell(m), beats: (e - s) as f32 / beat });
+                notes.push(CompactNote::Note {
+                    note: key.spell(m),
+                    beats: (e - s) as f32 / beat,
+                });
                 cursor = e;
             }
-            LibraryPart { name: v.name.clone(), clef: ClefChoice::Auto, notes }
+            LibraryPart {
+                name: v.name.clone(),
+                clef: ClefChoice::Auto,
+                notes,
+            }
         })
         .collect();
     let tempo_bpm = tempo
@@ -592,7 +681,10 @@ pub fn parse_midi(bytes: &[u8]) -> Result<LibraryPiece, String> {
 /// lower notes under a held note dropped, each note cut at the next onset, and a gap of one
 /// sixteenth after a long note closed.
 fn top_line(notes: &[Sixteenths], shift: i64) -> Vec<Sixteenths> {
-    let mut sorted: Vec<Sixteenths> = notes.iter().map(|&(s, e, m)| (s + shift, e.max(s + 1) + shift, m)).collect();
+    let mut sorted: Vec<Sixteenths> = notes
+        .iter()
+        .map(|&(s, e, m)| (s + shift, e.max(s + 1) + shift, m))
+        .collect();
     sorted.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)));
     let mut out: Vec<Sixteenths> = Vec::new();
     for (s, e, m) in sorted {
@@ -614,8 +706,12 @@ fn top_line(notes: &[Sixteenths], shift: i64) -> Vec<Sixteenths> {
 /// The likeliest key of some notes (MIDI note, weight) by the Krumhansl–Kessler profiles, with a
 /// small bonus for a tonic on the last note.
 pub fn estimate_key(notes: &[(i32, f32)], last: Option<i32>) -> KeySig {
-    const MAJOR: [f32; 12] = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-    const MINOR: [f32; 12] = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+    const MAJOR: [f32; 12] = [
+        6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+    ];
+    const MINOR: [f32; 12] = [
+        6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17,
+    ];
     let mut hist = [0f32; 12];
     for (m, w) in notes {
         hist[m.rem_euclid(12) as usize] += w.max(0.0);
@@ -625,7 +721,11 @@ pub fn estimate_key(notes: &[(i32, f32)], last: Option<i32>) -> KeySig {
         for tonic in 0..12 {
             let x: Vec<f32> = (0..12).map(|i| hist[(tonic + i) % 12]).collect();
             let r = correlation(&x, &profile)
-                + if last.is_some_and(|l| l.rem_euclid(12) as usize == tonic) { 0.1 } else { 0.0 };
+                + if last.is_some_and(|l| l.rem_euclid(12) as usize == tonic) {
+                    0.1
+                } else {
+                    0.0
+                };
             if r > best.0 {
                 best = (r, tonic, mode);
             }
@@ -640,7 +740,11 @@ fn correlation(x: &[f32], y: &[f32]) -> f32 {
     let cov: f32 = x.iter().zip(y).map(|(a, b)| (a - mx) * (b - my)).sum();
     let vx: f32 = x.iter().map(|a| (a - mx).powi(2)).sum();
     let vy: f32 = y.iter().map(|b| (b - my).powi(2)).sum();
-    if vx <= 0.0 || vy <= 0.0 { 0.0 } else { cov / (vx * vy).sqrt() }
+    if vx <= 0.0 || vy <= 0.0 {
+        0.0
+    } else {
+        cov / (vx * vy).sqrt()
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -663,15 +767,23 @@ pub fn is_library_file(name: &str) -> bool {
 /// skipping hidden files and folders.
 pub fn scan(dir: &Path) -> Vec<(String, String)> {
     fn walk(dir: &Path, rel: &str, depth: u32, out: &mut Vec<(String, String)>) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
             if name.starts_with('.') {
                 continue;
             }
             let path = e.path();
-            let Ok(meta) = std::fs::metadata(&path) else { continue };
-            let rel_name = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
+            let Ok(meta) = std::fs::metadata(&path) else {
+                continue;
+            };
+            let rel_name = if rel.is_empty() {
+                name.clone()
+            } else {
+                format!("{rel}/{name}")
+            };
             if meta.is_dir() {
                 if depth < 8 {
                     walk(&path, &rel_name, depth + 1, out);
@@ -697,7 +809,11 @@ pub fn scan(dir: &Path) -> Vec<(String, String)> {
 /// its collection is the file's folder.
 pub fn read_file(rel: &str, bytes: &[u8]) -> Result<Vec<LibraryPiece>, String> {
     let path = Path::new(rel);
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let mut pieces = if ext == "json" {
         parse_json(std::str::from_utf8(bytes).map_err(|_| "the file is not UTF-8 text")?)?
     } else {
@@ -709,16 +825,25 @@ pub fn read_file(rel: &str, bytes: &[u8]) -> Result<Vec<LibraryPiece>, String> {
     let many = pieces.len() > 1;
     for (k, p) in pieces.iter_mut().enumerate() {
         if p.id.is_empty() {
-            p.id = if many { format!("{base}#{}", k + 1) } else { base.to_string() };
+            p.id = if many {
+                format!("{base}#{}", k + 1)
+            } else {
+                base.to_string()
+            };
         }
         if p.title.is_empty() {
-            p.title = if many { format!("{stem} {}", k + 1) } else { stem.to_string() };
+            p.title = if many {
+                format!("{stem} {}", k + 1)
+            } else {
+                stem.to_string()
+            };
         }
         if p.collection.is_none() {
             p.collection = folder.clone();
         }
         p.file = rel.to_string();
-        p.finish().map_err(|e| if many { format!("pieces[{k}]: {e}") } else { e })?;
+        p.finish()
+            .map_err(|e| if many { format!("pieces[{k}]: {e}") } else { e })?;
     }
     for (k, p) in pieces.iter().enumerate() {
         if pieces[..k].iter().any(|q| q.id == p.id) {
@@ -732,7 +857,13 @@ pub fn read_file(rel: &str, bytes: &[u8]) -> Result<Vec<LibraryPiece>, String> {
 fn clean_name(name: &str) -> String {
     let s: String = name
         .chars()
-        .map(|c| if c.is_control() || r#"<>:"/\|?*"#.contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || r#"<>:"/\|?*"#.contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     s.trim().trim_matches('.').trim().to_string()
 }
@@ -759,7 +890,10 @@ pub fn write_file(dir: &Path, rel: &str, bytes: &[u8]) -> Result<(), String> {
     let target = resolve(dir, rel)?;
     let parent = target.parent().ok_or("invalid path")?;
     std::fs::create_dir_all(parent).map_err(|e| format!("creating {}: {e}", parent.display()))?;
-    let name = target.file_name().and_then(|n| n.to_str()).ok_or("invalid path")?;
+    let name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("invalid path")?;
     let tmp = parent.join(format!(".{name}.tmp"));
     std::fs::write(&tmp, bytes).map_err(|e| format!("writing {}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &target).map_err(|e| format!("writing {}: {e}", target.display()))
@@ -853,9 +987,15 @@ pub fn select<'a>(
             .ids
             .iter()
             .map(|id| {
-                let p = library.iter().find(|p| p.id == *id).ok_or_else(|| format!("the library has no piece `{id}`"))?;
+                let p = library
+                    .iter()
+                    .find(|p| p.id == *id)
+                    .ok_or_else(|| format!("the library has no piece `{id}`"))?;
                 if p.parts.len() < min_parts {
-                    return Err(format!("`{id}` has {} part(s); this exercise needs {min_parts}", p.parts.len()));
+                    return Err(format!(
+                        "`{id}` has {} part(s); this exercise needs {min_parts}",
+                        p.parts.len()
+                    ));
                 }
                 Ok(p)
             })
@@ -863,8 +1003,18 @@ pub fn select<'a>(
     }
     let out: Vec<&LibraryPiece> = library
         .iter()
-        .filter(|p| sel.collection.as_deref().is_none_or(|c| in_collection(p, c)))
-        .filter(|p| sel.tags.is_empty() || sel.tags.iter().any(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t))))
+        .filter(|p| {
+            sel.collection
+                .as_deref()
+                .is_none_or(|c| in_collection(p, c))
+        })
+        .filter(|p| {
+            sel.tags.is_empty()
+                || sel
+                    .tags
+                    .iter()
+                    .any(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
+        })
         .filter(|p| p.parts.len() >= min_parts)
         .collect();
     if out.is_empty() {
@@ -881,7 +1031,14 @@ pub fn select<'a>(
         return Err(if library.is_empty() {
             "the library is empty: add JSON or MIDI files to the library folder".into()
         } else {
-            format!("no library pieces {}", if what.is_empty() { "match".into() } else { what.join(", ") })
+            format!(
+                "no library pieces {}",
+                if what.is_empty() {
+                    "match".into()
+                } else {
+                    what.join(", ")
+                }
+            )
         });
     }
     Ok(out)
@@ -890,8 +1047,11 @@ pub fn select<'a>(
 /// The whole number of octaves that moves notes spanning `lo`–`hi` best into `range` (the
 /// fewest semitones outside it, then the smallest move).
 pub fn best_octave(lo: i32, hi: i32, range: NoteRange) -> i32 {
-    let cost = |k: i32| (range.low.0 - (lo + 12 * k)).max(0) + ((hi + 12 * k) - range.high.0).max(0);
-    (-3..=3).min_by_key(|k: &i32| (cost(*k), k.abs())).unwrap_or(0)
+    let cost =
+        |k: i32| (range.low.0 - (lo + 12 * k)).max(0) + ((hi + 12 * k) - range.high.0).max(0);
+    (-3..=3)
+        .min_by_key(|k: &i32| (cost(*k), k.abs()))
+        .unwrap_or(0)
 }
 
 /// Moves a melody by `k` octaves; the key and spelling stay, and the clef is chosen again.
@@ -913,13 +1073,17 @@ pub fn melody_range(m: &CompactMelody) -> Option<(i32, i32)> {
         CompactNote::Note { note, .. } => Some(note.midi()),
         CompactNote::Rest { .. } => None,
     });
-    midis.fold(None, |acc, x| Some(acc.map_or((x, x), |(lo, hi): (i32, i32)| (lo.min(x), hi.max(x)))))
+    midis.fold(None, |acc, x| {
+        Some(acc.map_or((x, x), |(lo, hi): (i32, i32)| (lo.min(x), hi.max(x))))
+    })
 }
 
 /// Moves a melody by whole octaves to sit best in `range`; the key and spelling stay. Returns
 /// the number of octaves moved.
 pub fn fit_octaves(m: &mut CompactMelody, range: NoteRange) -> i32 {
-    let Some((lo, hi)) = melody_range(m) else { return 0 };
+    let Some((lo, hi)) = melody_range(m) else {
+        return 0;
+    };
     let k = best_octave(lo, hi, range);
     shift_octaves(m, k);
     k
@@ -933,7 +1097,9 @@ mod tests {
         part.notes
             .iter()
             .map(|n| match n {
-                CompactNote::Note { note, beats } => format!("{}:{}", note.name(), fmt_beats(*beats)),
+                CompactNote::Note { note, beats } => {
+                    format!("{}:{}", note.name(), fmt_beats(*beats))
+                }
                 CompactNote::Rest { rest } => format!("R:{}", fmt_beats(*rest)),
             })
             .collect()
@@ -958,10 +1124,14 @@ mod tests {
 
     #[test]
     fn json_files_hold_one_piece_a_list_or_a_collection() {
-        let one = r#"{"title": "Air", "key": "Eb", "notes": [{"note": "Eb4", "beats": 2}, {"rest": 2}]}"#;
+        let one =
+            r#"{"title": "Air", "key": "Eb", "notes": [{"note": "Eb4", "beats": 2}, {"rest": 2}]}"#;
         let p = read_file("Book/air.json", one.as_bytes()).unwrap();
         assert_eq!(p.len(), 1);
-        assert_eq!((p[0].id.as_str(), p[0].title.as_str(), p[0].key.as_str()), ("Book/air", "Air", "Eb major"));
+        assert_eq!(
+            (p[0].id.as_str(), p[0].title.as_str(), p[0].key.as_str()),
+            ("Book/air", "Air", "Eb major")
+        );
         assert_eq!(p[0].collection.as_deref(), Some("Book"));
 
         let coll = r#"{"collection": "Duets", "tags": ["two-part"], "pieces": [
@@ -969,30 +1139,55 @@ mod tests {
                                          {"name": "Lower", "notes": "G4:2 A4:2"}]},
             {"id": "duet-2", "key": "D major", "notes": "D4 E4 F#4 G4"}]}"#;
         let p = read_file("set.json", coll.as_bytes()).unwrap();
-        assert_eq!(p.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["set#1", "duet-2"]);
+        assert_eq!(
+            p.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(),
+            ["set#1", "duet-2"]
+        );
         assert_eq!(p[0].collection.as_deref(), Some("Duets"));
         assert_eq!(p[0].tags, ["two-part"]);
         // The shorter part is padded to the same length.
         assert_eq!(pitches(&p[0].parts[1]), ["G4:2", "A4:2", "R:4"]);
         assert_eq!(p[1].scores().unwrap()[0].bars, 1);
 
-        let e = read_file("bad.json", br#"{"key": "C", "notes": [{"note": "H4", "beats": 1}]}"#).unwrap_err();
+        let e = read_file(
+            "bad.json",
+            br#"{"key": "C", "notes": [{"note": "H4", "beats": 1}]}"#,
+        )
+        .unwrap_err();
         assert!(e.contains("notes: [0]"), "{e}");
     }
 
     /// A type-1 MIDI file: a conductor track and one or two note tracks.
-    fn midi_file(tracks: &[(&str, &[(u32, u32, u8)])], key: Option<(i8, bool)>, sigs: &[(u32, u8, u8)]) -> Vec<u8> {
+    fn midi_file(
+        tracks: &[(&str, &[(u32, u32, u8)])],
+        key: Option<(i8, bool)>,
+        sigs: &[(u32, u8, u8)],
+    ) -> Vec<u8> {
         use midly::num::{u4, u7, u15, u24, u28};
-        use midly::{Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind};
+        use midly::{
+            Format, Header, MetaMessage, MidiMessage, Smf, Timing, TrackEvent, TrackEventKind,
+        };
         let mut conductor: Vec<(u32, TrackEventKind)> = vec![
-            (0, TrackEventKind::Meta(MetaMessage::TrackName(b"Exercise 4"))),
-            (0, TrackEventKind::Meta(MetaMessage::Tempo(u24::new(1_000_000)))),
+            (
+                0,
+                TrackEventKind::Meta(MetaMessage::TrackName(b"Exercise 4")),
+            ),
+            (
+                0,
+                TrackEventKind::Meta(MetaMessage::Tempo(u24::new(1_000_000))),
+            ),
         ];
         for &(t, n, d) in sigs {
-            conductor.push((t, TrackEventKind::Meta(MetaMessage::TimeSignature(n, d, 24, 8))));
+            conductor.push((
+                t,
+                TrackEventKind::Meta(MetaMessage::TimeSignature(n, d, 24, 8)),
+            ));
         }
         if let Some((sf, minor)) = key {
-            conductor.push((0, TrackEventKind::Meta(MetaMessage::KeySignature(sf, minor))));
+            conductor.push((
+                0,
+                TrackEventKind::Meta(MetaMessage::KeySignature(sf, minor)),
+            ));
         }
         let to_track = |mut evs: Vec<(u32, TrackEventKind<'static>)>| {
             evs.sort_by_key(|e| e.0);
@@ -1002,10 +1197,16 @@ mod tests {
                 .map(|(t, kind)| {
                     let delta = t - last;
                     last = t;
-                    TrackEvent { delta: u28::new(delta), kind }
+                    TrackEvent {
+                        delta: u28::new(delta),
+                        kind,
+                    }
                 })
                 .collect();
-            out.push(TrackEvent { delta: u28::new(0), kind: TrackEventKind::Meta(MetaMessage::EndOfTrack) });
+            out.push(TrackEvent {
+                delta: u28::new(0),
+                kind: TrackEventKind::Meta(MetaMessage::EndOfTrack),
+            });
             out
         };
         let mut all = vec![to_track(conductor)];
@@ -1014,12 +1215,33 @@ mod tests {
             let mut evs = vec![(0, TrackEventKind::Meta(MetaMessage::TrackName(name)))];
             for &(s, e, key) in notes.iter() {
                 let ch = u4::new(0);
-                evs.push((s, TrackEventKind::Midi { channel: ch, message: MidiMessage::NoteOn { key: u7::new(key), vel: u7::new(80) } }));
-                evs.push((e, TrackEventKind::Midi { channel: ch, message: MidiMessage::NoteOff { key: u7::new(key), vel: u7::new(0) } }));
+                evs.push((
+                    s,
+                    TrackEventKind::Midi {
+                        channel: ch,
+                        message: MidiMessage::NoteOn {
+                            key: u7::new(key),
+                            vel: u7::new(80),
+                        },
+                    },
+                ));
+                evs.push((
+                    e,
+                    TrackEventKind::Midi {
+                        channel: ch,
+                        message: MidiMessage::NoteOff {
+                            key: u7::new(key),
+                            vel: u7::new(0),
+                        },
+                    },
+                ));
             }
             all.push(to_track(evs));
         }
-        let smf = Smf { header: Header::new(Format::Parallel, Timing::Metrical(u15::new(480))), tracks: all };
+        let smf = Smf {
+            header: Header::new(Format::Parallel, Timing::Metrical(u15::new(480))),
+            tracks: all,
+        };
         let mut bytes = Vec::new();
         smf.write_std(&mut bytes).unwrap();
         bytes
@@ -1028,18 +1250,39 @@ mod tests {
     #[test]
     fn midi_parts_metre_pickup_and_key() {
         // A pickup quarter (2/4 bar of 1/4), then 3/4; slightly detached notes; key from notes.
-        let upper: &[(u32, u32, u8)] = &[(0, 450, 67), (480, 950, 72), (960, 1430, 74), (1440, 1900, 76), (1920, 3300, 72)];
+        let upper: &[(u32, u32, u8)] = &[
+            (0, 450, 67),
+            (480, 950, 72),
+            (960, 1430, 74),
+            (1440, 1900, 76),
+            (1920, 3300, 72),
+        ];
         let lower: &[(u32, u32, u8)] = &[(480, 1400, 60), (1440, 1900, 64), (1920, 3300, 60)];
-        let bytes = midi_file(&[("Alto", lower), ("Soprano", upper)], None, &[(0, 1, 2), (480, 3, 2)]);
+        let bytes = midi_file(
+            &[("Alto", lower), ("Soprano", upper)],
+            None,
+            &[(0, 1, 2), (480, 3, 2)],
+        );
         let p = read_file("Folk/ex4.mid", &bytes).unwrap().remove(0);
-        assert_eq!((p.title.as_str(), p.key.as_str(), p.time.to_string().as_str()), ("Exercise 4", "C major", "3/4"));
+        assert_eq!(
+            (
+                p.title.as_str(),
+                p.key.as_str(),
+                p.time.to_string().as_str()
+            ),
+            ("Exercise 4", "C major", "3/4")
+        );
         assert_eq!(p.tempo_bpm, Some(60.0));
         assert_eq!(p.parts[0].name.as_deref(), Some("Soprano"));
-        assert_eq!(pitches(&p.parts[0]), ["R:2", "G4:1", "C5:1", "D5:1", "E5:1", "C5:3"]);
+        assert_eq!(
+            pitches(&p.parts[0]),
+            ["R:2", "G4:1", "C5:1", "D5:1", "E5:1", "C5:3"]
+        );
         assert_eq!(pitches(&p.parts[1]), ["R:3", "C4:2", "E4:1", "C4:3"]);
 
         // A key signature wins; chords keep their top note.
-        let chords: &[(u32, u32, u8)] = &[(0, 480, 62), (0, 480, 66), (480, 960, 69), (480, 960, 64)];
+        let chords: &[(u32, u32, u8)] =
+            &[(0, 480, 62), (0, 480, 66), (480, 960, 69), (480, 960, 64)];
         let bytes = midi_file(&[("Piano", chords)], Some((2, false)), &[(0, 4, 2)]);
         let p = read_file("x.mid", &bytes).unwrap().remove(0);
         assert_eq!(p.key, "D major");
@@ -1069,11 +1312,24 @@ mod tests {
             .collect();
         let mut sorted = lib.clone();
         sorted.sort_by(|a, b| natural_cmp(&a.id, &b.id));
-        assert_eq!(sorted.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["A/one", "B/ex2", "B/ex10"]);
-        let sel = LibrarySelect { collection: Some("b".into()), ..LibrarySelect::default() };
+        assert_eq!(
+            sorted.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["A/one", "B/ex2", "B/ex10"]
+        );
+        let sel = LibrarySelect {
+            collection: Some("b".into()),
+            ..LibrarySelect::default()
+        };
         assert_eq!(select(&sorted, &sel, 1).unwrap().len(), 2);
-        assert!(select(&sorted, &sel, 2).unwrap_err().contains("2 or more parts"));
-        let sel = LibrarySelect { ids: vec!["A/one".into(), "nope".into()], ..LibrarySelect::default() };
+        assert!(
+            select(&sorted, &sel, 2)
+                .unwrap_err()
+                .contains("2 or more parts")
+        );
+        let sel = LibrarySelect {
+            ids: vec!["A/one".into(), "nope".into()],
+            ..LibrarySelect::default()
+        };
         assert!(select(&sorted, &sel, 1).unwrap_err().contains("`nope`"));
 
         let mut m = lib[0].melody(0);
@@ -1083,7 +1339,10 @@ mod tests {
 
     #[test]
     fn paths_stay_inside_the_folder() {
-        assert_eq!(file_path(Some("Ottman/Ch 3"), "12.json").unwrap(), "Ottman/Ch 3/12.json");
+        assert_eq!(
+            file_path(Some("Ottman/Ch 3"), "12.json").unwrap(),
+            "Ottman/Ch 3/12.json"
+        );
         assert_eq!(file_path(Some("../x"), "a?.mid").unwrap(), "x/a_.mid");
         assert!(file_path(None, "notes.txt").is_err());
         assert!(resolve(Path::new("/lib"), "../etc/passwd").is_err());

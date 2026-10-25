@@ -110,6 +110,8 @@ export const KIND_TITLES: Record<string, string> = {
   scale_degree_id: "Scale degrees",
   interval_comparison: "Interval comparison",
   harmony: "Harmony singing",
+  pitch_detect: "Find the note",
+  chord_color_id: "Chord colours",
 };
 
 /** Colours of the incidental-pairing task (same ids as the backend's PAIRING_COLORS). */
