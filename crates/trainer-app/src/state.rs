@@ -167,7 +167,14 @@ impl Core {
         if let Err(e) = db.sync_library(&self.library_dir()) {
             tracing::warn!("library sync failed: {e:#}");
         }
-        db.gen_context().unwrap_or_default()
+        let mut ctx = db.gen_context().unwrap_or_default();
+        let dir = self.soundfont_dir();
+        let mut dirs = vec![dir.as_path()];
+        if let Some(r) = &self.resource_soundfonts {
+            dirs.push(r.as_path());
+        }
+        ctx.soundfonts = Some(trainer_core::timbre::installed_soundfonts(&dirs));
+        ctx
     }
 
     pub fn library_dir(&self) -> PathBuf {

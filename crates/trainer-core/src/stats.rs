@@ -115,7 +115,7 @@ fn is_valid_field(f: &str) -> bool {
         .any(|p| f.starts_with(p) && f.len() > p.len())
 }
 
-fn median(mut v: Vec<f64>) -> Option<f64> {
+pub(crate) fn median(mut v: Vec<f64>) -> Option<f64> {
     if v.is_empty() {
         return None;
     }

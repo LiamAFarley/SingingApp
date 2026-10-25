@@ -74,6 +74,10 @@ pub struct PoolConfig {
 
 impl Default for PoolConfig {
     fn default() -> Self {
+        let sf_holdout = SOUNDFONT_PRESETS
+            .iter()
+            .filter(|p| p.pool == SfPool::Holdout)
+            .map(|p| p.id);
         PoolConfig {
             holdout_timbres: [
                 "gm:1",
@@ -85,10 +89,12 @@ impl Default for PoolConfig {
                 "synth:pulse",
                 "shepard",
             ]
-            .iter()
+            .into_iter()
+            .chain(sf_holdout)
             .map(|s| s.to_string())
             .collect(),
-            holdout_octaves: vec![2, 6],
+            // Every octave is open to training: the naming register is C3–B6 throughout.
+            holdout_octaves: Vec::new(),
         }
     }
 }
@@ -107,12 +113,113 @@ impl PoolConfig {
     }
 }
 
-/// Timbres used when a block does not name any.
-pub fn default_training_timbres() -> Vec<TimbreId> {
-    ["gm:0", "gm:48", "gm:73", "gm:24", "gm:52", "synth:triangle"]
+/// Timbres used when a block does not name any: General MIDI and synth timbres, plus the training
+/// presets of the extra SoundFonts in `installed` (all of them when `None`, i.e. not known).
+pub fn default_training_timbres(installed: Option<&[String]>) -> Vec<TimbreId> {
+    let gm = ["gm:0", "gm:48", "gm:73", "gm:24", "gm:52", "synth:triangle"];
+    let sf = SOUNDFONT_PRESETS
         .iter()
-        .map(|s| s.to_string())
-        .collect()
+        .filter(|p| p.pool == SfPool::Training)
+        .filter(|p| soundfont_installed(p.id, installed))
+        .map(|p| p.id);
+    gm.into_iter().chain(sf).map(|s| s.to_string()).collect()
+}
+
+/// Whether a timbre can be rendered as itself: `false` only for an `sf:` bank missing from
+/// `installed`. (A missing bank would fall back to a synth tone.)
+pub fn soundfont_installed(id: &str, installed: Option<&[String]>) -> bool {
+    match (Timbre::parse(id), installed) {
+        (Some(Timbre::SoundFont { bank, .. }), Some(list)) => {
+            list.iter().any(|b| b.eq_ignore_ascii_case(&bank))
+        }
+        _ => true,
+    }
+}
+
+/// File stems of the `.sf2` banks in `dirs` (the names `sf:` timbres use).
+pub fn installed_soundfonts(dirs: &[&std::path::Path]) -> Vec<String> {
+    let mut out = Vec::new();
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
+        };
+        for p in entries.flatten().map(|e| e.path()) {
+            let sf2 = p
+                .extension()
+                .and_then(|x| x.to_str())
+                .map(|x| x.eq_ignore_ascii_case("sf2"))
+                .unwrap_or(false);
+            if let (true, Some(stem)) = (sf2, p.file_stem().and_then(|s| s.to_str())) {
+                out.push(stem.to_string());
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SfPool {
+    Training,
+    Holdout,
+}
+
+/// An extra SoundFont preset that was measured for pitch accuracy (docs/SOUNDFONTS.md).
+pub struct SfPreset {
+    pub id: &'static str,
+    pub name: &'static str,
+    /// Lowest and highest MIDI note that renders in tune.
+    pub low: i32,
+    pub high: i32,
+    pub pool: SfPool,
+}
+
+const fn sf(id: &'static str, name: &'static str, low: i32, high: i32, pool: SfPool) -> SfPreset {
+    SfPreset { id, name, low, high, pool }
+}
+
+/// The measured presets, with the training/holdout split from docs/SOUNDFONTS.md.
+pub const SOUNDFONT_PRESETS: [SfPreset; 19] = [
+    sf("sf:UprightPiano:0", "Upright piano", 48, 83, SfPool::Training),
+    sf("sf:TenorSax:0", "Tenor saxophone", 48, 83, SfPool::Training),
+    sf("sf:ClassicalGuitar:0", "Classical guitar", 48, 83, SfPool::Training),
+    sf("sf:Viola:41", "Viola", 48, 83, SfPool::Training),
+    sf("sf:SoloVoices:0", "Male voice (Duncan)", 48, 83, SfPool::Training),
+    sf("sf:SoftVoice:0", "Soft female voice", 48, 83, SfPool::Training),
+    sf("sf:ConcertHarp:0", "Concert harp", 48, 83, SfPool::Training),
+    sf("sf:FrenchHorn:60", "French horn", 48, 83, SfPool::Holdout),
+    sf("sf:Trombone:57", "Trombone", 48, 83, SfPool::Holdout),
+    sf("sf:Cello:42", "Cello", 48, 72, SfPool::Holdout),
+    sf("sf:Violin:100", "Violin", 48, 83, SfPool::Holdout),
+    sf("sf:Flute:73", "Flute", 48, 83, SfPool::Holdout),
+    sf("sf:DrawbarOrgan:0", "Drawbar organ", 48, 83, SfPool::Holdout),
+    sf("sf:MaleOohs:1", "Male \"ooh\" ensemble", 50, 83, SfPool::Holdout),
+    sf("sf:OperaFemale:0", "Operatic female voice", 49, 75, SfPool::Holdout),
+    sf("sf:SoloVoices:1", "Male voice, \"na\"", 48, 83, SfPool::Holdout),
+    sf("sf:SoloVoices:4", "Male bass voice (Buck)", 48, 72, SfPool::Holdout),
+    sf("sf:SoloVoices:5", "Female voice (Dawn)", 48, 83, SfPool::Holdout),
+    sf("sf:HeavenChoir:1", "Choir", 48, 83, SfPool::Holdout),
+];
+
+/// The MIDI notes a timbre renders in tune, when that is limited. Extra SoundFonts were only
+/// measured over C3–B5, so an unlisted `sf:` preset is held to that too; General MIDI, synth and
+/// Shepard tones cover the whole keyboard.
+pub fn usable_range(id: &str) -> Option<(i32, i32)> {
+    if let Some(p) = SOUNDFONT_PRESETS.iter().find(|p| p.id == id) {
+        return Some((p.low, p.high));
+    }
+    match Timbre::parse(id) {
+        Some(Timbre::SoundFont { .. }) => Some((48, 83)),
+        _ => None,
+    }
+}
+
+/// Whether all twelve notes of `octave` are inside the timbre's usable range.
+pub fn octave_usable(id: &str, octave: i32) -> bool {
+    match usable_range(id) {
+        Some((lo, hi)) => 12 * (octave + 1) >= lo && 12 * (octave + 1) + 11 <= hi,
+        None => true,
+    }
 }
 
 pub const GM_PROGRAM_NAMES: [&str; 128] = [
@@ -274,10 +381,36 @@ mod tests {
     fn pools() {
         let p = PoolConfig::default();
         assert!(p.is_holdout("gm:1", 4));
-        assert!(p.is_holdout("gm:0", 6));
+        assert!(p.is_holdout("sf:FrenchHorn:60", 4));
+        // No octave is held out: the naming register is C3–B6 throughout.
+        assert!(!p.is_holdout("gm:0", 6));
+        assert!(!p.is_holdout("gm:0", 2));
         assert!(!p.is_holdout("gm:0", 4));
-        for t in default_training_timbres() {
+        for t in default_training_timbres(None) {
             assert!(!p.is_holdout_timbre(&t), "{t} must not be holdout");
         }
+        for sf in SOUNDFONT_PRESETS {
+            assert!(Timbre::parse(sf.id).is_some(), "{}", sf.id);
+            assert_eq!(p.is_holdout_timbre(sf.id), sf.pool == SfPool::Holdout, "{}", sf.id);
+        }
+    }
+
+    #[test]
+    fn soundfont_ranges_and_installs() {
+        // Cello is in tune C3–C5, so only octaves 3 and 4 are whole.
+        assert!(octave_usable("sf:Cello:42", 3));
+        assert!(octave_usable("sf:Cello:42", 4));
+        assert!(!octave_usable("sf:Cello:42", 5));
+        // Unmeasured SoundFont presets are held to C3–B5; GM covers the keyboard.
+        assert!(!octave_usable("sf:NewBank:3", 6));
+        assert!(octave_usable("gm:0", 6));
+        let installed = vec!["UprightPiano".to_string()];
+        let training = default_training_timbres(Some(installed.as_slice()));
+        assert!(training.contains(&"sf:UprightPiano:0".to_string()));
+        assert!(!training.contains(&"sf:TenorSax:0".to_string()));
+        assert!(training.contains(&"gm:0".to_string()));
+        assert!(soundfont_installed("gm:42", Some(installed.as_slice())));
+        assert!(!soundfont_installed("sf:Cello:42", Some(installed.as_slice())));
+        assert!(soundfont_installed("sf:Cello:42", None));
     }
 }

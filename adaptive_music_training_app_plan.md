@@ -465,24 +465,14 @@ Pitch-class identification · note labelling with octave · AP production · cro
 
 Identification response times are measured from stimulus onset on the audio clock; a missed deadline logs a `timeout` trial.
 
-### Assessment battery (preset `ap_assessment`)
+### Tests
 
-All holdout stimuli, no feedback, masks between trials, placed first in a session:
-
-1. 12-class identification, octaves 3–5, holdout piano-like timbre — 48 trials
-2. Cross-octave identification, octaves 2 and 6 — 24 trials
-3. Cross-timbre identification, all holdout timbres including `shepard` and `synth:sine` — 36 trials
-4. Speeded identification, 1500 ms deadline — 24 trials
-5. No-reference production, each pitch class once in random order, masked — 12 trials
-6. Tonal-centre identification on unfamiliar excerpts, no reference — 12 trials
-
-The report (`get_ap_profile`) gives: exact and ±1-semitone accuracy per test, median response time, 12×12 confusion matrix, signed-error histogram (systematic sharp or flat category bias), accuracy by timbre and by octave, production category accuracy and median |cents|, and comparison with earlier battery runs (retention when the gap is long).
+The `ap_assessment` battery was replaced on 25 October 2026 by four test courses: `ap_benchmark`, `ap_weekly`, `ap_transfer` and `ap_ucsf_style`. They run first in the day when due, with no feedback, 5 s per note and no replay. `docs/AP_TESTING.md` describes them and how `get_ap_profile` reports them.
 
 ### Presets shipped with the app
 
-- `ap_assessment` — the battery above.
-- Courses replace the progressive stages (`ap_research_integration_plan.md` §6): `ap_naming` (ten levels, three classes to twelve, ≥ 3 octaves, 13-semitone jumps, Other, a check without feedback per level), `ap_brady`, `ap_weekly`, `ap_ucsf_style` and `ap_maintenance`. A level passes on its rule and the course moves on; the daily set is composed from the active courses.
-- `ap_daily` — short mixed identification and production block.
+- `ap_benchmark`, `ap_weekly`, `ap_transfer`, `ap_ucsf_style` — the tests, built from their course definitions.
+- Courses replace the progressive stages (`ap_research_integration_plan.md` §6): `ap_naming` (ten levels, three classes to twelve, four octaves, 13-semitone jumps and two-octave steps, Other, a check without feedback per level), `ap_brady`, `ap_weekly`, `ap_ucsf_style` and `ap_maintenance`. A level passes on its rule and the course moves on; the daily set is composed from the active courses.
 
 Presets and "repeat last session" work without the LLM.
 
@@ -818,7 +808,7 @@ SingingApp/
 │  ├─ trainer-app/         Tauri 2 app: commands, session runner, queue watcher
 │  └─ trainer-mcp/         stdio MCP server (rmcp)
 ├─ ui/                     React + TypeScript + Vite (OSMD, canvas tuner, uPlot)
-├─ presets/                ap_assessment.json, ap_daily.json, … (AP courses are in courses.rs)
+├─ presets/                ap_pairing.json, … (AP courses and tests are in courses.rs)
 ├─ assets/                 soundfonts (FluidR3_GM), default stimulus pools
 ├─ ml/                     Part 2 Python worker (uv project)
 └─ docs/

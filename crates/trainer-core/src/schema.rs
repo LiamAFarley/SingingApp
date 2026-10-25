@@ -403,6 +403,12 @@ pub struct PitchIdParams {
     /// its interval from the last (labelled) tone. 13 needs at least three octaves.
     #[serde(default)]
     pub min_jump_semitones: u32,
+    /// Each tone is at least this many octaves (by octave number) from the previous one. At 2 every
+    /// note clears 13 semitones whatever its name, so the octave a tone lands in says nothing
+    /// about its name, as it can under `min_jump_semitones` alone. Needs four or more octaves;
+    /// where a timbre cannot step that far, `min_jump_semitones` decides.
+    #[serde(default)]
+    pub min_octave_step: u32,
     /// For a subset: this share of tones comes from outside it, at the edges of the range, and is
     /// answered "Other".
     #[serde(default)]

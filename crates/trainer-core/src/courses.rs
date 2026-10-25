@@ -15,6 +15,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
+pub use crate::ap_tests::{TestRun, TimbreAccuracy};
+use crate::ap_tests::{is_out_of_set, test_runs};
 use crate::generate::{GenContext, block_seed, generate_block};
 use crate::presets::AP_PROGRESSIVE_ORDER;
 use crate::schema::{BlockSpec, CourseRef, Mask, SessionSpec};
@@ -86,6 +88,8 @@ pub struct Course {
 
 pub const AP_NAMING: &str = "ap_naming";
 pub const AP_BRADY: &str = "ap_brady";
+pub const AP_BENCHMARK: &str = "ap_benchmark";
+pub const AP_TRANSFER: &str = "ap_transfer";
 pub const AP_WEEKLY: &str = "ap_weekly";
 pub const AP_UCSF_STYLE: &str = "ap_ucsf_style";
 pub const AP_MAINTENANCE: &str = "ap_maintenance";
@@ -115,8 +119,15 @@ pub(crate) fn block(course: &str, level: u32, verify: bool, mut v: Value) -> Blo
 }
 
 const NAMING_LEVELS: u32 = 10;
-/// Training octaves C3–B5: three octaves, so tones can always jump 13 semitones.
-pub(crate) const SPREAD: [i32; 3] = [3, 4, 5];
+/// The naming register, C3–B6, for training and the benchmark alike. Four octaves let each tone
+/// move two octaves from the last (`min_octave_step`), so its octave says nothing about its name.
+/// Timbres that cannot play in tune that high are kept to their range by the generator.
+pub(crate) const SPREAD: [i32; 4] = [3, 4, 5, 6];
+/// Octaves between consecutive naming tones.
+pub(crate) const STEP: u32 = 2;
+/// Answer time for every test without feedback: long enough to keep slow but genuine answers,
+/// too short to work a note out from another; replay is off. Within 2 s is scored afterwards.
+pub const TEST_DEADLINE_MS: u32 = 5000;
 
 fn naming_course() -> Course {
     let levels = (1..=NAMING_LEVELS)
@@ -134,7 +145,7 @@ fn naming_course() -> Course {
                 .join(" ");
             let params = json!({
                 "classes": class_json, "octaves": SPREAD, "min_jump_semitones": 13,
-                "out_of_set_rate": other, "deadline_ms": deadline,
+                "min_octave_step": STEP, "out_of_set_rate": other, "deadline_ms": deadline,
             });
             let mut train = params.clone();
             train["mask"] = json!("random_tones");
@@ -143,7 +154,7 @@ fn naming_course() -> Course {
             Level {
                 title: if all { "All twelve notes".into() } else { format!("{} notes", classes.len()) },
                 summary: format!(
-                    "{names}{}, over three octaves, answered within {:.1} s.",
+                    "{names}{}, over four octaves, answered within {:.1} s.",
                     if all { "" } else { ", plus Other for notes outside the set" },
                     deadline as f32 / 1000.0
                 ),
@@ -171,7 +182,7 @@ fn naming_course() -> Course {
         title: "Note naming".into(),
         short: "Naming".into(),
         category: "Absolute pitch".into(),
-        description: "Name a growing set of notes spread over three octaves, never two tones close together, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four passes, the last after a night's sleep.".into(),
+        description: "Name a growing set of notes spread over four octaves, each tone two octaves from the last, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four passes, the last after a night's sleep.".into(),
         schedule: Schedule::Ladder,
         levels,
     }
@@ -203,7 +214,7 @@ fn brady_course() -> Course {
             Level {
                 title: if uniform { "Even, 1.4 s apart".into() } else { format!("C {:.0}%, {:.1} s apart", c * 100.0, ioi as f32 / 1000.0) },
                 summary: format!(
-                    "All twelve notes over three octaves, a tone every {:.1} s{}. Keep C in your mind's ear and judge each note against it.",
+                    "All twelve notes over four octaves, a tone every {:.1} s{}. Keep C in your mind's ear and judge each note against it.",
                     ioi as f32 / 1000.0,
                     if uniform { ", all notes equally often".to_string() } else { format!(", C on {:.0}% of tones", c * 100.0) }
                 ),
@@ -236,6 +247,91 @@ fn brady_course() -> Course {
 }
 
 const WEEKLY_TIMBRES: [&str; 5] = ["gm:0", "gm:42", "gm:71", "gm:6", "synth:square"];
+/// C3–B5: cello and clarinet are out of their real range above and below it.
+const WEEKLY_OCTAVES: [i32; 3] = [3, 4, 5];
+
+/// The benchmark: singing from memory first, before any tone is heard, then sixty piano notes.
+fn benchmark_course() -> Course {
+    Course {
+        id: AP_BENCHMARK.into(),
+        title: "Benchmark".into(),
+        short: "Benchmark".into(),
+        category: "Absolute pitch".into(),
+        description: "The repeatable measure of where you are: twelve notes sung from memory before hearing anything, then sixty piano notes over four octaves with no feedback and 5 s to answer. Every two weeks, first thing, before any named note that day.".into(),
+        schedule: Schedule::Recurring { days: 14.0, on_test_day: false, after: None },
+        levels: vec![Level {
+            title: "Sing, then name".into(),
+            summary: "12 notes sung from memory, then 60 piano notes over four octaves, no feedback.".into(),
+            pass: PassRule::None,
+            blocks: vec![
+                block(AP_BENCHMARK, 1, true, json!({
+                    "type": "sing_pitch", "title": "Sing from memory", "count": 12, "assessment": true,
+                    "pre_mask": "shepard_glissando", "tags": ["ap.benchmark", "ap.production"],
+                    "instructions": "Sing each note as you remember it. Nothing plays it for you, and there is no feedback. Do not work it out from the note before.",
+                    "params": { "classes": "all", "response_ms": 4000, "pre_mask": "random_tones",
+                                "reveal_target_after": false },
+                })),
+                block(AP_BENCHMARK, 1, true, json!({
+                    "type": "pitch_id", "title": "Name the piano note", "count": 60, "assessment": true,
+                    "pre_mask": "shepard_glissando", "tags": ["ap.benchmark", "ap.baseline"],
+                    "instructions": "No results until the end, no replay, 5 s per note. Answer from the sound alone.",
+                    "params": { "classes": "all", "pool": "any", "timbres": ["gm:0"], "octaves": SPREAD,
+                                "min_jump_semitones": 13, "min_octave_step": STEP, "mask": "none",
+                                "deadline_ms": TEST_DEADLINE_MS },
+                })),
+            ],
+        }],
+    }
+}
+
+/// Instruments never used in training (the extra SoundFonts, two General MIDI ones as a fallback
+/// when those are not installed).
+const TRANSFER_TIMBRES: [&str; 8] = [
+    "sf:FrenchHorn:60",
+    "sf:Trombone:57",
+    "sf:Cello:42",
+    "sf:Violin:100",
+    "sf:DrawbarOrgan:0",
+    "sf:SoloVoices:5",
+    "gm:56",
+    "gm:11",
+];
+
+/// Transfer: untrained instruments, and the note name with the height taken away.
+fn transfer_course() -> Course {
+    Course {
+        id: AP_TRANSFER.into(),
+        title: "Transfer test".into(),
+        short: "Transfer".into(),
+        category: "Absolute pitch".into(),
+        description: "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.".into(),
+        schedule: Schedule::Recurring { days: 28.0, on_test_day: false, after: None },
+        levels: vec![Level {
+            title: "New instruments and Shepard tones".into(),
+            summary: "60 notes on untrained instruments, then 24 Shepard tones, no feedback.".into(),
+            pass: PassRule::None,
+            blocks: vec![
+                block(AP_TRANSFER, 1, true, json!({
+                    "type": "pitch_id", "title": "Untrained instruments", "count": 60, "assessment": true,
+                    "pre_mask": "shepard_glissando", "tags": ["ap.transfer", "ap.transfer.timbre"],
+                    "instructions": "Instruments you have not trained on. No results until the end, 5 s per note.",
+                    "params": { "classes": "all", "pool": "holdout", "timbres": TRANSFER_TIMBRES,
+                                "octaves": WEEKLY_OCTAVES, "min_jump_semitones": 13, "mask": "none",
+                                "deadline_ms": TEST_DEADLINE_MS },
+                })),
+                // Shepard tones are heard by name only, so a jump rule cannot separate them; a
+                // stream of random tones between them does instead.
+                block(AP_TRANSFER, 1, true, json!({
+                    "type": "pitch_id", "title": "Shepard tones", "count": 24, "assessment": true,
+                    "pre_mask": "shepard_glissando", "tags": ["ap.transfer", "ap.transfer.chroma"],
+                    "instructions": "Each tone has a note name but no high or low. Random tones play between them.",
+                    "params": { "classes": "all", "pool": "holdout", "timbres": ["shepard"], "octaves": [4],
+                                "mask": "random_tones", "deadline_ms": TEST_DEADLINE_MS },
+                })),
+            ],
+        }],
+    }
+}
 
 fn weekly_course() -> Course {
     Course {
@@ -243,7 +339,7 @@ fn weekly_course() -> Course {
         title: "Weekly test".into(),
         short: "Weekly test".into(),
         category: "Absolute pitch".into(),
-        description: "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback, after the pitch-memory clearing sound.".into(),
+        description: "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback and 5 s per note, after the pitch-memory clearing sound.".into(),
         schedule: Schedule::Recurring { days: 7.0, on_test_day: true, after: None },
         levels: vec![Level {
             title: "Five timbres".into(),
@@ -252,8 +348,8 @@ fn weekly_course() -> Course {
             blocks: vec![block(AP_WEEKLY, 1, true, json!({
                 "type": "pitch_id", "title": "Weekly test", "count": 120, "assessment": true,
                 "pre_mask": "shepard_glissando", "tags": ["ap.weekly"],
-                "params": { "classes": "all", "pool": "any", "timbres": WEEKLY_TIMBRES, "octaves": SPREAD,
-                            "min_jump_semitones": 13, "mask": "none" },
+                "params": { "classes": "all", "pool": "any", "timbres": WEEKLY_TIMBRES, "octaves": WEEKLY_OCTAVES,
+                            "min_jump_semitones": 13, "mask": "none", "deadline_ms": TEST_DEADLINE_MS },
             }))],
         }],
     }
@@ -264,7 +360,8 @@ fn ucsf_course() -> Course {
         let mut v = json!({
             "type": "pitch_id", "title": title, "count": 36, "assessment": true, "tags": ["ap.ucsf_style"],
             "params": { "classes": "all", "pool": "any", "timbres": [timbre], "octaves": [2, 3, 4, 5, 6],
-                        "min_jump_semitones": 13, "mask": "none" },
+                        "min_jump_semitones": 13, "min_octave_step": STEP, "mask": "none",
+                        "deadline_ms": TEST_DEADLINE_MS },
         });
         if let Some(m) = pre {
             v["pre_mask"] = json!(m);
@@ -296,15 +393,16 @@ fn maintenance_course() -> Course {
         title: "Maintenance".into(),
         short: "Maintenance".into(),
         category: "Absolute pitch".into(),
-        description: "Five minutes of all twelve notes over three octaves and several timbres, twice a week, once note naming is complete.".into(),
+        description: "Five minutes of all twelve notes over four octaves and several timbres, twice a week, once note naming is complete.".into(),
         schedule: Schedule::Recurring { days: 3.5, on_test_day: false, after: Some(AP_NAMING.into()) },
         levels: vec![Level {
             title: "All twelve notes".into(),
-            summary: "All twelve notes, three octaves, 2 s to answer.".into(),
+            summary: "All twelve notes, four octaves, 2 s to answer.".into(),
             pass: PassRule::None,
             blocks: vec![block(AP_MAINTENANCE, 1, true, json!({
                 "type": "pitch_id", "title": "Maintenance", "count": 40, "tags": ["ap.maintenance"],
-                "params": { "classes": "all", "octaves": SPREAD, "min_jump_semitones": 13, "deadline_ms": 2000,
+                "params": { "classes": "all", "octaves": SPREAD, "min_jump_semitones": 13,
+                            "min_octave_step": STEP, "deadline_ms": 2000,
                             "mask": "random_tones" },
             }))],
         }],
@@ -314,7 +412,14 @@ fn maintenance_course() -> Course {
 pub fn builtin_courses() -> Vec<Course> {
     let mut courses = vec![naming_course(), brady_course()];
     courses.extend(crate::ap_courses::courses());
-    courses.extend([weekly_course(), ucsf_course(), maintenance_course()]);
+    // Tests in the order they run when several are due: the benchmark before anything is heard.
+    courses.extend([
+        benchmark_course(),
+        weekly_course(),
+        transfer_course(),
+        ucsf_course(),
+        maintenance_course(),
+    ]);
     courses
 }
 
@@ -374,7 +479,7 @@ fn parse_time(s: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Unassisted trials tagged with a course (or a course level), newest first.
-fn tagged_trials(db: &Db, tag: &str, limit: u32) -> Result<Vec<TrialRow>> {
+pub(crate) fn tagged_trials(db: &Db, tag: &str, limit: u32) -> Result<Vec<TrialRow>> {
     db.query_trials(
         &TrialFilter {
             tag: Some(tag.into()),
@@ -989,6 +1094,11 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
             None => Ok(true),
         }
     };
+    // Tests should come before any named note of the day.
+    let named_today = db
+        .last_labeled_reference_at()?
+        .map(|t| t.with_timezone(&Local).date_naive() == now.with_timezone(&Local).date_naive())
+        .unwrap_or(false);
     let mut out = Vec::new();
     for c in &courses {
         let level = current_level(db, c)?;
@@ -1017,8 +1127,11 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
                     Some(a) => complete_of(a)?,
                     None => true,
                 };
-                let (d, note) =
+                let (d, mut note) =
                     recurring_due(*days, *on_test_day, after_ok, last.as_deref(), &plan, now);
+                if d && named_today {
+                    note.push_str(" Named notes were heard today, so it is better run first thing tomorrow.");
+                }
                 (d, Some(note))
             }
         };
@@ -1271,27 +1384,6 @@ pub struct ClassProgress {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
-pub struct TestRun {
-    pub session_id: String,
-    pub at: String,
-    pub trials: u32,
-    pub accuracy: f64,
-    /// UCSF-style points as a share of the maximum (1 exact, 0.75 a semitone off).
-    pub ucsf_points: f64,
-    /// Mean absolute error in semitones, folded to the nearest octave (0 perfect, 3 chance).
-    pub mad: Option<f64>,
-    /// Accuracy per timbre.
-    pub by_timbre: Vec<TimbreAccuracy>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
-pub struct TimbreAccuracy {
-    pub timbre: String,
-    pub trials: u32,
-    pub accuracy: f64,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct AnchorPoint {
     pub at: String,
     /// Cents from the nearest real C (or whichever note was asked).
@@ -1303,7 +1395,10 @@ pub struct ApDashboard {
     pub classes: Vec<ClassProgress>,
     pub classes_mastered: u32,
     pub courses: Vec<CourseStatus>,
+    /// Each test's runs, oldest first.
+    pub benchmark: Vec<TestRun>,
     pub weekly: Vec<TestRun>,
+    pub transfer: Vec<TestRun>,
     pub ucsf_style: Vec<TestRun>,
     /// Singing your anchor from memory, oldest first.
     pub anchor: Vec<AnchorPoint>,
@@ -1311,73 +1406,6 @@ pub struct ApDashboard {
     /// Minutes of absolute-pitch sessions in the last 7 days.
     pub minutes_this_week: f64,
     pub plan: DailyPlan,
-}
-
-fn is_out_of_set(t: &TrialRow) -> bool {
-    t.stimulus
-        .get("out_of_set")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn test_runs(db: &Db, course: &str) -> Result<Vec<TestRun>> {
-    let trials = tagged_trials(db, &format!("course.{course}"), 20_000)?;
-    let mut by_session: BTreeMap<String, Vec<&TrialRow>> = BTreeMap::new();
-    for t in &trials {
-        if t.correct.is_some() && !is_out_of_set(t) {
-            by_session.entry(t.session_id.clone()).or_default().push(t);
-        }
-    }
-    let mut out: Vec<TestRun> = by_session
-        .into_iter()
-        .map(|(sid, rows)| {
-            let n = rows.len() as f64;
-            let correct = rows.iter().filter(|t| t.correct == Some(true)).count() as f64;
-            let points: f64 = rows
-                .iter()
-                .filter_map(|t| t.metrics.get("ucsf_points").and_then(Value::as_f64))
-                .sum();
-            let errs: Vec<f64> = rows
-                .iter()
-                .filter_map(|t| t.metrics.get("class_error").and_then(Value::as_f64))
-                .map(f64::abs)
-                .collect();
-            let mut timbres: BTreeMap<String, (u32, u32)> = BTreeMap::new();
-            for t in &rows {
-                let k = t
-                    .stimulus
-                    .get("timbre")
-                    .and_then(Value::as_str)
-                    .unwrap_or("?")
-                    .to_string();
-                let e = timbres.entry(k).or_default();
-                e.0 += 1;
-                e.1 += (t.correct == Some(true)) as u32;
-            }
-            TestRun {
-                session_id: sid,
-                at: rows
-                    .iter()
-                    .map(|t| t.started_at.clone())
-                    .min()
-                    .unwrap_or_default(),
-                trials: n as u32,
-                accuracy: correct / n,
-                ucsf_points: points / n,
-                mad: (!errs.is_empty()).then(|| errs.iter().sum::<f64>() / errs.len() as f64),
-                by_timbre: timbres
-                    .into_iter()
-                    .map(|(timbre, (k, c))| TimbreAccuracy {
-                        timbre,
-                        trials: k,
-                        accuracy: c as f64 / k as f64,
-                    })
-                    .collect(),
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| a.at.cmp(&b.at));
-    Ok(out)
 }
 
 pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
@@ -1506,7 +1534,9 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
         classes_mastered: classes.iter().filter(|c| c.mastered).count() as u32,
         classes,
         courses,
+        benchmark: test_runs(db, AP_BENCHMARK)?,
         weekly: test_runs(db, AP_WEEKLY)?,
+        transfer: test_runs(db, AP_TRANSFER)?,
         ucsf_style: test_runs(db, AP_UCSF_STYLE)?,
         anchor,
         anchor_median_abs_cents,
@@ -1711,7 +1741,12 @@ mod tests {
         // 25 October 2026 is a Sunday, the default test day.
         let sunday = compose_daily_set(&db, &ctx, at(25, 12, 0)).unwrap();
         let courses: Vec<&str> = sunday.items.iter().map(|i| i.course.as_str()).collect();
-        assert_eq!(&courses[..2], [AP_WEEKLY, AP_UCSF_STYLE]);
+        // The benchmark and transfer test are due on their first run; the benchmark goes first,
+        // before anything is heard.
+        assert_eq!(
+            &courses[..4],
+            [AP_BENCHMARK, AP_WEEKLY, AP_TRANSFER, AP_UCSF_STYLE]
+        );
         assert!(courses.contains(&AP_NAMING) && courses.contains(&AP_BRADY));
         assert!(
             !courses.contains(&AP_MAINTENANCE),
@@ -1721,8 +1756,11 @@ mod tests {
         assert!(sunday.spec.blocks.iter().all(|b| b.course.is_some()));
         assert!(validate_session(&sunday.spec, &ctx).ok);
 
+        // Done on Sunday, the two-weekly and four-weekly tests are not due on Monday.
+        add_block(&db, AP_BENCHMARK, 1, true, at(25, 9, 0), 60, 0.3);
+        add_block(&db, AP_TRANSFER, 1, true, at(25, 9, 30), 60, 0.2);
         let monday = compose_daily_set(&db, &ctx, at(26, 12, 0)).unwrap();
-        assert!(monday.items.iter().all(|i| !i.test));
+        assert!(monday.items.iter().all(|i| !i.test), "{:?}", monday.items);
         // About the planned 25 minutes, plus the clearing sound.
         assert!((18.0..34.0).contains(&monday.minutes), "{}", monday.minutes);
         assert_eq!(monday.spec.blocks[0].pre_mask, Some(Mask::ShepardGlissando));

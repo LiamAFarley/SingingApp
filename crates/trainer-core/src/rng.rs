@@ -111,6 +111,14 @@ impl<T: Clone + PartialEq> BalancedBag<T> {
         if self.items.is_empty() {
             return None;
         }
+        self.refill_if_empty(rng);
+        let item = self.bag.pop();
+        self.last = item.clone();
+        item
+    }
+
+    /// Starts the next shuffled cycle when this one is used up.
+    pub fn refill_if_empty(&mut self, rng: &mut Rng) {
         if self.bag.is_empty() {
             self.bag = self.items.clone();
             rng.shuffle(&mut self.bag);
@@ -119,9 +127,29 @@ impl<T: Clone + PartialEq> BalancedBag<T> {
                 self.bag.swap(n - 1, 0);
             }
         }
-        let item = self.bag.pop();
-        self.last = item.clone();
-        item
+    }
+
+    /// Returns a drawn item that was not used, at a random place among those still to come, so
+    /// the counts stay balanced.
+    pub fn put_back(&mut self, item: T, rng: &mut Rng) {
+        let at = rng.below(self.bag.len() + 1);
+        self.bag.insert(at, item);
+    }
+
+    /// Takes one `item` out of those still to come, if it is there, because it was used in place
+    /// of a drawn one.
+    pub fn take(&mut self, item: &T) -> bool {
+        match self.bag.iter().position(|x| x == item) {
+            Some(i) => {
+                self.bag.remove(i);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn pending(&self, item: &T) -> bool {
+        self.bag.contains(item)
     }
 }
 

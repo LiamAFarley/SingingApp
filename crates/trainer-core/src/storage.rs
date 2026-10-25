@@ -1182,6 +1182,7 @@ impl Db {
             anchors: self.anchors()?,
             library: self.library()?,
             labels: crate::labels::sets_from_db(self)?,
+            soundfonts: None,
         })
     }
 

@@ -14,6 +14,7 @@ use crate::schema::{
     ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams,
     SingPitchParams, SustainParams, TonalCenterIdParams,
 };
+use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, test_runs};
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
 use crate::storage::{Db, SessionRow, SessionStatus, TrialFilter, TrialRow};
 
@@ -246,84 +247,109 @@ pub fn trial_detail(db: &Db, trial_id: &str) -> Result<Value> {
     Ok(v)
 }
 
-/// Results of the most recent absolute-pitch assessment, compared with the previous one.
+/// One test's history: the latest run, the one before, whether the change between them is bigger
+/// than run-to-run noise, and the trend over every run.
+fn test_history(runs: &[TestRun]) -> Value {
+    let Some(latest) = runs.last() else {
+        return Value::Null;
+    };
+    let previous = runs.len().checked_sub(2).map(|i| &runs[i]);
+    let change = previous.map(|p| {
+        let d = latest.accuracy - p.accuracy;
+        let se = (latest.accuracy * (1.0 - latest.accuracy) / latest.trials.max(1) as f64
+            + p.accuracy * (1.0 - p.accuracy) / p.trials.max(1) as f64)
+            .sqrt();
+        json!({
+            "accuracy": d,
+            "accuracy_noise_95": 1.96 * se,
+            "beyond_noise": d.abs() > 1.96 * se,
+            "ucsf_points": latest.ucsf_points - p.ucsf_points,
+            "mad": match (latest.mad, p.mad) { (Some(a), Some(b)) => json!(a - b), _ => Value::Null },
+            "in_time": latest.in_time - p.in_time,
+        })
+    });
+    json!({
+        "runs": runs.len(),
+        "latest": latest,
+        "previous": previous,
+        "change_from_previous": change,
+        "trend_per_30_days": trend_per_30_days(runs),
+        "history": runs.iter().map(|r| json!({
+            "at": r.at, "trials": r.trials, "accuracy": r.accuracy, "in_time": r.in_time,
+            "ucsf_points": r.ucsf_points, "mad": r.mad, "shepard": r.shepard,
+            "sung_accuracy": r.sung.as_ref().map(|s| s.accuracy),
+            "sung_median_abs_cents": r.sung.as_ref().and_then(|s| s.median_abs_cents),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+/// Least-squares slope of accuracy and UCSF points per 30 days, from three runs on.
+fn trend_per_30_days(runs: &[TestRun]) -> Value {
+    let pts: Vec<(f64, &TestRun)> = runs
+        .iter()
+        .filter(|r| r.trials > 0)
+        .filter_map(|r| {
+            chrono::DateTime::parse_from_rfc3339(&r.at)
+                .ok()
+                .map(|t| (t.timestamp() as f64 / 86_400.0, r))
+        })
+        .collect();
+    if pts.len() < 3 {
+        return Value::Null;
+    }
+    let slope = |f: &dyn Fn(&TestRun) -> f64| {
+        let n = pts.len() as f64;
+        let mx = pts.iter().map(|p| p.0).sum::<f64>() / n;
+        let my = pts.iter().map(|p| f(p.1)).sum::<f64>() / n;
+        let sxx: f64 = pts.iter().map(|p| (p.0 - mx).powi(2)).sum();
+        let sxy: f64 = pts.iter().map(|p| (p.0 - mx) * (f(p.1) - my)).sum();
+        if sxx > 0.0 { sxy / sxx * 30.0 } else { 0.0 }
+    };
+    json!({ "accuracy": slope(&|r| r.accuracy), "ucsf_points": slope(&|r| r.ucsf_points) })
+}
+
+/// The absolute-pitch tests: the benchmark in detail, and the weekly, transfer and UCSF-style
+/// tests. Runs are found by their course tags, whether started on their own or in today's set.
 pub fn ap_profile(db: &Db) -> Result<Value> {
-    let sessions: Vec<SessionRow> = db
-        .list_sessions(Some(SessionStatus::Completed), 200)?
+    use crate::courses::{AP_BENCHMARK, AP_TRANSFER, AP_UCSF_STYLE, AP_WEEKLY};
+    let benchmark = test_runs(db, AP_BENCHMARK)?;
+    let mut bench = test_history(&benchmark);
+    if let Some(latest) = benchmark.last() {
+        let tag = format!("course.{AP_BENCHMARK}.");
+        let rows: Vec<TrialRow> = db
+            .trials_for_session(&latest.session_id)?
+            .into_iter()
+            .filter(|t| t.kind == ExerciseKind::PitchId.as_str() && !t.assisted)
+            .filter(|t| t.tags.iter().any(|g| g.starts_with(&tag)))
+            .collect();
+        bench["identification_confusion"] = serde_json::to_value(confusion(&rows))?;
+        bench["signed_error_by_pitch_class"] =
+            serde_json::to_value(aggregate(&rows, &["stimulus.pitch_class".into()]))?;
+        bench["by_octave"] = serde_json::to_value(aggregate(&rows, &["stimulus.octave".into()]))?;
+    }
+    let legacy = db
+        .list_sessions(Some(SessionStatus::Completed), 500)?
         .into_iter()
         .filter(|s| s.protocol.as_deref() == Some("ap_assessment"))
-        .collect();
-    let Some(latest) = sessions.first() else {
-        return Ok(
-            json!({ "assessment": null, "message": "No completed absolute pitch assessment yet (preset ap_assessment)." }),
-        );
-    };
-    let profile = |s: &SessionRow| -> Result<Value> {
-        let trials = db.trials_for_session(&s.id)?;
-        let spec = s.spec().ok();
-        let mut blocks = Vec::new();
-        for b in 0..spec.as_ref().map(|s| s.blocks.len()).unwrap_or(0) {
-            let rows: Vec<TrialRow> = trials
-                .iter()
-                .filter(|t| t.block_idx as usize == b)
-                .cloned()
-                .collect();
-            if rows.is_empty() {
-                continue;
-            }
-            let st = aggregate(&rows, &[]).into_iter().next();
-            let within_one = rows
-                .iter()
-                .filter(|t| {
-                    t.metrics
-                        .get("signed_error")
-                        .and_then(Value::as_i64)
-                        .map(|e| e.abs() <= 1)
-                        .unwrap_or(false)
-                })
-                .count();
-            let title = spec
-                .as_ref()
-                .map(|s| s.blocks[b].display_title())
-                .unwrap_or_default();
-            let mut entry = json!({
-                "title": title,
-                "type": rows[0].kind,
-                "trials": rows.len(),
-                "accuracy": st.as_ref().and_then(|s| s.accuracy),
-                "within_one_semitone": within_one as f64 / rows.len() as f64,
-                "median_rt_ms": st.as_ref().and_then(|s| s.median_rt_ms),
-                "median_abs_cents": st.as_ref().and_then(|s| s.median_abs_cents),
-            });
-            if rows[0].kind == ExerciseKind::PitchId.as_str() {
-                entry["by_timbre"] =
-                    serde_json::to_value(aggregate(&rows, &["stimulus.timbre".into()]))?;
-                entry["by_octave"] =
-                    serde_json::to_value(aggregate(&rows, &["stimulus.octave".into()]))?;
-            }
-            blocks.push(entry);
-        }
-        let id_rows: Vec<TrialRow> = trials
-            .iter()
-            .filter(|t| t.kind == ExerciseKind::PitchId.as_str())
-            .cloned()
-            .collect();
-        Ok(json!({
-            "session_id": s.id,
-            "completed_at": s.completed_at,
-            "blocks": blocks,
-            "identification_confusion": confusion(&id_rows),
-            "signed_error_by_pitch_class": aggregate(&id_rows, &["stimulus.pitch_class".into()]),
-        }))
-    };
-    let current = profile(latest)?;
-    let previous = match sessions.get(1) {
-        Some(p) => Some(profile(p)?),
-        None => None,
-    };
-    Ok(
-        json!({ "assessment": current, "previous": previous, "assessments_completed": sessions.len() }),
-    )
+        .count();
+    Ok(json!({
+        "scoring": {
+            "answer_limit_ms": crate::courses::TEST_DEADLINE_MS,
+            "in_time_ms": IN_TIME_MS,
+            "times_measured_from": "tone onset (tones last 1 s)",
+            "chance": CHANCE,
+            "accuracy": "correct within the answer limit; timeouts count as wrong",
+            "ucsf_points": "1 exact, 0.75 a semitone off, 0 otherwise, as a share of the maximum",
+            "mad": "mean absolute error in semitones over answered notes, 0 perfect, 3 chance",
+        },
+        "benchmark": bench,
+        "weekly": test_history(&test_runs(db, AP_WEEKLY)?),
+        "transfer": test_history(&test_runs(db, AP_TRANSFER)?),
+        "ucsf_style": test_history(&test_runs(db, AP_UCSF_STYLE)?),
+        "legacy_assessments": legacy,
+        "legacy_note": (legacy > 0).then_some("Runs of the old ap_assessment preset (holdout piano, random-tone masks) are not comparable with these tests and are left out."),
+        "guide": "docs/AP_TESTING.md",
+    }))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -504,7 +530,9 @@ mod tests {
         assert_eq!(o["trials_total"], json!(4));
         let d = trial_detail(&db, &r.trials[0].id).unwrap();
         assert_eq!(d["type"], json!("pitch_id"));
-        assert!(ap_profile(&db).unwrap()["assessment"].is_null());
+        let profile = ap_profile(&db).unwrap();
+        assert!(profile["benchmark"].is_null());
+        assert_eq!(profile["scoring"]["answer_limit_ms"], json!(5000));
     }
 
     #[test]

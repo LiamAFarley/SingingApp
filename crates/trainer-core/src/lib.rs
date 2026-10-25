@@ -3,6 +3,7 @@
 //! by the MCP server, so both always agree on what an exercise is and how it is graded.
 
 pub mod ap_courses;
+pub mod ap_tests;
 pub mod courses;
 pub mod generate;
 pub mod grade;

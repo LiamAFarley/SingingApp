@@ -342,7 +342,9 @@ impl<'a> SessionRun<'a> {
                     });
                     let cfg = grading(&trial);
                     let res = match &trial {
-                        TrialSpec::Identify(t) => self.run_identify(&engine, t, feedback, attempt),
+                        TrialSpec::Identify(t) => {
+                            self.run_identify(&engine, t, feedback, attempt, block.assessment)
+                        }
                         TrialSpec::SingPitch(t) => {
                             self.run_sing_pitch(&engine, t, &cfg, feedback, attempt, &ctx)
                         }
@@ -511,6 +513,7 @@ impl<'a> SessionRun<'a> {
         t: &IdentifyTrial,
         feedback: FeedbackMode,
         attempt: u32,
+        assessment: bool,
     ) -> R<Option<(TrialOutcome, Extras)>> {
         let renderer = self.core.renderer();
         let stim = Arc::new(renderer.render_events(&t.events));
@@ -561,7 +564,9 @@ impl<'a> SessionRun<'a> {
         view.choices = t.choices.clone();
         view.layout = layout;
         view.deadline_ms = deadline_ms;
-        view.can_replay = deadline_ms.is_none();
+        // A test plays each tone once, whatever its answer limit.
+        let can_replay = deadline_ms.is_none() && !assessment;
+        view.can_replay = can_replay;
         view.can_reference = t.reference.is_some();
         // The countdown starts where response times do.
         view.response_start_s = Some(
@@ -607,7 +612,7 @@ impl<'a> SessionRun<'a> {
                     };
                     break (Some(choice), Some(rt));
                 }
-                Some(RunnerCommand::Replay) if answering && deadline.is_none() => {
+                Some(RunnerCommand::Replay) if answering && can_replay => {
                     replays += 1;
                     engine.play_now(stim.clone(), 1.0, Bus::Prompt)?;
                 }

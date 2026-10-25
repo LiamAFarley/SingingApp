@@ -4,7 +4,7 @@ use serde_json::{Value, json};
 
 use crate::courses::{
     AP_CHORD_COLORS, AP_CONTRAST, AP_NOTE_COLORS, AP_SPEED, Course, ERRORLESS_DEFAULT_TAG, Level,
-    PassRule, SPREAD, Schedule, block,
+    PassRule, SPREAD, STEP, Schedule, block,
 };
 use crate::labels::{self, GERVAIN_NAMES, TANEDA_COLORS};
 
@@ -69,7 +69,7 @@ fn speed_course() -> Course {
     }
 }
 
-/// C E G, then the other white keys, then the black keys, then three octaves.
+/// C E G, then the other white keys, then the black keys, then four octaves.
 const COLOR_ORDER: [&str; 12] = [
     "C", "E", "G", "D", "F", "A", "B", "F#", "C#", "G#", "D#", "A#",
 ];
@@ -94,9 +94,9 @@ fn note_colors_course() -> Course {
         let mut check = practice.clone();
         check["mask"] = json!("none");
         levels.push(Level {
-            title: if n == 12 { "All twelve, within 2 s".into() } else { "All twelve, three octaves".into() },
+            title: if n == 12 { "All twelve, within 2 s".into() } else { "All twelve, four octaves".into() },
             summary: format!(
-                "All twelve colours over three octaves, at least 13 semitones apart, answered within {:.1} s. The check has no feedback.",
+                "All twelve colours over four octaves, each two octaves from the last, answered within {:.1} s. The check has no feedback.",
                 deadline as f32 / 1000.0
             ),
             pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
@@ -111,7 +111,7 @@ fn note_colors_course() -> Course {
         title: "Note colours (Taneda)".into(),
         short: "Colours".into(),
         category: "Absolute pitch".into(),
-        description: "Taneda's colours, starting from C, E and G in one octave and adding a key at each level. Early levels are errorless: a miss is not marked, the right colour lights up, and that note comes back. Later levels spread over three octaves and show ordinary feedback.".into(),
+        description: "Taneda's colours, starting from C, E and G in one octave and adding a key at each level. Early levels are errorless: a miss is not marked, the right colour lights up, and that note comes back. Later levels spread over four octaves and show ordinary feedback.".into(),
         schedule: Schedule::Ladder,
         levels,
     }
@@ -138,6 +138,9 @@ fn color_params(
     }
     if jump > 0 {
         params["min_jump_semitones"] = json!(jump);
+        if octaves.len() >= 4 {
+            params["min_octave_step"] = json!(STEP);
+        }
     }
     if let Some(ms) = deadline {
         params["deadline_ms"] = json!(ms);
@@ -327,8 +330,8 @@ fn contrast_course() -> Course {
     let mut spread_check = spread.clone();
     spread_check["mask"] = json!("none");
     levels.push(Level {
-        title: "Black keys, three octaves".into(),
-        summary: "The five black keys over three octaves, at least 13 semitones apart. The check has no feedback.".into(),
+        title: "Black keys, four octaves".into(),
+        summary: "The five black keys over four octaves, each two octaves from the last. The check has no feedback.".into(),
         pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
         blocks: vec![
             contrast_block(4, false, "Name the word", 24, "after_trial", spread, "Do not hum. Answer with the word."),
@@ -348,7 +351,7 @@ fn contrast_course() -> Course {
     all_check["mask"] = json!("none");
     levels.push(Level {
         title: "All twelve words".into(),
-        summary: "All twelve names over three octaves, within 2 s. The check has no feedback."
+        summary: "All twelve names over four octaves, within 2 s. The check has no feedback."
             .into(),
         pass: PassRule::Accuracy {
             min: 0.9,
@@ -407,6 +410,9 @@ fn contrast_params(
     }
     if jump > 0 {
         params["min_jump_semitones"] = json!(jump);
+        if octaves.len() >= 4 {
+            params["min_octave_step"] = json!(STEP);
+        }
     }
     if let Some(ms) = deadline {
         params["deadline_ms"] = json!(ms);

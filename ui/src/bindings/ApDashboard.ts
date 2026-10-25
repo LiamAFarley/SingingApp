@@ -5,7 +5,11 @@ import type { CourseStatus } from "./CourseStatus";
 import type { DailyPlan } from "./DailyPlan";
 import type { TestRun } from "./TestRun";
 
-export type ApDashboard = { classes: Array<ClassProgress>, classes_mastered: number, courses: Array<CourseStatus>, weekly: Array<TestRun>, ucsf_style: Array<TestRun>, 
+export type ApDashboard = { classes: Array<ClassProgress>, classes_mastered: number, courses: Array<CourseStatus>, 
+/**
+ * Each test's runs, oldest first.
+ */
+benchmark: Array<TestRun>, weekly: Array<TestRun>, transfer: Array<TestRun>, ucsf_style: Array<TestRun>, 
 /**
  * Singing your anchor from memory, oldest first.
  */

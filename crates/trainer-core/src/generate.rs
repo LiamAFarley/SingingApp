@@ -8,7 +8,10 @@ use crate::rng::{BalancedBag, Rng, WeightedBag};
 use crate::schema::*;
 use crate::score::{ClefChoice, CompactMelody, KeySig, Pitch, Score, ScoreNote, note_events};
 use crate::theory::{ChordQuality, Interval, Note, PitchClass, ScaleKind};
-use crate::timbre::{PoolConfig, TimbreId, default_training_timbres, is_valid_timbre};
+use crate::timbre::{
+    PoolConfig, TimbreId, default_training_timbres, is_valid_timbre, octave_usable,
+    soundfont_installed,
+};
 
 #[derive(Clone, Debug)]
 pub struct GenContext {
@@ -21,6 +24,8 @@ pub struct GenContext {
     pub library: Vec<LibraryPiece>,
     /// Saved label sets. Empty falls back to the built-in sets.
     pub labels: Vec<crate::labels::LabelSet>,
+    /// File stems of the extra SoundFont banks that are installed; `None` when not known.
+    pub soundfonts: Option<Vec<String>>,
 }
 
 impl Default for GenContext {
@@ -31,6 +36,7 @@ impl Default for GenContext {
             anchors: Vec::new(),
             library: Vec::new(),
             labels: Vec::new(),
+            soundfonts: None,
         }
     }
 }
@@ -139,17 +145,19 @@ fn check_timbres(list: &[TimbreId]) -> Result<(), GenError> {
     Ok(())
 }
 
-/// (timbre, octave) combinations allowed by the pool.
+/// (timbre, octave) combinations allowed by the pool. Octaves a timbre cannot play in tune are
+/// left out for that timbre, and so are SoundFont banks that are not installed.
 fn pool_combos(
     timbres: &[TimbreId],
     octaves: &[i32],
     pool: Pool,
     ctx: &GenContext,
 ) -> Result<Vec<(TimbreId, i32)>, GenError> {
+    let installed = ctx.soundfonts.as_deref();
     let timbres: Vec<TimbreId> = if timbres.is_empty() {
         match pool {
             Pool::Holdout => ctx.pools.holdout_timbres.clone(),
-            _ => default_training_timbres(),
+            _ => default_training_timbres(installed),
         }
     } else {
         timbres.to_vec()
@@ -161,9 +169,16 @@ fn pool_combos(
     if let Some(o) = octaves.iter().find(|o| !(0..=8).contains(*o)) {
         return err(format!("octave {o} is outside 0–8"));
     }
+    let missing: Vec<&TimbreId> = timbres
+        .iter()
+        .filter(|t| !soundfont_installed(t, installed))
+        .collect();
     let mut combos = Vec::new();
-    for t in &timbres {
+    for t in timbres.iter().filter(|t| soundfont_installed(t, installed)) {
         for &o in octaves {
+            if !octave_usable(t, o) {
+                continue;
+            }
             let holdout = ctx.pools.is_holdout(t, o);
             let ok = match pool {
                 Pool::Training => !holdout,
@@ -176,8 +191,18 @@ fn pool_combos(
         }
     }
     if combos.is_empty() {
+        if !missing.is_empty() {
+            return err(format!(
+                "no stimuli: these SoundFont timbres are not installed: {}",
+                missing
+                    .iter()
+                    .map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         return err(format!(
-            "no {} stimuli: every timbre/octave combination is excluded by the pool (holdout timbres: {}; holdout octaves: {:?})",
+            "no {} stimuli: every timbre/octave combination is excluded by the pool or by the timbres' ranges (holdout timbres: {}; holdout octaves: {:?})",
             pool.as_str(),
             ctx.pools.holdout_timbres.join(", "),
             ctx.pools.holdout_octaves
@@ -310,6 +335,38 @@ impl ClassDraw {
         }
         .expect("classes are not empty")
     }
+
+    /// `new` was played instead of the drawn `old`: an even draw gets `old` back and gives up one
+    /// pending `new`, so each class still comes up equally often.
+    fn replace(&mut self, old: PitchClass, new: PitchClass, rng: &mut Rng) {
+        if let ClassDraw::Even(b) = self {
+            if old != new {
+                b.take(&new);
+                b.put_back(old, rng);
+            }
+        }
+    }
+
+    fn refill_if_empty(&mut self, rng: &mut Rng) {
+        if let ClassDraw::Even(b) = self {
+            b.refill_if_empty(rng);
+        }
+    }
+
+    /// Returns a drawn class that was not played.
+    fn put_back(&mut self, c: PitchClass, rng: &mut Rng) {
+        if let ClassDraw::Even(b) = self {
+            b.put_back(c, rng);
+        }
+    }
+
+    /// Whether `c` is still to come in this cycle (always true for weighted draws).
+    fn pending(&self, c: PitchClass) -> bool {
+        match self {
+            ClassDraw::Even(b) => b.pending(&c),
+            ClassDraw::Weighted(_) => true,
+        }
+    }
 }
 
 fn gen_pitch_id(
@@ -327,6 +384,9 @@ fn gen_pitch_id(
     }
     if p.min_jump_semitones > 24 {
         return err("min_jump_semitones must be at most 24");
+    }
+    if p.min_octave_step > 3 {
+        return err("min_octave_step must be at most 3");
     }
     let others: Vec<PitchClass> = PitchClass::ALL
         .iter()
@@ -384,7 +444,8 @@ fn gen_pitch_id(
             .collect()
     };
     let min_jump = p.min_jump_semitones as i32;
-    let mut last_midi = None;
+    let step = p.min_octave_step as i32;
+    let mut last_midi: Option<i32> = None;
     let mut out = Vec::with_capacity(n);
     for _ in 0..n {
         let out_of_set = use_other && rng.chance(p.out_of_set_rate as f64);
@@ -393,13 +454,29 @@ fn gen_pitch_id(
         } else {
             bag.draw(rng)
         };
-        let (timbre, mut octave) = combos[combo_bag.draw(rng).unwrap()].clone();
+        let (mut timbre, mut octave) = combos[combo_bag.draw(rng).unwrap()].clone();
         if out_of_set {
             // At the edges of the range, where a small set's highest and lowest notes would
             // otherwise be guessable by height alone.
             let octs = octaves_of(&timbre);
             let (lo_t, hi_t) = (*octs.iter().min().unwrap(), *octs.iter().max().unwrap());
             octave = if rng.chance(0.5) { lo_t } else { hi_t };
+        } else if let (true, Some(prev)) = (step > 0, last_midi) {
+            // Move by octaves without looking at the note, so the octave gives nothing away.
+            let prev_oct = prev.div_euclid(12) - 1;
+            let far = |o: i32| (o - prev_oct).abs() >= step;
+            if !far(octave) {
+                let same: Vec<i32> = octaves_of(&timbre).into_iter().filter(|&o| far(o)).collect();
+                if let Some(&o) = rng.choose(&same) {
+                    octave = o;
+                } else {
+                    let any: Vec<&(TimbreId, i32)> = combos.iter().filter(|(_, o)| far(*o)).collect();
+                    if let Some(&&(ref t, o)) = rng.choose(&any) {
+                        timbre = t.clone();
+                        octave = o;
+                    }
+                }
+            }
         }
         let mut midi = pc.in_octave(octave);
         if Some(midi) == last_midi && classes.len() > 1 && !out_of_set {
@@ -413,7 +490,9 @@ fn gen_pitch_id(
                     octave = o;
                 }
             } else {
+                let old = pc;
                 pc = bag.draw(rng);
+                bag.put_back(old, rng);
             }
             midi = pc.in_octave(octave);
         }
@@ -432,8 +511,21 @@ fn gen_pitch_id(
                         .flat_map(|&c| octs.iter().map(move |&o| (c, o)))
                         .filter(|&(c, o)| far(c, o))
                         .collect();
-                    match rng.choose(&cands) {
+                    // Prefer a class still to come, so the counts stay even.
+                    if !out_of_set {
+                        bag.refill_if_empty(rng);
+                    }
+                    let pending: Vec<(PitchClass, i32)> = cands
+                        .iter()
+                        .copied()
+                        .filter(|&(c, _)| out_of_set || bag.pending(c))
+                        .collect();
+                    let pool = if pending.is_empty() { &cands } else { &pending };
+                    match rng.choose(pool) {
                         Some(&(c, o)) => {
+                            if !out_of_set {
+                                bag.replace(pc, c, rng);
+                            }
                             pc = c;
                             octave = o;
                         }
@@ -501,6 +593,9 @@ fn gen_pitch_id(
         }
         if min_jump > 0 {
             stimulus["min_jump"] = json!(min_jump);
+        }
+        if step > 0 {
+            stimulus["min_octave_step"] = json!(step);
         }
         if relaxed {
             stimulus["constraint_relaxed"] = json!(true);
@@ -3157,6 +3252,7 @@ fn gen_harmony(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::{BTreeMap, BTreeSet};
 
     fn block(json: &str) -> BlockSpec {
         let mut v: serde_json::Value = serde_json::from_str(json).unwrap();
@@ -3239,6 +3335,88 @@ mod tests {
             panic!()
         };
         assert!(t.choice_sounds.is_empty());
+    }
+
+    #[test]
+    fn octave_steps_say_nothing_about_the_note() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "pitch_id", "count": 1000, "params": {"timbres": ["gm:0"], "octaves": [3, 4, 5, 6], "min_jump_semitones": 13, "min_octave_step": 2}}"#,
+        );
+        let trials = generate_block(&b, 3, &ctx).unwrap();
+        let notes: Vec<(i32, i32, String)> = trials
+            .iter()
+            .map(|t| {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                (
+                    t.stimulus["midi"].as_i64().unwrap() as i32,
+                    t.stimulus["octave"].as_i64().unwrap() as i32,
+                    t.correct.clone(),
+                )
+            })
+            .collect();
+        for w in notes.windows(2) {
+            assert!((w[1].1 - w[0].1).abs() >= 2, "{w:?}");
+            assert!((w[1].0 - w[0].0).abs() >= 13, "{w:?}");
+        }
+        // Every octave is used, and the octave a tone lands in does not depend on its name:
+        // after an octave-3 tone the next is in octave 5 or 6, whatever the note.
+        let mut after3: BTreeMap<String, BTreeSet<i32>> = BTreeMap::new();
+        for w in notes.windows(2).filter(|w| w[0].1 == 3) {
+            after3.entry(w[1].2.clone()).or_default().insert(w[1].1);
+        }
+        assert_eq!(after3.len(), 12);
+        let expected: BTreeSet<i32> = [5, 6].into_iter().collect();
+        assert!(after3.values().all(|o| *o == expected), "{after3:?}");
+        let octaves: BTreeSet<i32> = notes.iter().map(|n| n.1).collect();
+        assert_eq!(octaves, [3, 4, 5, 6].into_iter().collect());
+    }
+
+    #[test]
+    fn jump_rule_keeps_the_notes_even() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "pitch_id", "count": 60, "params": {"timbres": ["gm:0"], "octaves": [3, 4, 5], "min_jump_semitones": 13}}"#,
+        );
+        for seed in 0..40 {
+            let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+            for t in generate_block(&b, seed, &ctx).unwrap() {
+                let TrialSpec::Identify(t) = t else { panic!() };
+                *counts.entry(t.correct.clone()).or_default() += 1;
+            }
+            assert_eq!(counts.len(), 12);
+            let (lo, hi) = (counts.values().min().unwrap(), counts.values().max().unwrap());
+            // Independent draws would typically spread by five or more.
+            assert!(hi - lo <= 2, "seed {seed}: {counts:?}");
+        }
+    }
+
+    #[test]
+    fn soundfont_timbres_stay_in_range_and_installed() {
+        let ctx = GenContext {
+            soundfonts: Some(vec!["Cello".into()]),
+            ..Default::default()
+        };
+        let b = block(
+            r#"{"type": "pitch_id", "count": 200, "params": {"pool": "any", "timbres": ["sf:Cello:42", "sf:Trombone:57", "gm:0"], "octaves": [3, 4, 5, 6]}}"#,
+        );
+        let mut seen = BTreeSet::new();
+        for t in generate_block(&b, 1, &ctx).unwrap() {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            let timbre = t.stimulus["timbre"].as_str().unwrap().to_string();
+            let oct = t.stimulus["octave"].as_i64().unwrap();
+            assert_ne!(timbre, "sf:Trombone:57", "not installed");
+            if timbre == "sf:Cello:42" {
+                assert!((3..=4).contains(&oct), "cello in octave {oct}");
+            }
+            seen.insert(timbre);
+        }
+        assert_eq!(seen.len(), 2);
+        let none = block(
+            r#"{"type": "pitch_id", "count": 5, "params": {"pool": "any", "timbres": ["sf:Trombone:57"]}}"#,
+        );
+        let e = generate_block(&none, 1, &ctx).unwrap_err();
+        assert!(e.0.contains("not installed"), "{}", e.0);
     }
 
     #[test]

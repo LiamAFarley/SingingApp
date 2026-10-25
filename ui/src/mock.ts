@@ -26,8 +26,8 @@ import type { ScoreNote } from "./bindings/ScoreNote";
 const clock = () => performance.now() / 1000;
 
 const presets: PresetView[] = [
-  p("ap_daily", "Absolute pitch: daily", "Absolute pitch", "Name 36 notes and sing 12, all twelve pitch classes.", 48, 5.4, ["Name the note", "Sing the note"]),
-  p("ap_assessment", "Absolute pitch assessment", "Absolute pitch", "Holdout tones, no feedback: identification across octaves and timbres, speed, singing and key. Run first in a session.", 156, 16.5, ["12-class identification", "Cross-octave identification"]),
+  p("ap_benchmark", "Benchmark", "Absolute pitch", "The repeatable measure of where you are: twelve notes sung from memory before hearing anything, then sixty piano notes over four octaves with no feedback and 5 s to answer. Every two weeks, first thing, before any named note that day.", 72, 7.0, ["Sing from memory", "Name the piano note"]),
+  p("ap_transfer", "Transfer test", "Absolute pitch", "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.", 84, 8.2, ["Untrained instruments", "Shepard tones"]),
   p("ear_intervals_melodic", "Intervals: melodic", "Ear training", "Melodic intervals up and down, minor 2nd to octave.", 30, 3.2, ["Interval identification"]),
   p("degrees_01", "Scale degrees: level 1", "Ear training", "Degrees 1, 2 and 3 in C major. Suggested criterion for the next level: at least 90% over two sessions.", 30, 4.1, ["Scale degrees"]),
   p("degrees_02", "Scale degrees: level 2", "Ear training", "Degrees 1 to 5 in C major. Suggested criterion for the next level: at least 90% over two sessions.", 30, 4.1, ["Scale degrees"]),
@@ -1158,7 +1158,7 @@ function mockCourses(): CourseStatus[] {
       "Naming",
       "Name a growing set of notes spread over three octaves, never two tones close together, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four passes, the last after a night's sleep.",
       naming,
-      "C E A♭ D F♯, plus Other for notes outside the set, over three octaves, answered within 3.6 s.",
+      "C E A♭ D F♯, plus Other for notes outside the set, over four octaves, answered within 3.6 s.",
       "1 of 2 checks in a row at 90% or more (last: 92%).",
     ),
     ladder(
@@ -1167,12 +1167,14 @@ function mockCourses(): CourseStatus[] {
       "Anchor C",
       "Brady's fixed-scale method: all twelve notes from the start, C heard far more often at first and the pace slow; C fades to an even share and the pace rises to a tone every 1.4 s. Starts by singing your C from memory.",
       brady,
-      "All twelve notes over three octaves, a tone every 5.0 s, C on 40% of tones. Keep C in your mind's ear and judge each note against it.",
+      "All twelve notes over four octaves, a tone every 5.0 s, C on 40% of tones. Keep C in your mind's ear and judge each note against it.",
       "Needs 2 checks in a row at 80% or more.",
     ),
-    test("ap_weekly", "Weekly test", "Weekly test", "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback, after the pitch-memory clearing sound.", true, "Due today.", daysAgo(7)),
+    test("ap_benchmark", "Benchmark", "Benchmark", "The repeatable measure of where you are: twelve notes sung from memory before hearing anything, then sixty piano notes over four octaves with no feedback and 5 s to answer. Every two weeks, first thing, before any named note that day.", false, "Next from 20 Nov.", daysAgo(9)),
+    test("ap_weekly", "Weekly test", "Weekly test", "120 notes, 24 each on piano, cello, clarinet, harpsichord and square wave, with no feedback and 5 s per note, after the pitch-memory clearing sound.", true, "Due today.", daysAgo(7)),
+    test("ap_transfer", "Transfer test", "Transfer", "Whether naming carries over: sixty notes on instruments training never uses, then twenty-four Shepard tones, which have a note name but no height. Every four weeks.", false, "Next from 3 Dec.", daysAgo(23)),
     test("ap_ucsf_style", "UCSF-style test", "UCSF-style test", "36 piano and 36 sine tones over five octaves, no feedback, scored as the UCSF test is: a point for an exact answer, three quarters for a semitone off. Not the UCSF test itself.", false, "Next on the Sunday test day from 15 Nov.", daysAgo(14)),
-    test("ap_maintenance", "Maintenance", "Maintenance", "Five minutes of all twelve notes over three octaves and several timbres, twice a week, once note naming is complete.", false, "Starts once note naming is complete.", null),
+    test("ap_maintenance", "Maintenance", "Maintenance", "Five minutes of all twelve notes over four octaves and several timbres, twice a week, once note naming is complete.", false, "Starts once note naming is complete.", null),
   ];
 }
 
@@ -1180,14 +1182,36 @@ function mockDashboard(): ApDashboard {
   const naming = [0.97, 0.42, 0.55, 0.38, 0.93, 0.47, 0.71, 0.4, 0.92, 0.5, 0.36, 0.44];
   const trials = [40, 22, 26, 20, 40, 21, 34, 20, 40, 23, 19, 20];
   const timbres = ["gm:0", "gm:42", "gm:71", "gm:6", "synth:square"];
+  const ci = (acc: number, n: number) => {
+    const h = 1.96 * Math.sqrt((acc * (1 - acc)) / n);
+    return { accuracy_low: Math.max(0, acc - h), accuracy_high: Math.min(1, acc + h) };
+  };
   const run = (d: number, acc: number) => ({
     session_id: `w${d}`,
     at: daysAgo(d),
     trials: 120,
     accuracy: acc,
+    ...ci(acc, 120),
+    in_time: acc * 0.7,
+    timeouts: 3,
     ucsf_points: Math.min(1, acc + 0.12),
     mad: 2.6 - acc * 2.2,
+    mean_signed_error: 0.1,
+    median_correct_rt_ms: 1850,
     by_timbre: timbres.map((timbre, i) => ({ timbre, trials: 24, accuracy: Math.max(0, acc - 0.06 + i * 0.03) })),
+    shepard: null,
+    sung: null,
+    named_note_minutes_before: null,
+    notes: [] as string[],
+  });
+  const bench = (d: number, acc: number, sung: number, notes: string[] = []) => ({
+    ...run(d, acc),
+    session_id: `b${d}`,
+    trials: 60,
+    ...ci(acc, 60),
+    by_timbre: [{ timbre: "gm:0", trials: 60, accuracy: acc }],
+    sung: { trials: 12, accuracy: sung, median_abs_cents: 140, median_interval_abs_cents: 190, chaining_ratio: 1.36, chaining_likely: false },
+    notes,
   });
   return {
     classes: PCS.map((pc, i) => ({
@@ -1204,8 +1228,10 @@ function mockDashboard(): ApDashboard {
     })),
     classes_mastered: naming.filter((n, i) => n >= 0.9 && trials[i] >= 20).length,
     courses: mockCourses(),
+    benchmark: [bench(37, 0.18, 0.25, ["Not clearly above chance yet: 18% (95% range 11–30%) against 8% by guessing."]), bench(23, 0.27, 0.33), bench(9, 0.35, 0.42)],
     weekly: [run(21, 0.31), run(14, 0.36), run(7, 0.44)],
-    ucsf_style: [{ ...run(14, 0.33), session_id: "u14", trials: 72, by_timbre: [{ timbre: "gm:0", trials: 36, accuracy: 0.39 }, { timbre: "synth:sine", trials: 36, accuracy: 0.28 }] }],
+    transfer: [{ ...run(23, 0.24), session_id: "t23", trials: 60, ...ci(0.24, 60), shepard: 0.17, by_timbre: [{ timbre: "sf:FrenchHorn:60", trials: 10, accuracy: 0.3 }, { timbre: "sf:Cello:42", trials: 10, accuracy: 0.2 }, { timbre: "shepard", trials: 24, accuracy: 0.17 }] }],
+    ucsf_style: [{ ...run(14, 0.33), session_id: "u14", trials: 72, ...ci(0.33, 72), by_timbre: [{ timbre: "gm:0", trials: 36, accuracy: 0.39 }, { timbre: "synth:sine", trials: 36, accuracy: 0.28 }] }],
     anchor: [38, -22, 15, -9, 12].map((cents, i) => ({ at: daysAgo(5 - i), cents })),
     anchor_median_abs_cents: 15,
     minutes_this_week: 142,
@@ -1215,7 +1241,7 @@ function mockDashboard(): ApDashboard {
 
 function mockDailySet(): DailySet {
   const items = [
-    { course: "ap_weekly", title: "Weekly test", level: null, minutes: 7.6, reason: "Due today.", test: true },
+    { course: "ap_weekly", title: "Weekly test", level: null, minutes: 9.4, reason: "Due today.", test: true },
     { course: "ap_naming", title: "Note naming: level 3 (5 notes)", level: 3, minutes: 14.8, reason: "Level 3 of 10. 1 of 2 checks in a row at 90% or more (last: 92%).", test: false },
     { course: "ap_brady", title: "Fixed C anchor (Brady): level 1 (C 40%, 5.0 s apart)", level: 1, minutes: 10.1, reason: "Level 1 of 5. Needs 2 checks in a row at 80% or more.", test: false },
   ].filter((i) => i.test || apPlan.courses.some((c) => c.course === i.course && c.active));

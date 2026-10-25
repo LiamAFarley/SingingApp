@@ -435,6 +435,30 @@ Built 24 October 2026 as planned, with these details:
 - the chord-colour course shows its next-chord date;
 - errorless levels store true results with no error marks.
 
+### Tests rework (after AP-2) — built
+
+Built 25 October 2026 from `docs/2026-10-24_benchmark_assessment_spec.md` and its review
+(`docs/ap_benchmark_spec_review_and_revisions.md`). `docs/AP_TESTING.md` is the reference for the
+coach.
+
+- The `ap_assessment` and `ap_daily` presets are gone. The tests are courses: `ap_benchmark` (new,
+  every 14 days), `ap_weekly`, `ap_transfer` (new, every 28 days) and `ap_ucsf_style`. Their
+  presets are built from the course definitions.
+- Every test: no feedback, 5 s per note, no replay (replay is now off on any assessment block),
+  the clearing glissando first, and no mask between notes except on Shepard tones.
+- `min_octave_step` on `pitch_id` makes each tone move two octaves by octave number, chosen
+  without looking at the note. With the 13-semitone rule alone, the octave gave away about 0.3
+  bits about the note. The naming register is now C3–B6 for training and the benchmark.
+- Holdout octaves are dropped. The extra SoundFonts are split into training and holdout, kept to
+  their in-tune range, and skipped when not installed.
+- Class draws stay even under the jump rule: a replaced class goes back into the bag.
+- `get_ap_profile` reports by course tag:
+  - accuracy with its 95% range, within 2 s from onset, timeouts, UCSF points and MAD;
+  - signed lean, correct-only median time, per timbre, Shepard and sung accuracy;
+  - a chaining check on sung notes;
+  - minutes since a named note, and cautions;
+  - change against noise and a 30-day trend.
+
 ### AP-3: production, inner voices, screening (M)
 
 - Anchor auralisation check, sing by label, hold-and-compare (§4.5).

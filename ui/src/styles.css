@@ -1282,3 +1282,21 @@ select.sing-part {
   font-size: 18px;
   font-weight: 600;
 }
+
+/* AP test tables: scroll sideways on narrow screens rather than squeezing the columns. */
+.table-scroll {
+  overflow-x: auto;
+}
+.test-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+/* AP test tables: scroll sideways on narrow screens rather than squeezing the columns. */
+.table-scroll {
+  overflow-x: auto;
+}
+.test-notes {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}

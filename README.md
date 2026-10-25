@@ -12,16 +12,15 @@ A Windows desktop trainer for absolute pitch, ear training, singing and sight si
 - **Absolute pitch:**
   - **Today's set** (Absolute pitch page): one daily session composed from the active courses, each at its current level and fitted to its minutes, with any test that is due first.
   - Courses:
-    - **Note naming**: ten levels from three notes to all twelve. Notes are spread over three octaves, never within 13 semitones of the one before, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four checks at 90%, the fourth at least 12 h after the third.
+    - **Note naming**: ten levels from three notes to all twelve. Notes are spread over four octaves (C3–B6), each two octaves from the one before, with Other for notes outside the set. Each level ends with a check without feedback; the last level needs four checks at 90%, the fourth at least 12 h after the third.
     - **Fixed C anchor** (Brady): all twelve notes from the start, C on 40% of tones fading to an even share, tones arriving at a steady pace from every 5 s to every 1.4 s. Each session starts by singing C from memory.
-    - **Weekly test** (120 notes on five instruments), **UCSF-style test** (every four weeks) and **maintenance** (twice a week once naming is complete).
+    - Tests, first in the day when due, 5 s per note, no replay: the **Benchmark** (12 notes sung from memory, then 60 piano notes; every two weeks), the **Weekly test** (120 notes on five instruments), the **Transfer test** (untrained instruments and Shepard tones; every four weeks) and the **UCSF-style test** (every four weeks). **Maintenance** runs twice a week once naming is complete. `docs/AP_TESTING.md` explains each test and how to read it.
   - A course moves to its next level when the level's checks pass. The page shows what each rule still needs and when the next check counts. Levels can also be set by hand.
-  - Progress per note pools every method: a note is mastered at 90% named within 2 s. Also shown: weekly and UCSF-style results (exact, UCSF-style points, mean error in semitones, per instrument) and how far your remembered C is from a real C.
+  - Progress per note pools every method: a note is mastered at 90% named within 2 s. Also shown: each test's results (exact with its 95% range, within 2 s, UCSF-style points, mean error in semitones, Shepard, sung notes, per instrument, cautions) and how far your remembered C is from a real C.
   - Before a check without feedback, a 20-second endlessly falling Shepard–Risset tone clears pitch memory. It plays automatically when you heard a named note in the last five minutes.
   - After answering any identification question, click an answer to hear it: the other notes, intervals, chords, scales, keys or degrees, in the same register and sound.
   - Singing a named note. After a miss, a tuner aimed at that note opens so you can practise locking on (hold it within 15 cents for a second), with an optional drone.
   - Passive pairing and key finding.
-  - A holdout assessment battery.
 - **Ear training:**
   - Intervals, melodic and harmonic, either without a key or inside a key after a cadence.
   - Interval comparison: which of two intervals is larger.

@@ -143,7 +143,9 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
         }
         if let Exercise::PitchId(p) = &b.exercise {
             // A stream is too fast to chain intervals, and a 13-semitone jump rule defeats it.
-            let chaining_closed = p.pacing != Pacing::Respond || p.min_jump_semitones >= 13;
+            let chaining_closed = p.pacing != Pacing::Respond
+                || p.min_jump_semitones >= 13
+                || p.min_octave_step >= 2;
             if p.mask == Mask::None
                 && b.effective_feedback().shows_trial_result()
                 && !chaining_closed
@@ -161,6 +163,18 @@ pub fn validate_session(spec: &SessionSpec, ctx: &GenContext) -> ValidationRepor
                 warnings.push(issue(
                     format!("{path}.params.min_jump_semitones"),
                     "a jump rule of an octave or more needs at least three octaves, or tones become predictable",
+                ));
+            }
+            // Every octave needs somewhere to step to, or the step rule pins the middle octaves.
+            let step = p.min_octave_step as i32;
+            if step > 0
+                && p.octaves
+                    .iter()
+                    .any(|o| !p.octaves.iter().any(|q| (q - o).abs() >= step))
+            {
+                warnings.push(issue(
+                    format!("{path}.params.min_octave_step"),
+                    format!("a step of {step} octaves cannot be made from every listed octave; use more octaves (four for a step of 2)"),
                 ));
             }
         }

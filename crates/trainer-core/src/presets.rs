@@ -115,18 +115,6 @@ pub fn harmony_level(n: u32) -> SessionSpec {
 
 const FILES: &[(&str, &str, &str, &str)] = &[
     (
-        "ap_assessment",
-        "Absolute pitch",
-        "Holdout tones, no feedback: identification across octaves and timbres, speed, singing and key. Run first in a session.",
-        include_str!("../presets/ap_assessment.json"),
-    ),
-    (
-        "ap_daily",
-        "Absolute pitch",
-        "Name 36 notes and sing 12, all twelve pitch classes.",
-        include_str!("../presets/ap_daily.json"),
-    ),
-    (
         "ap_pairing",
         "Absolute pitch",
         "Listen: each tone followed by its name. Passive exposure.",
@@ -294,6 +282,24 @@ pub fn builtin_presets() -> Vec<Preset> {
             spec: serde_json::to_value(&spec).unwrap(),
         });
     }
+    // The absolute-pitch tests, from their course definitions so their trials carry the course
+    // tags and count on the dashboard however they are started.
+    for id in [
+        crate::courses::AP_BENCHMARK,
+        crate::courses::AP_WEEKLY,
+        crate::courses::AP_TRANSFER,
+        crate::courses::AP_UCSF_STYLE,
+    ] {
+        let course = crate::courses::find_course(id).expect("built-in test course");
+        let spec = crate::courses::level_session(&course, 1).expect("test courses have a level");
+        out.push(Preset {
+            id: id.to_string(),
+            title: spec.title.clone(),
+            category: "Absolute pitch".into(),
+            description: course.description.clone(),
+            spec: serde_json::to_value(&spec).unwrap(),
+        });
+    }
     for (id, category, description, json) in FILES {
         let spec =
             SessionSpec::from_json(json).unwrap_or_else(|e| panic!("preset {id} is invalid: {e}"));
@@ -329,8 +335,8 @@ mod tests {
             let spec = SessionSpec::from_value(p.spec.clone()).unwrap();
             let r = validate_session(&spec, &ctx);
             assert!(r.ok, "preset {} has errors: {:?}", p.id, r.errors);
-            // The assessment's own pool choices must not trigger the pool warnings.
-            if p.id == "ap_assessment" {
+            // The tests' own pool choices must not trigger the pool warnings.
+            if p.id.starts_with("ap_benchmark") || p.id == "ap_transfer" {
                 assert!(r.warnings.is_empty(), "{:?}", r.warnings);
             }
         }

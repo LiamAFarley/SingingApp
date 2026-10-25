@@ -124,16 +124,22 @@ stereo. Use these to judge character and loudness before committing a timbre to 
 `bank-check.txt` shows that all 16 banks load from the app's data folder and that every used preset
 renders at the correct pitch.
 
-## Recommended pool split (not applied)
+## Pool split (applied 25 October 2026)
 
-The defaults in `timbre.rs` still use General MIDI only. A starting point for AP training/holdout,
-using disjoint timbres:
+`timbre.rs` (`SOUNDFONT_PRESETS`) holds this split, with each preset's usable range. Training
+timbres are used only when their bank is installed. A SoundFont timbre is never played outside its
+range, and an unlisted `sf:` preset is held to C3–B5. `sf:ConcertHarp:0` was added to training
+and `sf:SoloVoices:1` to holdout:
 
-- **Training:** `gm:0`, `gm:48`, `sf:UprightPiano:0`, `sf:TenorSax:0`, `sf:ClassicalGuitar:0`,
-  `sf:Viola:41`, `sf:SoloVoices:0`, `sf:SoftVoice:0`
+- **Training:** the General MIDI defaults (`gm:0`, `gm:48`, `gm:73`, `gm:24`, `gm:52`,
+  `synth:triangle`) plus `sf:UprightPiano:0`, `sf:TenorSax:0`, `sf:ClassicalGuitar:0`,
+  `sf:Viola:41`, `sf:SoloVoices:0`, `sf:SoftVoice:0`, `sf:ConcertHarp:0`
 - **Holdout:** existing GM holdouts plus `sf:FrenchHorn:60`, `sf:Trombone:57`, `sf:Cello:42`,
   `sf:Violin:100`, `sf:Flute:73`, `sf:DrawbarOrgan:0`, `sf:MaleOohs:1`, `sf:OperaFemale:0`,
-  `sf:SoloVoices:4`, `sf:SoloVoices:5`, `sf:HeavenChoir:1`
+  `sf:SoloVoices:1`, `sf:SoloVoices:4`, `sf:SoloVoices:5`, `sf:HeavenChoir:1`
+
+The transfer test (`ap_transfer`, docs/AP_TESTING.md) plays six of the holdout presets. `HeavenChoir` and
+`Flute` are left out of it because they are much quieter than the rest.
 
 Keeping `SoloVoices:0` in training and `SoloVoices:4`/`5` in holdout tests cross-voice transfer
 inside one bank. Do not put the same timbre in both lists; the pool validator treats the holdout

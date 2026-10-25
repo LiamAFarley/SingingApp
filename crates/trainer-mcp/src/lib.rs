@@ -34,22 +34,28 @@ The user starts queued sessions from \"Up next\" in the app.\n\
 \n\
 Rules:\n\
 - The app grades every attempt deterministically. Use its metrics; never re-judge pitch or rhythm yourself.\n\
-- Holdout stimuli (pool \"holdout\") are for assessment only. Put assessments at the start of a session, with no feedback.\n\
+- Holdout stimuli (pool \"holdout\") are for assessment only. Tests run first in the day, before any named note, with no \
+feedback. Absolute pitch is measured only by the four test courses below; docs/AP_TESTING.md says what each measures, how \
+often to run it and how to read it. Do not build your own absolute pitch assessments.\n\
 - Fade feedback as accuracy stabilises: continuous -> after_trial -> none. Test transfer (new octaves, timbres, keys) before \
 calling something learned, and retest after gaps for retention.\n\
 - pitch_pairing, incidental_pairing and other exposure are not evidence of absolute pitch.\n\
-- Absolute pitch is organised in courses (list_courses, get_ap_dashboard): ap_naming (a growing set of notes over three \
+- Absolute pitch is organised in courses (list_courses, get_ap_dashboard): ap_naming (a growing set of notes over four \
 octaves with Other for notes outside the set, a check without feedback per level, the last level needing four checks at 90% \
 with the last one at least 12 h after the third), ap_brady (all twelve notes, C weighted 40% fading to even, paced streams from \
 5 s to 1.4 s apart, starting by singing C from memory), ap_speed (pitch_detect streams, d′ on the last streams), \
 ap_note_colors (Taneda colours, errorless at first), ap_chord_colors (Eguchi's 14 chord colours; the next chord is due only \
 after 100% and 14 days), ap_contrast (E♭ against F♯, then the black keys, answered with Gervain names or the user's own set), \
-and the tests ap_weekly (120 notes, five timbres, Sundays by default), ap_ucsf_style (every 4 weeks) and ap_maintenance \
-(twice a week once naming is complete). The app moves a course to its next level when the level's checks pass, and the user's \
+the tests ap_benchmark (12 notes sung from memory, then 60 piano notes; every 2 weeks), ap_weekly (120 notes, five \
+timbres, on the test day), ap_transfer (60 notes on untrained instruments and 24 Shepard tones; every 4 weeks) and \
+ap_ucsf_style (36 piano, 36 sine; every 4 weeks), all with 5 s per note and no replay, and ap_maintenance (twice a week once \
+naming is complete). Tests come up in \"Today's set\" when due; to run one now, queue its preset (get_preset with the test's \
+id). Read them with get_ap_profile. The app moves a course to its next level when the level's checks pass, and the user's \
 \"Today's set\" is composed from the active courses in the daily plan (preview_daily_set, set_daily_plan). New courses start \
 switched off. Use set_course_level only to correct a level. The dashboard pools every method per note: mastered means at least \
 90% correct within 2 s over the recent trials. Before any unassisted check, clear pitch memory with a block pre_mask \
-\"shepard_glissando\" and keep consecutive tones at least 13 semitones apart over three octaves. feedback \"errorless\" stores \
+\"shepard_glissando\" and keep consecutive tones apart: min_jump_semitones 13 and, over four or more octaves, \
+min_octave_step 2 (each tone two octaves from the last, so its octave gives nothing away). feedback \"errorless\" stores \
 the true result but shows no error mark; it is the default on early colour, chord and contrast levels unless the user turns \
 \"Errorless early levels\" off (set_ap_prefs). Label sets (list_label_sets, set_label_set) are note_names, taneda_colors, \
 gervain_names, my_colors and eguchi_chords. Trials always store the pitch class, so the set does not change mastery. Do not \
@@ -258,9 +264,13 @@ impl TrainerServer {
     }
 
     fn gen_context(&self) -> Result<GenContext, String> {
+        let dir = self.data_dir.join("soundfonts");
+        let installed = trainer_core::timbre::installed_soundfonts(&[dir.as_path()]);
         self.with_db(|db| {
             db.sync_library(&self.library_dir())?;
-            db.gen_context()
+            let mut ctx = db.gen_context()?;
+            ctx.soundfonts = Some(installed);
+            Ok(ctx)
         })
     }
 
@@ -418,7 +428,7 @@ impl TrainerServer {
     }
 
     #[tool(
-        description = "Results of the latest absolute pitch assessment (preset ap_assessment): accuracy and within-one-semitone accuracy per test, by timbre and octave, confusion matrix, signed error per pitch class, and the previous assessment for comparison."
+        description = "The absolute pitch tests (see docs/AP_TESTING.md): for the benchmark, weekly, transfer and UCSF-style tests, the latest run and the one before, whether the change is beyond run-to-run noise, the 30-day trend and every run's headline figures. Each run has accuracy with its 95% range, within-2-s accuracy, timeouts, UCSF-style points, mean absolute error, mean signed error, median correct response time, per-timbre and Shepard accuracy, sung-from-memory accuracy with a chaining check, how long after a named note it ran, and plain-language cautions. The benchmark adds its confusion matrix and signed error per note and per octave."
     )]
     async fn get_ap_profile(&self) -> Result<CallToolResult, ErrorData> {
         match self.with_db(reports::ap_profile) {
@@ -428,7 +438,7 @@ impl TrainerServer {
     }
 
     #[tool(
-        description = "Absolute pitch progress in one place: per note, naming accuracy within 2 s over the recent trials from every method (mastered at 90%+) and singing accuracy; every course with its current level, pass-rule progress (e.g. 3 of 4 checks, the next one counting from a given time) and what is due; weekly and UCSF-style test runs (accuracy, UCSF-style points, mean absolute deviation, per timbre); singing C from memory over time; minutes this week; the daily plan."
+        description = "Absolute pitch progress in one place: per note, naming accuracy within 2 s over the recent trials from every method (mastered at 90%+) and singing accuracy; every course with its current level, pass-rule progress (e.g. 3 of 4 checks, the next one counting from a given time) and what is due; benchmark, weekly, transfer and UCSF-style test runs (accuracy with its 95% range, within 2 s, UCSF-style points, mean absolute deviation, per timbre, cautions); singing C from memory over time; minutes this week; the daily plan."
     )]
     async fn get_ap_dashboard(&self) -> Result<CallToolResult, ErrorData> {
         match self.with_db(|db| courses::ap_dashboard(db, chrono::Utc::now())) {
@@ -597,18 +607,22 @@ impl TrainerServer {
         }
         out.push(json!({"id": "shepard", "name": "Shepard tone (pitch class only)", "pool": if pools.is_holdout_timbre("shepard") { "holdout" } else { "training" }}));
         let banks_dir = self.data_dir.join("soundfonts");
-        if let Ok(entries) = std::fs::read_dir(&banks_dir) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.extension()
-                    .and_then(|x| x.to_str())
-                    .map(|x| x.eq_ignore_ascii_case("sf2"))
-                    .unwrap_or(false)
-                {
-                    if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
-                        out.push(json!({"id": format!("sf:{stem}:<program>"), "name": format!("SoundFont bank {stem}"), "pool": "training"}));
-                    }
-                }
+        let installed = trainer_core::timbre::installed_soundfonts(&[banks_dir.as_path()]);
+        for p in &trainer_core::timbre::SOUNDFONT_PRESETS {
+            if trainer_core::timbre::soundfont_installed(p.id, Some(installed.as_slice())) {
+                out.push(json!({
+                    "id": p.id, "name": p.name,
+                    "pool": if pools.is_holdout_timbre(p.id) { "holdout" } else { "training" },
+                    "usable": [trainer_core::theory::Note(p.low).name(), trainer_core::theory::Note(p.high).name()],
+                }));
+            }
+        }
+        for stem in &installed {
+            let known = trainer_core::timbre::SOUNDFONT_PRESETS
+                .iter()
+                .any(|p| p.id.split(':').nth(1) == Some(stem.as_str()));
+            if !known {
+                out.push(json!({"id": format!("sf:{stem}:<program>"), "name": format!("SoundFont bank {stem} (not measured; held to C3–B5)"), "pool": "training"}));
             }
         }
         text(&json!({"timbres": out, "holdout_octaves": pools.holdout_octaves}))
@@ -1281,9 +1295,9 @@ mod tests {
         assert!(!err, "{rp}");
         assert_eq!(rp["comfortable_low"], json!("A2"));
 
-        let (err, preset) = call(&client, "get_preset", json!({"id": "ap_assessment"})).await;
+        let (err, preset) = call(&client, "get_preset", json!({"id": "ap_benchmark"})).await;
         assert!(!err);
-        assert_eq!(preset["protocol"], json!("ap_assessment"));
+        assert_eq!(preset["protocol"], json!("ap_benchmark"));
 
         client.cancel().await?;
         handle.await??;

@@ -192,7 +192,9 @@ export function ApPage({ sessionActive, onOpenSession }: { sessionActive: boolea
             </div>
           </div>
 
+          <TestTable title="Benchmark" runs={dash.benchmark} />
           <TestTable title="Weekly test" runs={dash.weekly} />
+          <TestTable title="Transfer test" runs={dash.transfer} />
           <TestTable title="UCSF-style test" runs={dash.ucsf_style} />
         </>
       )}
@@ -307,44 +309,77 @@ function LadderCard({
 
 function TestTable({ title, runs }: { title: string; runs: TestRun[] }) {
   if (runs.length === 0) return null;
-  const timbres = Array.from(new Set(runs.flatMap((r) => r.by_timbre.map((t) => t.timbre))));
+  const all = Array.from(new Set(runs.flatMap((r) => r.by_timbre.map((t) => t.timbre)))).filter((t) => t !== "shepard");
+  // A column per timbre only while that stays readable.
+  const timbres = all.length > 1 && all.length <= 5 ? all : [];
+  const shepard = runs.some((r) => r.shepard != null);
+  const sung = runs.some((r) => r.sung != null);
+  const latest = runs[runs.length - 1];
   return (
     <div className="section">
       <h2>{title}</h2>
-      <div className="card flush">
+      <div className="card flush table-scroll">
         <table>
           <thead>
             <tr>
               <th>Date</th>
               <th>Trials</th>
-              <th>Exact</th>
+              <th title="Correct within 5 s, with its 95% range. Guessing gives 8%.">Exact</th>
+              <th title="Correct within 2 s of the tone starting">In 2 s</th>
               <th title="1 point for an exact answer, 0.75 for a semitone off">UCSF-style</th>
               <th title="Mean absolute error in semitones: 0 perfect, 3 chance">Mean error</th>
-              {timbres.length > 1 && timbres.map((t) => <th key={t}>{TIMBRE_NAMES[t] ?? t}</th>)}
+              {shepard && <th title="Shepard tones: note name without height">Shepard</th>}
+              {sung && <th title="Notes sung from memory, any octave">Sung</th>}
+              {timbres.map((t) => (
+                <th key={t}>{TIMBRE_NAMES[t] ?? t}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {[...runs].reverse().map((r) => (
               <tr key={r.session_id}>
-                <td className="num">{fmtDate(r.at)}</td>
+                <td className="num">
+                  {fmtDate(r.at)}
+                  {r.notes.length > 0 && (
+                    <span className="muted" title={r.notes.join("\n")}>
+                      {" "}
+                      ⚠
+                    </span>
+                  )}
+                </td>
                 <td className="num">{r.trials}</td>
-                <td className="num">{pct(r.accuracy)}</td>
+                <td className="num" title={`95% range ${pct(r.accuracy_low)}–${pct(r.accuracy_high)}`}>
+                  {pct(r.accuracy)}
+                  <span className="muted small">
+                    {" "}
+                    ({pct(r.accuracy_low)}–{pct(r.accuracy_high)})
+                  </span>
+                </td>
+                <td className="num">{pct(r.in_time)}</td>
                 <td className="num">{pct(r.ucsf_points)}</td>
                 <td className="num">{r.mad == null ? "–" : `${r.mad.toFixed(2)} st`}</td>
-                {timbres.length > 1 &&
-                  timbres.map((t) => {
-                    const v = r.by_timbre.find((x) => x.timbre === t);
-                    return (
-                      <td key={t} className="num">
-                        {v ? pct(v.accuracy) : "–"}
-                      </td>
-                    );
-                  })}
+                {shepard && <td className="num">{r.shepard == null ? "–" : pct(r.shepard)}</td>}
+                {sung && <td className="num">{r.sung == null ? "–" : pct(r.sung.accuracy)}</td>}
+                {timbres.map((t) => {
+                  const v = r.by_timbre.find((x) => x.timbre === t);
+                  return (
+                    <td key={t} className="num">
+                      {v ? pct(v.accuracy) : "–"}
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      {latest.notes.length > 0 && (
+        <ul className="muted small test-notes">
+          {latest.notes.map((n) => (
+            <li key={n}>{n}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
