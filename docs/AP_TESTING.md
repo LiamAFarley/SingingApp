@@ -19,6 +19,8 @@ when it is due. The coach's regular job is:
 | Every four weeks | The **Transfer test** (about 8 min). | `get_ap_profile` → `transfer` |
 | Every four weeks, on the test day | The **UCSF-style test** (about 6 min). | `get_ap_profile` → `ucsf_style` |
 | Twice a week, once note naming is complete | **Maintenance** (5 min, a training block, not a test). | `get_ap_dashboard` |
+| Once to start, then every four weeks | The **Aptitude screening** (about 9 min): note memory, tone 2- and 3-back, span. Not an AP measure; it weights the plan (§3.5). | `get_aptitude_profile` |
+| Every day no test is due | **Your C from memory**: one note sung before anything is heard, at the start of Today's set (Settings can turn it off). | `get_ap_dashboard` → `anchor` |
 
 Tests are not graded pass or fail. They are measurements, and they only mean something across
 several runs (§5).
@@ -92,6 +94,35 @@ Nothing plays between notes.
 36 piano and 36 sine tones over five octaves, C2–B6, two-octave steps, scored as the UCSF test is
 (1 point exact, 0.75 a semitone off). It allows comparison with the published cutoffs below. It
 is not the UCSF test itself.
+
+### 3.5 Aptitude screening (`ap_screening`): once to start, then every 28 days
+
+Not an absolute pitch measure: it measures the auditory memory that predicts how adult absolute
+pitch training goes (Van Hedger et al. 2015, 2019; `AP_Trainer_Literature_search.md` §1, §7). No
+feedback, about 9 minutes, in this order:
+
+| Part | What happens | Result |
+|---|---|---|
+| Note memory (`pitch_memory_match`, 20 searches) | A sine tone from a 27-step ladder (471.58–547.99 Hz, 10 cents a step; targets the odd steps 5–23) plays, then a hiss. The learner finds it again from step 1, 3, 25 or 27 with the arrows (Shift for two steps), hearing each step. The position is never shown. | Mean absolute error in steps and cents; signed error (positive is high). |
+| 2-back and 3-back (`n_back`, `stimuli: tones`) | 30 tones each, one every 2 s, from all twelve notes over C3–B5, no key, drone or cadence. Space when a tone is the same as the one 2 (or 3) back. Matches are the same tone; other tones differ in pitch class from it. | d′ per stream. |
+| Span (`span`) | Sequences of 3, then 4, … items, two at each length; enter each back in order. Spoken digits when `speech/digits/1–9` exist, otherwise a 9-key tone pad (C4–D5) played back in order. Stops when both sequences at one length are wrong. | Longest length recalled. |
+
+`get_aptitude_profile` gives every run with its date, the mode that ran, and the reference lines:
+
+| Measure | Adults who later reached AP | Comparison |
+|---|---|---|
+| Note memory error | 2.75 steps, 27.5 cents (SE 0.30) | Lifelong AP 2.44 steps (SE 0.19) |
+| 2-back d′ | 4.05 (SE 0.17) | Undergraduates 3.37 |
+| 3-back d′ | 3.52 (SE 0.32) | Undergraduates 2.27 |
+| Digit span | 8.83 (SE 0.65) | Non-AP musicians 8.1, lifelong AP 10.0 |
+
+`capacity_band` restates §7's thresholds (note memory ≤ 27.5 cents and 3-back d′ ≥ 3.5) for the
+latest runs: `near_ceiling`, `mixed` or `lower`. The coach routes from the raw numbers; the band
+does not decide anything and the screening gates nothing. Read with care:
+
+- the span reference lines are for spoken digits; a tone-pad span is a different task;
+- searches answered without moving say nothing about memory (the profile notes them);
+- one run is one sample: wait for the second before reading a change.
 
 ### Not tests
 

@@ -74,6 +74,15 @@ pub fn estimate_trial_seconds(t: &TrialSpec) -> f32 {
         TrialSpec::Detect(t) => {
             t.prompt_ms as f32 / 1000.0 + t.tones.len() as f32 * t.window_ms as f32 / 1000.0 + 1.5
         }
+        // Hearing the target, the mask, and about eight seconds of searching.
+        TrialSpec::Match(t) => (t.tone_ms + t.mask_ms) as f32 / 1000.0 + 8.0,
+        // A ladder usually stops by length 8: each sequence, then typing it back.
+        TrialSpec::Span(t) => t
+            .items
+            .iter()
+            .filter(|i| i.length <= 8)
+            .map(|i| i.length as f32 * (t.ioi_ms as f32 / 1000.0 + 0.6) + 2.5)
+            .sum(),
     }
 }
 

@@ -1,6 +1,7 @@
 //! Deterministic trial generation: (block spec, seed, context) → concrete trials.
 
 mod audiation;
+mod screening;
 
 use serde_json::json;
 
@@ -31,6 +32,9 @@ pub struct GenContext {
     /// Recent error rate per answer, keyed `exercise:answer` (`scale_degree_id:b6`), for
     /// adaptive drills.
     pub weak: std::collections::BTreeMap<String, f64>,
+    /// Speech files in the speech folder (`digits/1.wav` …); `None` when not known, which counts
+    /// as none.
+    pub speech: Option<std::collections::BTreeSet<String>>,
 }
 
 impl Default for GenContext {
@@ -43,6 +47,7 @@ impl Default for GenContext {
             labels: Vec::new(),
             soundfonts: None,
             weak: std::collections::BTreeMap::new(),
+            speech: None,
         }
     }
 }
@@ -54,6 +59,14 @@ impl GenContext {
             .find(|s| s.id == id)
             .cloned()
             .or_else(|| crate::labels::builtin_set(id))
+    }
+
+    /// Whether every one of these speech files is in the folder.
+    pub fn has_speech<'a>(&self, rels: impl IntoIterator<Item = &'a str>) -> bool {
+        let Some(have) = &self.speech else {
+            return false;
+        };
+        rels.into_iter().all(|r| have.contains(r))
     }
 }
 
@@ -117,6 +130,8 @@ pub fn generate_block(
         Exercise::SyllableCheck(p) => audiation::gen_syllable_check(p, n, &mut rng),
         Exercise::CadenceId(p) => audiation::gen_cadence_id(p, n, &mut rng),
         Exercise::BassLine(p) => audiation::gen_bass_line(p, n, &mut rng, ctx),
+        Exercise::PitchMemoryMatch(p) => screening::gen_pitch_memory_match(p, n, &mut rng),
+        Exercise::Span(p) => screening::gen_span(p, n, &mut rng, ctx),
     }?;
     if block.effective_feedback().shows_trial_result() {
         color_answers(&mut trials, ctx);
@@ -890,6 +905,7 @@ fn gen_pitch_detect(
             last = Some(midi);
             tones.push(DetectTone {
                 events: vec![ev(midi, 0.0, p.tone_ms as f64, &timbre, -6.0)],
+                speech: None,
                 target: target_here && pc == target,
                 far: (midi - prompt_midi).abs() > 12,
                 midi,
@@ -1154,6 +1170,22 @@ fn gen_sing_pitch(
         return err("classes must not be empty");
     }
     check_timbres(std::slice::from_ref(&p.reveal_timbre))?;
+    if p.hold_and_compare && !(1000..=8000).contains(&p.compare_ms) {
+        return err("compare_ms must be 1000–8000");
+    }
+    let set_id = p.labels.clone().unwrap_or_else(|| {
+        if p.prompt == SingPrompt::Color {
+            crate::labels::TANEDA_COLORS.into()
+        } else {
+            crate::labels::GERVAIN_NAMES.into()
+        }
+    });
+    let set = (p.prompt != SingPrompt::Name)
+        .then(|| ctx.label_set(&set_id))
+        .flatten();
+    if p.prompt != SingPrompt::Name && set.is_none() {
+        return err(format!("unknown label set {set_id}"));
+    }
     let mut bag = BalancedBag::new(classes);
     let centre = (ctx.comfortable.low.0 + ctx.comfortable.high.0) / 2;
     let mut out = Vec::with_capacity(n);
@@ -1166,14 +1198,27 @@ fn gen_sing_pitch(
             let k = ((centre - base) as f32 / 12.0).round() as i32;
             base + 12 * k
         });
-        let prompt = match target_midi {
-            Some(m) => format!("Sing {}", Note(m).display_name()),
-            None => format!("Sing {}", pc.display_name()),
+        let name = match target_midi {
+            Some(m) => Note(m).display_name(),
+            None => pc.display_name().to_string(),
         };
+        let asked = sing_prompt(p, pc, &name, set.as_ref(), ctx)?;
         out.push(TrialSpec::SingPitch(SingPitchTrial {
             exercise: ExerciseKind::SingPitch,
             answer_color: None,
-            prompt,
+            prompt_color: asked.color,
+            speech: asked.speech,
+            compare: p.hold_and_compare.then(|| {
+                ev(
+                    reveal_midi,
+                    0.0,
+                    p.compare_ms as f64,
+                    &p.reveal_timbre,
+                    -8.0,
+                )
+            }),
+            compare_ms: if p.hold_and_compare { p.compare_ms } else { 0 },
+            prompt: asked.text,
             target_class: pc,
             target_midi,
             response_ms: p.response_ms.max(1000),
@@ -1187,10 +1232,95 @@ fn gen_sing_pitch(
                 "octave": p.octave,
                 "mask": p.pre_mask,
                 "delay_ms": p.delay_ms,
+                "prompt": asked.kind,
+                "label": asked.label,
+                "label_set": asked.set,
+                "hold_and_compare": p.hold_and_compare,
             }),
         }));
     }
     Ok(out)
+}
+
+/// How one `sing_pitch` target is asked for.
+struct AskedFor {
+    text: String,
+    color: Option<String>,
+    speech: Option<String>,
+    /// What actually ran: `name`, `label`, `color` or `spoken` (a spoken prompt whose file is
+    /// missing falls back to `label`).
+    kind: &'static str,
+    label: Option<String>,
+    set: Option<String>,
+}
+
+fn sing_prompt(
+    p: &SingPitchParams,
+    pc: PitchClass,
+    name: &str,
+    set: Option<&crate::labels::LabelSet>,
+    ctx: &GenContext,
+) -> Result<AskedFor, GenError> {
+    let named = AskedFor {
+        text: format!("Sing {name}"),
+        color: None,
+        speech: None,
+        kind: "name",
+        label: None,
+        set: None,
+    };
+    if p.prompt == SingPrompt::Name {
+        return Ok(named);
+    }
+    let set = set.ok_or_else(|| GenError("unknown label set".into()))?;
+    let entry = crate::labels::class_entry(set, pc);
+    let word = entry.and_then(|e| e.word.clone().or_else(|| e.name.clone()));
+    let label = |kind| AskedFor {
+        text: format!("Sing {}", word.clone().unwrap_or_else(|| name.to_string())),
+        color: None,
+        speech: None,
+        kind,
+        label: word.clone(),
+        set: Some(set.id.clone()),
+    };
+    Ok(match p.prompt {
+        SingPrompt::Name => unreachable!(),
+        SingPrompt::Label => label("label"),
+        SingPrompt::Color => {
+            let color = entry.and_then(|e| e.color.clone()).ok_or_else(|| {
+                GenError(format!(
+                    "label set {} has no colour for {}",
+                    set.id,
+                    pc.display_name()
+                ))
+            })?;
+            AskedFor {
+                text: "Sing this colour".into(),
+                color: Some(color),
+                speech: None,
+                kind: "color",
+                label: word.clone(),
+                set: Some(set.id.clone()),
+            }
+        }
+        SingPrompt::Spoken => {
+            let file = entry
+                .and_then(|e| e.speech.clone())
+                .unwrap_or_else(|| format!("notes/{}.wav", pc.name()));
+            if ctx.has_speech([file.as_str()]) {
+                AskedFor {
+                    text: "Sing the note you hear named".into(),
+                    color: None,
+                    speech: Some(file),
+                    kind: "spoken",
+                    label: word.clone(),
+                    set: Some(set.id.clone()),
+                }
+            } else {
+                label("label")
+            }
+        }
+    })
 }
 
 fn gen_pairing(
@@ -1296,6 +1426,10 @@ fn gen_anchor_song(
                 out.push(TrialSpec::SingPitch(SingPitchTrial {
                     exercise: ExerciseKind::AnchorSong,
                     answer_color: None,
+                    prompt_color: None,
+                    speech: None,
+                    compare: None,
+                    compare_ms: 0,
                     prompt: format!("Sing the first note of “{}”", a.title),
                     target_class: pc,
                     target_midi: None,

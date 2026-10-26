@@ -92,6 +92,8 @@ export function traceStyle(mode: PitchRefMode | null | undefined): { tint: boole
 }
 
 export const KIND_TITLES: Record<string, string> = {
+  pitch_memory_match: "Note memory (find the tone)",
+  span: "Memory span",
   pitch_id: "Name the note",
   sing_pitch: "Sing a named note",
   pitch_pairing: "Note pairing",

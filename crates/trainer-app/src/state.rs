@@ -174,6 +174,9 @@ impl Core {
             dirs.push(r.as_path());
         }
         ctx.soundfonts = Some(trainer_core::timbre::installed_soundfonts(&dirs));
+        ctx.speech = Some(trainer_core::speech::present(
+            &trainer_core::speech::speech_dir(&self.data_dir),
+        ));
         ctx
     }
 

@@ -49,7 +49,15 @@ after 100% and 14 days), ap_contrast (E♭ against F♯, then the black keys, an
 the tests ap_benchmark (12 notes sung from memory, then 60 piano notes; every 2 weeks), ap_weekly (120 notes, five \
 timbres, on the test day), ap_transfer (60 notes on untrained instruments and 24 Shepard tones; every 4 weeks) and \
 ap_ucsf_style (36 piano, 36 sine; every 4 weeks), all with 5 s per note and no replay, and ap_maintenance (twice a week once \
-naming is complete). Tests come up in \"Today's set\" when due; to run one now, queue its preset (get_preset with the test's \
+naming is complete). ap_screening is the aptitude screening (implicit note memory, tone N-back at 2 and 3 back, span; \
+no feedback, about 9 minutes; due at once, then every 4 weeks); read it with get_aptitude_profile and use it to weight the \
+daily set (lower capacity: more chord colours, Brady and errorless colour work; near ceiling: the multi-octave naming \
+ladder). It informs the plan and gates nothing. ap_production trains singing named notes from memory (classes grow as in \
+ap_naming; each level's check comes first, before any note is heard, then practice with hold and compare); it reports \
+cents error and settling time. sing_pitch can be asked for by label (prompt label, color or spoken, with labels) and \
+hold_and_compare fades the target in under the voice after the graded window. The absolute-pitch daily set starts with \
+singing C from memory (internal anchor accuracy, a trend on the dashboard) on days no test is due. Tests come up in \
+\"Today's set\" when due; to run one now, queue its preset (get_preset with the test's \
 id). Read them with get_ap_profile. The app moves a course to its next level when the level's checks pass, and the user's \
 \"Today's set\" is composed from the active courses in the daily plan (preview_daily_set, set_daily_plan). New courses start \
 switched off. Use set_course_level only to correct a level. The dashboard pools every method per note: mastered means at least \
@@ -318,6 +326,9 @@ impl TrainerServer {
             db.sync_library(&self.library_dir())?;
             let mut ctx = db.gen_context()?;
             ctx.soundfonts = Some(installed);
+            ctx.speech = Some(trainer_core::speech::present(
+                &trainer_core::speech::speech_dir(&self.data_dir),
+            ));
             Ok(ctx)
         })
     }
@@ -480,6 +491,16 @@ impl TrainerServer {
     )]
     async fn get_ap_profile(&self) -> Result<CallToolResult, ErrorData> {
         match self.with_db(reports::ap_profile) {
+            Ok(v) => text(&v),
+            Err(e) => tool_error(e),
+        }
+    }
+
+    #[tool(
+        description = "The aptitude screening (course ap_screening, Van Hedger's battery) over time: implicit note memory (mean absolute error in steps and cents, signed error, per run), tone or letter N-back d′ at 2 and 3 back per run, auditory span (longest length recalled) per run with the mode that ran (spoken digits or the tone pad), each with its run date and the research reference lines; the latest figures; and capacity_band (near_ceiling, mixed or lower against INM ≤ 27.5 cents and 3-back d′ ≥ 3.5), which only restates the raw numbers. Route from the raw numbers; notes say when a result is weak evidence (tone-pad span, letters missing, unmoved searches)."
+    )]
+    async fn get_aptitude_profile(&self) -> Result<CallToolResult, ErrorData> {
+        match self.with_db(trainer_core::aptitude::aptitude_profile) {
             Ok(v) => text(&v),
             Err(e) => tool_error(e),
         }

@@ -13,7 +13,8 @@ use serde_json::json;
 use trainer_audio::{AudioEngine, Bus, SoundBuffer};
 use trainer_core::generate::{block_seed, default_mode, generate_block};
 use trainer_core::grade::{
-    GradingConfig, TrialOutcome, grade_choice, grade_dictation, grade_sing_pitch, grade_sung,
+    GradingConfig, TrialOutcome, grade_choice, grade_dictation, grade_match, grade_sing_pitch,
+    grade_span, grade_sung,
 };
 use trainer_core::pitch::{PitchTrack, TrackOptions, track};
 use trainer_core::reports::{session_report, session_summary};
@@ -260,6 +261,16 @@ fn end_frame(engine: &AudioEngine, events: &[SoundEvent], start: u64) -> u64 {
 /// Silence after a resolution or other answer sound before the next question starts.
 const AFTER_SOUND_PAUSE_MS: f64 = 500.0;
 
+/// Ramps the start of a buffer up from silence over `frames` (hold and compare).
+fn fade_in(buf: &mut SoundBuffer, frames: usize) {
+    let n = frames.min(buf.frames()).max(1);
+    for i in 0..n {
+        let g = i as f32 / n as f32;
+        buf.data[i * 2] *= g;
+        buf.data[i * 2 + 1] *= g;
+    }
+}
+
 impl<'a> SessionRun<'a> {
     fn set(&self, f: impl FnOnce(&mut RunnerState)) {
         let snapshot = {
@@ -450,6 +461,8 @@ impl<'a> SessionRun<'a> {
                         }
                         TrialSpec::Dictation(t) => self.run_dictation(&engine, t, attempt),
                         TrialSpec::Detect(t) => self.run_detect(&engine, t, feedback, attempt),
+                        TrialSpec::Match(t) => self.run_match(&engine, t, attempt),
+                        TrialSpec::Span(t) => self.run_span(&engine, t, attempt),
                     }?;
                     let Some((outcome, extras)) = res else {
                         break; // skipped
@@ -622,6 +635,13 @@ impl<'a> SessionRun<'a> {
             detect_total: None,
             detect_index: None,
             detect_mark: None,
+            match_moves: None,
+            span_mode: None,
+            span_length: None,
+            span_item: None,
+            prompt_color: None,
+            compare_until_s: None,
+            compare_midi: None,
         }
     }
 
@@ -822,6 +842,9 @@ impl<'a> SessionRun<'a> {
                 1.0,
                 Bus::Prompt,
             )?;
+            if let Some(rel) = &tone.speech {
+                self.play_speech(engine, rel, start);
+            }
             let onset = Instant::now()
                 + Duration::from_secs_f64(
                     start.saturating_sub(engine.now()) as f64 / engine.sample_rate() as f64,
@@ -883,16 +906,173 @@ impl<'a> SessionRun<'a> {
 
     /// Plays a speech file if it is in the folder. A missing or unreadable file is skipped.
     fn play_speech(&self, engine: &AudioEngine, rel: &str, at: u64) {
+        self.play_speech_frames(engine, rel, at);
+    }
+
+    /// Plays a speech file and returns its length in frames, or `None` when it could not play.
+    fn play_speech_frames(&self, engine: &AudioEngine, rel: &str, at: u64) -> Option<u64> {
         let dir = trainer_core::speech::speech_dir(&self.core.data_dir);
-        let Some(path) = trainer_core::speech::resolve(&dir, rel) else {
-            return;
-        };
+        let path = trainer_core::speech::resolve(&dir, rel)?;
         match trainer_audio::speech::load(&path, engine.sample_rate()) {
             Ok(buf) => {
-                let _ = engine.play(Arc::new(buf), at, 1.0, Bus::Prompt);
+                let frames = buf.frames() as u64;
+                engine.play(Arc::new(buf), at, 1.0, Bus::Prompt).ok()?;
+                Some(frames)
             }
-            Err(e) => tracing::warn!("speech {}: {e:#}", path.display()),
+            Err(e) => {
+                tracing::warn!("speech {}: {e:#}", path.display());
+                None
+            }
         }
+    }
+
+    // --- screening ---------------------------------------------------------------------------
+
+    /// Implicit note memory: the target, a noise mask, then the search from one end of the
+    /// ladder. Each arrow press plays the new step; the position is never shown.
+    fn run_match(
+        &mut self,
+        engine: &AudioEngine,
+        t: &MatchTrial,
+        attempt: u32,
+    ) -> R<Option<(TrialOutcome, Extras)>> {
+        let renderer = self.core.renderer();
+        let mut view = self.base_view(
+            ExerciseKind::PitchMemoryMatch,
+            Interaction::Match,
+            &t.prompt,
+            attempt,
+        );
+        view.match_moves = Some(0);
+        self.set(|st| {
+            st.phase = Phase::Listening;
+            st.trial = Some(view);
+        });
+        let at = engine.frame_after_ms(150.0);
+        let target = renderer.render_events(&[t.tone(t.target_step, t.tone_ms)]);
+        engine.play(Arc::new(target), at, 1.0, Bus::Prompt)?;
+        if let Some(m) = renderer.render_mask(Mask::Noise, now().timestamp_micros() as u64) {
+            let mask_at = at + engine.frames_from_ms(t.tone_ms as f64 + 150.0);
+            engine.play(Arc::new(m), mask_at, 1.0, Bus::Prompt)?;
+        }
+        let search_at = at + engine.frames_from_ms((t.tone_ms + t.mask_ms) as f64);
+        if self.wait_until_frame(engine, search_at)? {
+            engine.stop_bus(Bus::Prompt);
+            return Ok(None);
+        }
+        let play = |step: u32| -> R<()> {
+            engine.fade_bus(Bus::Prompt, 30.0);
+            engine.play_now(
+                Arc::new(renderer.render_events(&[t.tone(step, t.step_ms)])),
+                1.0,
+                Bus::Prompt,
+            )?;
+            Ok(())
+        };
+        let mut step = t.start_step;
+        let mut moves = 0u32;
+        play(step)?;
+        let started = Instant::now();
+        self.set(|st| st.phase = Phase::Answering);
+        loop {
+            match self.wait(None)? {
+                Some(RunnerCommand::Step { delta }) => {
+                    step = (step as i32 + delta.clamp(-2, 2)).clamp(1, t.steps as i32) as u32;
+                    moves += 1;
+                    play(step)?;
+                    self.set(|st| {
+                        if let Some(v) = st.trial.as_mut() {
+                            v.match_moves = Some(moves);
+                        }
+                    });
+                }
+                Some(RunnerCommand::Replay) => play(step)?,
+                Some(RunnerCommand::Answer { .. }) => break,
+                Some(RunnerCommand::Skip) => {
+                    engine.stop_bus(Bus::Prompt);
+                    return Ok(None);
+                }
+                _ => {}
+            }
+        }
+        engine.fade_bus(Bus::Prompt, TRIAL_FADE_MS);
+        let rt = started.elapsed().as_secs_f64() * 1000.0;
+        Ok(Some((grade_match(t, step, moves, rt), Extras::default())))
+    }
+
+    /// A span ladder: each sequence, then its answer, until `next_item` stops it. Skip ends the
+    /// ladder; what was answered so far is kept.
+    fn run_span(
+        &mut self,
+        engine: &AudioEngine,
+        t: &SpanTrial,
+        attempt: u32,
+    ) -> R<Option<(TrialOutcome, Extras)>> {
+        let renderer = self.core.renderer();
+        let mut results: Vec<bool> = Vec::new();
+        let mut answers: Vec<String> = Vec::new();
+        let ioi = t.ioi_ms as f64;
+        'ladder: while let Some(i) = t.next_item(&results) {
+            let item = &t.items[i];
+            let mut view =
+                self.base_view(ExerciseKind::Span, Interaction::Span, &t.prompt, attempt);
+            view.span_mode = Some(t.mode.clone());
+            view.span_length = Some(item.length);
+            view.span_item = Some(i as u32 + 1);
+            self.set(|st| {
+                st.phase = Phase::Listening;
+                st.trial = Some(view);
+            });
+            let at = engine.frame_after_ms(700.0);
+            for (k, d) in item.sequence.iter().enumerate() {
+                let when = at + engine.frames_from_ms(ioi * k as f64);
+                if t.mode == "digits" {
+                    self.play_speech(engine, &SpanTrial::digit_speech(*d), when);
+                } else if let Some(e) = t.pad_tone(*d, ioi * 0.7) {
+                    engine.play(
+                        Arc::new(renderer.render_events(&[e])),
+                        when,
+                        1.0,
+                        Bus::Prompt,
+                    )?;
+                }
+            }
+            let end = at + engine.frames_from_ms(ioi * item.sequence.len() as f64);
+            if self.wait_until_frame(engine, end)? {
+                engine.stop_bus(Bus::Prompt);
+                break 'ladder;
+            }
+            self.set(|st| st.phase = Phase::Answering);
+            let answer = loop {
+                match self.wait(None)? {
+                    Some(RunnerCommand::Answer { choice }) => break choice,
+                    Some(RunnerCommand::PlayChoice { choice }) if t.mode == "tones" => {
+                        if let Some(e) =
+                            choice.parse::<u8>().ok().and_then(|k| t.pad_tone(k, 450.0))
+                        {
+                            engine.fade_bus(Bus::Prompt, 30.0);
+                            engine.play_now(
+                                Arc::new(renderer.render_events(&[e])),
+                                1.0,
+                                Bus::Prompt,
+                            )?;
+                        }
+                    }
+                    Some(RunnerCommand::Skip) => break 'ladder,
+                    _ => {}
+                }
+            };
+            let given: Vec<u8> = answer
+                .chars()
+                .filter_map(|c| c.to_digit(10).map(|d| d as u8))
+                .collect();
+            results.push(given == item.sequence);
+            answers.push(answer);
+        }
+        if answers.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some((grade_span(t, &answers), Extras::default())))
     }
 
     // --- passive pairing ---------------------------------------------------------------------
@@ -977,9 +1157,16 @@ impl<'a> SessionRun<'a> {
             engine.play(Arc::new(m), at, 1.0, Bus::Prompt)?;
             at += frames + engine.frames_from_ms(500.0);
         }
+        // A spoken prompt is heard before the answer window opens.
+        if let Some(rel) = &t.speech
+            && let Some(frames) = self.play_speech_frames(engine, rel, at)
+        {
+            at += frames + engine.frames_from_ms(300.0);
+        }
         let rec_start = at + engine.frames_from_ms(t.delay_ms as f64);
         let rec_end = rec_start + engine.frames_from_ms(t.response_ms as f64);
         let mut view = self.base_view(t.exercise, Interaction::SingPitch, &t.prompt, attempt);
+        view.prompt_color = t.prompt_color.clone();
         view.show_live_pitch = feedback == FeedbackMode::Continuous;
         view.response_start_s = Some(secs(engine, rec_start));
         view.response_end_s = Some(secs(engine, rec_end));
@@ -1006,6 +1193,27 @@ impl<'a> SessionRun<'a> {
         let mut outcome = grade_sing_pitch(t, &tr, cfg, lead as f32 / engine.sample_rate() as f32);
         outcome.response["capture_offset_s"] = json!(lead as f64 / engine.sample_rate() as f64);
         let sr = engine.sample_rate();
+        // Hold and compare: keep singing while the target fades in under the voice. The take
+        // above is already graded; this part only shows the gap.
+        if let (Some(c), true) = (&t.compare, feedback.shows_trial_result()) {
+            let mut buf = renderer.render_events(std::slice::from_ref(c));
+            fade_in(&mut buf, engine.frames_from_ms(1500.0) as usize);
+            let (_, from) = engine.play_now(Arc::new(buf), 1.0, Bus::Prompt)?;
+            let until = from + engine.frames_from_ms(t.compare_ms as f64);
+            self.set(|st| {
+                st.phase = Phase::Recording;
+                if let Some(v) = st.trial.as_mut() {
+                    v.compare_until_s = Some(secs(engine, until));
+                    v.compare_midi = Some(c.midi);
+                    v.show_live_pitch = true;
+                }
+            });
+            if self.wait_until_frame(engine, until)? {
+                engine.stop_bus(Bus::Prompt);
+            }
+            engine.fade_bus(Bus::Prompt, TRIAL_FADE_MS);
+            outcome.response["held_and_compared"] = json!(true);
+        }
         Ok(Some((
             outcome,
             Extras {
@@ -1645,6 +1853,8 @@ fn stored_kind(block: &BlockSpec, trial: &TrialSpec) -> ExerciseKind {
         TrialSpec::SingPitch(t) => t.exercise,
         TrialSpec::Sung(t) => t.exercise,
         TrialSpec::Detect(t) => t.exercise,
+        TrialSpec::Match(_) => ExerciseKind::PitchMemoryMatch,
+        TrialSpec::Span(_) => ExerciseKind::Span,
         TrialSpec::Pairing(_) | TrialSpec::Dictation(_) => block.exercise.kind(),
     }
 }

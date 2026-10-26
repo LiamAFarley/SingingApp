@@ -10,7 +10,7 @@ use crate::metrics::{
 use crate::pitch::PitchTrack;
 use crate::schema::{
     DetectTrial, DictationTrial, ExerciseKind, FeedbackMode, GradingOverrides, IdentifyTrial,
-    PitchRefMode, SingPitchTrial, SungTrial, Tuning,
+    MatchTrial, PitchRefMode, SingPitchTrial, SpanTrial, SungTrial, Tuning,
 };
 use crate::score::{Pitch, ScoreNote};
 use crate::theory::{Note, PitchClass};
@@ -324,6 +324,99 @@ pub fn grade_detect(trial: &DetectTrial, presses_ms: &[Option<f64>]) -> TrialOut
         summary: format!(
             "d′ {d:.2}. {hits} hits, {misses} misses, {false_alarms} false alarms. Median hit {latency}.{far_note}"
         ),
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Screening: implicit note memory and span
+// ---------------------------------------------------------------------------------------------
+
+/// Implicit note memory: the error of the chosen step, signed (positive is above the target) and
+/// absolute, in steps and cents. There is no right or wrong; the error is the result.
+pub fn grade_match(trial: &MatchTrial, answer_step: u32, moves: u32, rt_ms: f64) -> TrialOutcome {
+    let answer = answer_step.clamp(1, trial.steps);
+    let error_steps = answer as i32 - trial.target_step as i32;
+    let error_cents = error_steps as f32 * trial.step_cents;
+    let direction = match error_steps.signum() {
+        0 => "exactly".to_string(),
+        1 => "high".to_string(),
+        _ => "low".to_string(),
+    };
+    TrialOutcome {
+        correct: None,
+        score: None,
+        rt_ms: Some(rt_ms),
+        response: json!({ "answer_step": answer, "moves": moves }),
+        metrics: json!({
+            "target_step": trial.target_step,
+            "start_step": trial.start_step,
+            "answer_step": answer,
+            "error_steps": error_steps,
+            "abs_error_steps": error_steps.abs(),
+            "error_cents": error_cents,
+            "abs_error_cents": error_cents.abs(),
+            "moves": moves,
+        }),
+        summary: if error_steps == 0 {
+            "Found it exactly.".into()
+        } else {
+            format!(
+                "{} {} ({:.0} cents) {direction}.",
+                error_steps.abs(),
+                if error_steps.abs() == 1 {
+                    "step"
+                } else {
+                    "steps"
+                },
+                error_cents.abs()
+            )
+        },
+    }
+}
+
+/// A whole span ladder. `answers` are what was entered for each sequence presented, in order.
+/// The span is the longest length with at least one sequence right.
+pub fn grade_span(trial: &SpanTrial, answers: &[String]) -> TrialOutcome {
+    let mut ladder = Vec::with_capacity(answers.len());
+    let mut span = 0u32;
+    for (item, answer) in trial.items.iter().zip(answers) {
+        let given: Vec<u8> = answer
+            .chars()
+            .filter_map(|c| c.to_digit(10).map(|d| d as u8))
+            .collect();
+        let ok = given == item.sequence;
+        if ok {
+            span = span.max(item.length);
+        }
+        ladder.push(json!({
+            "length": item.length,
+            "sequence": item.sequence.iter().map(|d| d.to_string()).collect::<String>(),
+            "answer": answer,
+            "correct": ok,
+        }));
+    }
+    let right = ladder.iter().filter(|l| l["correct"] == true).count();
+    TrialOutcome {
+        correct: None,
+        score: None,
+        rt_ms: None,
+        response: json!({ "answers": answers }),
+        metrics: json!({
+            "span": span,
+            "mode": trial.mode,
+            "fallback": trial.stimulus.get("fallback").cloned().unwrap_or(json!(false)),
+            "sequences": answers.len(),
+            "sequences_correct": right,
+            "ladder": ladder,
+        }),
+        summary: if span == 0 {
+            "No sequence recalled in full.".into()
+        } else {
+            format!(
+                "Span {span} ({right} of {} sequences right).",
+                answers.len()
+            )
+        },
     }
 }
 
@@ -1253,6 +1346,10 @@ mod tests {
         let trial = SingPitchTrial {
             exercise: ExerciseKind::SingPitch,
             answer_color: None,
+            prompt_color: None,
+            speech: None,
+            compare: None,
+            compare_ms: 0,
             prompt: "Sing E♭".into(),
             target_class: PitchClass::new(3),
             target_midi: None,
@@ -1700,6 +1797,7 @@ mod tests {
 
         let tone = |target, far| DetectTone {
             events: vec![],
+            speech: None,
             target,
             far,
             midi: if far { 48 } else { 60 },
@@ -1732,5 +1830,84 @@ mod tests {
         assert_eq!(o.metrics["far_hits"], 0);
         assert_eq!(o.rt_ms, Some(400.0));
         assert!(o.summary.contains("d′"), "{}", o.summary);
+    }
+
+    #[test]
+    fn d_prime_matches_a_hand_computed_fixture() {
+        // Log-linear correction: hit rate 8.5/11, false alarms 3.5/21; z(0.7727) − z(0.1667).
+        assert!((d_prime(8, 2, 3, 17) - 1.71528).abs() < 1e-3);
+        assert!((d_prime(10, 0, 0, 20) - 3.67137).abs() < 1e-3);
+    }
+
+    fn match_trial(target: u32, start: u32) -> MatchTrial {
+        MatchTrial {
+            prompt: String::new(),
+            target_step: target,
+            start_step: start,
+            steps: 27,
+            step_cents: 10.0,
+            base_midi: 70,
+            base_cents: 20.0,
+            tone_ms: 1000,
+            mask_ms: 2000,
+            step_ms: 700,
+            timbre: "synth:sine".into(),
+            stimulus: json!({}),
+        }
+    }
+
+    #[test]
+    fn note_memory_error_is_signed_in_steps_and_cents() {
+        let high = grade_match(&match_trial(11, 1), 14, 13, 6000.0);
+        assert_eq!(high.metrics["error_steps"], 3);
+        assert_eq!(high.metrics["error_cents"], 30.0);
+        assert_eq!(high.metrics["abs_error_cents"], 30.0);
+        assert!(high.summary.contains("high"));
+        let low = grade_match(&match_trial(11, 27), 9, 9, 6000.0);
+        assert_eq!(low.metrics["error_steps"], -2);
+        assert_eq!(low.metrics["error_cents"], -20.0);
+        assert_eq!(low.metrics["abs_error_steps"], 2);
+        assert!(low.summary.contains("low"));
+        assert_eq!(
+            grade_match(&match_trial(5, 1), 5, 4, 1.0).metrics["error_steps"],
+            0
+        );
+        // Off the ladder is the ladder's end.
+        assert_eq!(
+            grade_match(&match_trial(23, 27), 40, 0, 1.0).metrics["answer_step"],
+            27
+        );
+    }
+
+    #[test]
+    fn span_is_the_longest_length_recalled() {
+        let item = |length: u32, seq: &[u8]| crate::schema::SpanItem {
+            length,
+            sequence: seq.to_vec(),
+        };
+        let t = SpanTrial {
+            prompt: String::new(),
+            mode: "tones".into(),
+            items: vec![
+                item(3, &[1, 2, 3]),
+                item(3, &[4, 5, 6]),
+                item(4, &[1, 2, 3, 4]),
+                item(4, &[5, 6, 7, 8]),
+            ],
+            per_length: 2,
+            ioi_ms: 1000,
+            pad: vec![],
+            timbre: "gm:0".into(),
+            stimulus: json!({ "fallback": true }),
+        };
+        let out = grade_span(
+            &t,
+            &["123".into(), "456".into(), "1243".into(), "5 6 7 8".into()],
+        );
+        assert_eq!(out.metrics["span"], 4);
+        assert_eq!(out.metrics["sequences_correct"], 3);
+        assert_eq!(out.metrics["fallback"], true);
+        let out = grade_span(&t, &["12".into(), "465".into()]);
+        assert_eq!(out.metrics["span"], 0);
     }
 }

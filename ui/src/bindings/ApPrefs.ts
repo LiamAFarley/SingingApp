@@ -11,4 +11,8 @@ errorless_early: boolean,
 /**
  * Label set for the contrast course (`gervain_names` or `my_colors`).
  */
-contrast_labels: string, };
+contrast_labels: string, 
+/**
+ * Start the daily set by singing C from memory on days no test is due.
+ */
+daily_anchor_check: boolean, };

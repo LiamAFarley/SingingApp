@@ -1058,6 +1058,56 @@ pre.code {
   border: 1px solid var(--border);
 }
 
+.swatch.big {
+  width: 240px;
+  height: 150px;
+  margin: 0 auto;
+}
+
+/* Hold and compare: the gap from the note, centred on zero */
+.compare-bar {
+  position: relative;
+  width: 320px;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.compare-bar .compare-mid {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--text);
+  opacity: 0.5;
+}
+
+.compare-bar .compare-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.prompt-sub.correct {
+  color: var(--correct);
+}
+
+/* Span: a 3 × 3 keypad, 1–9 */
+.span-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 64px);
+  gap: 8px;
+}
+
+.span-pad .btn {
+  height: 56px;
+  font-size: 20px;
+  justify-content: center;
+}
+
 .color-key {
   appearance: none;
   display: inline-flex;
@@ -1292,13 +1342,30 @@ select.sing-part {
   padding-left: 18px;
 }
 
-/* AP test tables: scroll sideways on narrow screens rather than squeezing the columns. */
-.table-scroll {
-  overflow-x: auto;
+/* Internal anchor accuracy over time; the band is a quarter tone either side of C. */
+.anchor-trend {
+  margin-top: 10px;
 }
-.test-notes {
-  margin: 8px 0 0;
-  padding-left: 18px;
+.anchor-trend svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.anchor-band {
+  fill: var(--correct);
+  opacity: 0.12;
+}
+.anchor-zero {
+  stroke: var(--text-faint);
+  stroke-dasharray: 3 3;
+}
+.anchor-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.anchor-dot {
+  fill: var(--accent);
 }
 
 /* Buttons filled with a label's colour: hints and key labels follow the chosen text colour. */

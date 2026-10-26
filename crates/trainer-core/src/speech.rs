@@ -137,6 +137,15 @@ pub fn inspect(dir: &Path) -> SpeechReport {
     }
 }
 
+/// The expected files that are in the folder (as `digits/1.wav`, whatever their extension).
+pub fn present(dir: &Path) -> std::collections::BTreeSet<String> {
+    expected()
+        .into_iter()
+        .filter(|f| resolve(dir, &f.rel).is_some())
+        .map(|f| f.rel)
+        .collect()
+}
+
 /// Every path a generator should produce, one per line, for `tools/speech_file_list.py`.
 pub fn expected_paths() -> Vec<String> {
     expected().into_iter().map(|e| e.rel).collect()

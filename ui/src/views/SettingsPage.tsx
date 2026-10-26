@@ -266,6 +266,17 @@ function ApPractice() {
       <p className="small muted">
         The first levels of note colours, chord colours and contrast light up the right answer without marking a miss. What is stored is still whether you were right.
       </p>
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={prefs.daily_anchor_check}
+          onChange={(e) => setPrefs({ ...prefs, daily_anchor_check: e.target.checked })}
+        />
+        Start today's set by singing C from memory
+      </label>
+      <p className="small muted">
+        One note before anything is heard, on days no test starts the set. It tracks how far your remembered C is from a real one, shown as a trend on the Absolute pitch page.
+      </p>
       <label className="field" style={{ maxWidth: 280 }}>
         Contrast course
         <select value={prefs.contrast_labels} onChange={(e) => setPrefs({ ...prefs, contrast_labels: e.target.value })}>

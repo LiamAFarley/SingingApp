@@ -55,4 +55,21 @@ detect_index: number | null,
 /**
  * A mark during a detection stream: `hit`, `miss` or `false`.
  */
-detect_mark: string | null, };
+detect_mark: string | null, 
+/**
+ * Note memory: arrow presses so far (the position itself is not shown).
+ */
+match_moves?: number, 
+/**
+ * Span: `digits` or `tones`, the current length, and which sequence of the ladder this is.
+ */
+span_mode?: string, span_length?: number, span_item?: number, 
+/**
+ * Sing by colour: the swatch to sing.
+ */
+prompt_color?: string, 
+/**
+ * Hold and compare: the target fades in under the voice until this master-clock time, and
+ * the tuner compares the voice with `compare_midi`.
+ */
+compare_until_s?: number, compare_midi?: number, };

@@ -802,6 +802,129 @@ fn n_back_stream(
     (seq, target)
 }
 
+fn n_back_prompt(back: usize) -> (String, String) {
+    if back == 1 {
+        (
+            "Tap Match (space) when it is the same as the one before".into(),
+            "Same as the last".into(),
+        )
+    } else {
+        (
+            format!("Tap Match (space) when it is the same as the one {back} back"),
+            format!("Same as {back} back"),
+        )
+    }
+}
+
+/// The screening N-back: tones from the twelve pitch classes over several octaves with no key,
+/// or spoken letters. A match repeats the item exactly; the others differ from it in pitch class
+/// (or letter), so nothing is half a match.
+fn gen_n_back_screening(
+    p: &NBackParams,
+    n: usize,
+    rng: &mut Rng,
+    ctx: &GenContext,
+) -> Result<Vec<TrialSpec>, GenError> {
+    if p.mode != NBackMode::Recognize {
+        return err("sing mode needs degree stimuli");
+    }
+    let letter_files: Vec<String> = N_BACK_LETTERS
+        .iter()
+        .map(|l| format!("letters/{l}.wav"))
+        .collect();
+    let letters_there = ctx.has_speech(letter_files.iter().map(String::as_str));
+    let letters = p.stimuli == NBackStimuli::Letters && letters_there;
+    let fallback = p.stimuli == NBackStimuli::Letters && !letters_there;
+    let classes = p.classes.classes();
+    if !letters {
+        if classes.len() < 4 {
+            return err("classes needs at least four pitch classes");
+        }
+        if p.octaves.len() < 3 {
+            return err(
+                "octaves needs at least three octaves, so height cannot stand in for the note",
+            );
+        }
+        for o in &p.octaves {
+            if !(1..=7).contains(o) {
+                return err("octaves must be 1–7");
+            }
+        }
+    }
+    let back = p.n as usize;
+    let values: Vec<i32> = if letters {
+        (0..N_BACK_LETTERS.len() as i32).collect()
+    } else {
+        classes.iter().map(|c| c.index() as i32).collect()
+    };
+    let ioi = p.ioi_ms as f64;
+    let (prompt, label) = n_back_prompt(back);
+    let mut out = Vec::with_capacity(n);
+    for _ in 0..n {
+        let (seq, targets) = n_back_stream(&values, back, p.length as usize, p.target_rate, rng);
+        let mut midis: Vec<i32> = Vec::with_capacity(seq.len());
+        let mut tones = Vec::with_capacity(seq.len());
+        for (i, (v, hit)) in seq.iter().zip(&targets).enumerate() {
+            if letters {
+                let file = letter_files[*v as usize].clone();
+                midis.push(0);
+                tones.push(DetectTone {
+                    events: Vec::new(),
+                    speech: Some(file),
+                    target: *hit,
+                    far: false,
+                    midi: 0,
+                });
+                continue;
+            }
+            // A match is the same tone; anything else lands in any octave.
+            let midi = if *hit {
+                midis[i - back]
+            } else {
+                let o = *rng.choose(&p.octaves).unwrap();
+                PitchClass::new(*v).in_octave(o)
+            };
+            midis.push(midi);
+            tones.push(DetectTone {
+                events: vec![ev(midi, 0.0, ioi * 0.6, &p.timbre, -6.0)],
+                speech: None,
+                target: *hit,
+                far: false,
+                midi,
+            });
+        }
+        let items: Vec<String> = if letters {
+            seq.iter()
+                .map(|v| N_BACK_LETTERS[*v as usize].to_string())
+                .collect()
+        } else {
+            midis.iter().map(|m| Note(*m).name()).collect()
+        };
+        out.push(TrialSpec::Detect(DetectTrial {
+            exercise: ExerciseKind::NBack,
+            prompt: prompt.clone(),
+            target_class: PitchClass::new(0),
+            target_label: label.clone(),
+            target_color: None,
+            prompt_events: Vec::new(),
+            prompt_ms: 1500,
+            speech: None,
+            tones,
+            window_ms: p.ioi_ms,
+            marks: p.marks,
+            stimulus: json!({
+                "n": back,
+                "stimuli": if letters { "letters" } else { "tones" },
+                "fallback": fallback,
+                "items": items,
+                "matches": targets.iter().filter(|x| **x).count(),
+                "octaves": if letters { json!(null) } else { json!(p.octaves) },
+            }),
+        }));
+    }
+    Ok(out)
+}
+
 pub(super) fn gen_n_back(
     p: &NBackParams,
     n: usize,
@@ -821,6 +944,9 @@ pub(super) fn gen_n_back(
         return err("target_rate must be 0.1–0.6");
     }
     check_timbres(std::slice::from_ref(&p.timbre))?;
+    if p.stimuli != NBackStimuli::Degrees {
+        return gen_n_back_screening(p, n, rng, ctx);
+    }
     let semis = degree_semis(&p.degrees)?;
     if semis.len() < 2 {
         return err("degrees needs at least two degrees");
@@ -862,6 +988,7 @@ pub(super) fn gen_n_back(
                         }
                         DetectTone {
                             events,
+                            speech: None,
                             target: *hit,
                             far: false,
                             midi: t + s,

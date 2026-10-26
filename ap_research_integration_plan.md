@@ -459,13 +459,22 @@ coach.
   - minutes since a named note, and cautions;
   - change against noise and a 30-day trend.
 
-### AP-3: production, inner voices, screening (M)
+### AP-3: production, inner voices, screening (M) — screening and production built
 
-- Anchor auralisation check, sing by label, hold-and-compare (§4.5).
-- `sing_chord_tones` (§4.3).
-- `pitch_memory_match`, `n_back`, `span` with spoken digits and letters (§4.4).
-- Aptitude profile (§5.5) and drift detector (§5.6).
-- Courses: `ap_production`, `ap_inner_voices`, `ap_screening`.
+- Anchor auralisation check, sing by label, hold-and-compare (§4.5). **Built:** the daily set
+  starts with singing C from memory on days no test starts it (a course's own anchor check moves
+  to the front instead); `sing_pitch` `prompt: label | color | spoken`; `hold_and_compare`.
+- `sing_chord_tones` (§4.3). *Not built.*
+- `pitch_memory_match`, `n_back`, `span` with spoken digits and letters (§4.4). **Built:**
+  `n_back` gained `stimuli: tones | letters` rather than a second engine; letters and digits fall
+  back to tones when the speech files are missing, and the stored stimulus says so.
+- Aptitude profile (§5.5): **built** (`get_aptitude_profile`, the Absolute pitch page). Drift
+  detector (§5.6): *not built.*
+- Courses: `ap_production` and `ap_screening` **built** (handoff
+  `docs/2026-10-25_ap3_handoff.md`); `ap_inner_voices` *not built.*
+- Also from the handoff: the daily set keeps the plan's order (no daily rotation; the course
+  cards reorder it), the per-note table labels where naming trials came from and adds a
+  production column ("known" = named and sung), and contrast level 1 has three notes.
 
 ### AP-4: anchors (S)
 

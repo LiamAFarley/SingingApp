@@ -16,6 +16,7 @@ import type { TrialView } from "./bindings/TrialView";
 import type { AppSettings } from "./bindings/AppSettings";
 import type { Anchor } from "./bindings/Anchor";
 import type { ApDashboard } from "./bindings/ApDashboard";
+import type { AptitudeProfile } from "./bindings/AptitudeProfile";
 import type { CourseStatus } from "./bindings/CourseStatus";
 import type { CustomLevel } from "./bindings/CustomLevel";
 import type { WorkshopView } from "./bindings/WorkshopView";
@@ -1108,7 +1109,8 @@ export function mockBackend(): Backend {
     deleteCustomLevel: async (id) => {
       mockCustom = mockCustom.filter((c) => c.id !== id);
     },
-    apPrefs: async () => ({ errorless_early: true, contrast_labels: "gervain_names" }),
+    apPrefs: async () => ({ errorless_early: true, contrast_labels: "gervain_names", daily_anchor_check: true }),
+    aptitudeProfile: async () => mockAptitude(),
     saveApPrefs: async (prefs) => prefs,
     listLabelSets: async () => [
       {
@@ -1398,6 +1400,34 @@ function mockCourses(): CourseStatus[] {
   ];
 }
 
+function mockAptitude(): AptitudeProfile {
+  const ref = (group: string, value: number, se: number | null) => ({ group, value, se, source: "Van Hedger et al." });
+  const learners = "Adults who later reached AP thresholds";
+  return {
+    inm: [
+      { session_id: "s1", at: daysAgo(30), trials: 20, mean_abs_error_steps: 3.4, mean_abs_error_cents: 34, mean_signed_error_cents: 6, median_abs_error_steps: 3, unmoved: 0 },
+      { session_id: "s2", at: daysAgo(2), trials: 20, mean_abs_error_steps: 2.9, mean_abs_error_cents: 29, mean_signed_error_cents: -4, median_abs_error_steps: 3, unmoved: 1 },
+    ],
+    n_back: [
+      { session_id: "s1", at: daysAgo(30), n: 2, d_prime: 3.1, hits: 7, misses: 2, false_alarms: 2, correct_rejections: 19, stimuli: "tones", fallback: false },
+      { session_id: "s1", at: daysAgo(30), n: 3, d_prime: 2.2, hits: 5, misses: 4, false_alarms: 3, correct_rejections: 18, stimuli: "tones", fallback: false },
+      { session_id: "s2", at: daysAgo(2), n: 2, d_prime: 3.5, hits: 8, misses: 1, false_alarms: 2, correct_rejections: 19, stimuli: "tones", fallback: false },
+      { session_id: "s2", at: daysAgo(2), n: 3, d_prime: 2.6, hits: 6, misses: 3, false_alarms: 2, correct_rejections: 19, stimuli: "tones", fallback: false },
+    ],
+    span: [
+      { session_id: "s1", at: daysAgo(30), span: 6, mode: "tones", fallback: false, sequences: 10, sequences_correct: 7 },
+      { session_id: "s2", at: daysAgo(2), span: 7, mode: "tones", fallback: false, sequences: 12, sequences_correct: 8 },
+    ],
+    latest: { inm_mean_abs_error_cents: 29, inm_mean_abs_error_steps: 2.9, n_back_2_d_prime: 3.5, n_back_3_d_prime: 2.6, span: 7, span_mode: "tones" },
+    inm_reference: [ref(learners, 2.75, 0.3), ref("Lifelong AP possessors", 2.44, 0.19)],
+    n_back_2_reference: [ref(learners, 4.05, 0.17), ref("University undergraduates", 3.37, 0.16)],
+    n_back_3_reference: [ref(learners, 3.52, 0.32), ref("University undergraduates", 2.27, 0.19)],
+    span_reference: [ref(learners, 8.83, 0.65), ref("Non-AP musicians", 8.1, null), ref("Lifelong AP possessors", 10, null)],
+    capacity_band: "lower",
+    notes: ["Span ran on the tone pad (no spoken digits in the speech folder); the digit-span reference lines are for spoken digits, so read them loosely."],
+  };
+}
+
 function mockDashboard(): ApDashboard {
   const naming = [0.97, 0.42, 0.55, 0.38, 0.93, 0.47, 0.71, 0.4, 0.92, 0.5, 0.36, 0.44];
   const trials = [40, 22, 26, 20, 40, 21, 34, 20, 40, 23, 19, 20];
@@ -1442,11 +1472,18 @@ function mockDashboard(): ApDashboard {
       naming_accuracy: Math.min(1, naming[i] + 0.05),
       mastered: naming[i] >= 0.9 && trials[i] >= 20,
       singing_trials: i % 3 === 0 ? 12 : 4,
-      singing_accuracy: i % 3 === 0 ? 0.75 : 0.5,
+      singing_accuracy: i % 3 === 0 ? 0.85 : 0.5,
+      sung_reliably: i % 3 === 0,
+      known: i % 3 === 0 && naming[i] >= 0.9 && trials[i] >= 20,
+      naming_sources: [
+        { source: "naming", trials: Math.ceil(trials[i] * 0.6) },
+        { source: "colours", trials: Math.floor(trials[i] * 0.4) },
+      ],
       detection_d_prime: i === 0 ? 1.8 : null,
       last_seen: daysAgo(1),
     })),
     classes_mastered: naming.filter((n, i) => n >= 0.9 && trials[i] >= 20).length,
+    classes_known: naming.filter((n, i) => i % 3 === 0 && n >= 0.9 && trials[i] >= 20).length,
     courses: mockCourses(),
     benchmark: [bench(37, 0.18, 0.25, ["Not clearly above chance yet: 18% (95% range 11–30%) against 8% by guessing."]), bench(23, 0.27, 0.33), bench(9, 0.35, 0.42)],
     weekly: [run(21, 0.31), run(14, 0.36), run(7, 0.44)],

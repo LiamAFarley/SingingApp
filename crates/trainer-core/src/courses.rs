@@ -102,6 +102,14 @@ pub const AP_SPEED: &str = "ap_speed";
 pub const AP_CHORD_COLORS: &str = "ap_chord_colors";
 pub const AP_NOTE_COLORS: &str = "ap_note_colors";
 pub const AP_CONTRAST: &str = "ap_contrast";
+pub const AP_SCREENING: &str = "ap_screening";
+pub const AP_PRODUCTION: &str = "ap_production";
+
+/// On every trial of the aptitude screening, with a per-task tag beside it.
+pub const SCREENING_TAG: &str = "ap.screening";
+pub const SCREENING_INM_TAG: &str = "ap.screening.inm";
+pub const SCREENING_N_BACK_TAG: &str = "ap.screening.n_back";
+pub const SCREENING_SPAN_TAG: &str = "ap.screening.span";
 
 /// On a course block whose errorless feedback is the default, so a setting can turn it off.
 pub const ERRORLESS_DEFAULT_TAG: &str = "ap.errorless_default";
@@ -252,6 +260,77 @@ fn brady_course() -> Course {
     }
 }
 
+/// Classes per production level: C alone first, so nothing presupposes an anchor, then the
+/// naming order.
+const PRODUCTION_STEPS: [usize; 8] = [1, 2, 3, 4, 6, 8, 10, 12];
+
+/// Singing named notes from memory. Each level checks first, before any note has been heard,
+/// with no feedback; then practice with feedback, the target fading in under the voice after
+/// each answer (hold and compare). Results report cents and settling time.
+fn production_course() -> Course {
+    let levels = PRODUCTION_STEPS
+        .iter()
+        .enumerate()
+        .map(|(i, &k)| {
+            let n = i as u32 + 1;
+            let classes: Vec<&str> = AP_PROGRESSIVE_ORDER[..k].to_vec();
+            let all = k == 12;
+            let class_json = if all { json!("all") } else { json!(classes) };
+            let names = classes
+                .iter()
+                .map(|c| c.parse::<PitchClass>().unwrap().display_name())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let checks = (k as u32 * 2).clamp(3, 12);
+            Level {
+                module: None,
+                title: if all { "All twelve notes".into() } else if k == 1 { "C".into() } else { format!("{k} notes") },
+                summary: format!(
+                    "Sing {names} from memory: first {checks} with no help and no results, then practice where the note fades in under your voice after each answer. Within a quarter tone counts; cents and settling time are reported."
+                ),
+                pass: PassRule::Accuracy { min: 0.75, blocks: 2 },
+                blocks: vec![
+                    block(AP_PRODUCTION, n, true, json!({
+                        "type": "sing_pitch", "title": "Check: from memory", "count": checks,
+                        "feedback": "none", "tags": ["ap.production", "ap.production.check"],
+                        "instructions": "Before hearing anything, sing each note as you remember it. No results until the end.",
+                        "params": { "classes": class_json, "response_ms": 3500, "reveal_target_after": false },
+                    })),
+                    block(AP_PRODUCTION, n, false, json!({
+                        "type": "sing_pitch", "title": "Sing and compare", "count": 12,
+                        "tags": ["ap.production"],
+                        "instructions": "Sing the note, then keep singing: the real note fades in under your voice and the tuner shows the gap.",
+                        "params": { "classes": class_json, "response_ms": 3500, "hold_and_compare": true },
+                    })),
+                ],
+            }
+        })
+        .collect();
+    Course {
+        id: AP_PRODUCTION.into(),
+        title: "Singing notes from memory".into(),
+        short: "Production".into(),
+        category: "Absolute pitch".into(),
+        description: "Sing a named note with no reference tone. Starts with C alone and adds notes in the naming order. Each level checks first, before anything is heard, then practises with the note fading in under your voice. Passes at 75% within a quarter tone on two checks.".into(),
+        schedule: Schedule::Ladder,
+        levels,
+    }
+}
+
+/// The daily set's first block on days no test is due: sing C from memory (internal anchor
+/// accuracy), unless a course in the set already does.
+fn anchor_check_block() -> BlockSpec {
+    let mut b: BlockSpec = serde_json::from_value(json!({
+        "type": "sing_pitch", "title": "Your C from memory", "count": 1,
+        "tags": [ANCHOR_CHECK_TAG],
+        "instructions": "Before hearing anything, sing C as you remember it. The real C plays afterwards.",
+        "params": { "classes": ["C"] },
+    }))
+    .expect("anchor check block is valid");
+    b.title = Some("Your C from memory".into());
+    b
+}
+
 const WEEKLY_TIMBRES: [&str; 5] = ["gm:0", "gm:42", "gm:71", "gm:6", "synth:square"];
 /// C3–B5: cello and clarinet are out of their real range above and below it.
 const WEEKLY_OCTAVES: [i32; 3] = [3, 4, 5];
@@ -397,6 +476,52 @@ fn ucsf_course() -> Course {
     }
 }
 
+/// The aptitude screening (Van Hedger et al.): implicit note memory, tone N-back at 2 and 3
+/// back, then auditory span. No feedback anywhere; the numbers form the aptitude profile.
+fn screening_course() -> Course {
+    let part = |title: &str, task_tag: &str, v: Value| {
+        let mut v = v;
+        v["title"] = json!(title);
+        v["assessment"] = json!(true);
+        v["tags"] = json!([SCREENING_TAG, task_tag]);
+        block(AP_SCREENING, 1, true, v)
+    };
+    let n_back = |n: u32| {
+        json!({
+            "type": "n_back", "count": 1,
+            "instructions": format!("Tones from all twelve notes over three octaves, one every 2 s. Press Space when a tone is the same as the one {n} back. No results until the end."),
+            "params": { "n": n, "stimuli": "tones", "classes": "all", "octaves": [3, 4, 5],
+                        "length": 30, "ioi_ms": 2000, "target_rate": 0.3, "timbre": "gm:0" },
+        })
+    };
+    Course {
+        id: AP_SCREENING.into(),
+        title: "Aptitude screening".into(),
+        short: "Screening".into(),
+        category: "Absolute pitch".into(),
+        description: "Three short memory tasks from Van Hedger's battery: find a sine tone again on a 10-cent ladder, tone N-back at 2 and 3 back, and auditory span. No feedback. Run once to start with, then every four weeks; the coach reads the results to weight the daily set.".into(),
+        schedule: Schedule::Recurring { days: 28.0, on_test_day: false, after: None },
+        levels: vec![Level {
+            module: None,
+            title: "Note memory, N-back, span".into(),
+            summary: "20 tone searches, two N-back streams, then a span ladder. About 9 minutes.".into(),
+            pass: PassRule::None,
+            blocks: vec![
+                part("Find the tone again", SCREENING_INM_TAG, json!({
+                    "type": "pitch_memory_match", "count": 20,
+                    "instructions": "A short sine tone plays, then a hiss. Then find the tone again: Up and Down move a step, Shift moves two, and each move plays the tone. Press Enter when it matches what you remember. Go by memory, not by counting steps.",
+                })),
+                part("2-back", SCREENING_N_BACK_TAG, n_back(2)),
+                part("3-back", SCREENING_N_BACK_TAG, n_back(3)),
+                part("Memory span", SCREENING_SPAN_TAG, json!({
+                    "type": "span", "count": 1,
+                    "instructions": "A sequence plays; then enter it in order. Spoken digits are typed; tones are played back on the pad (keys 1–9, low to high). Sequences get longer until both at one length are wrong.",
+                })),
+            ],
+        }],
+    }
+}
+
 fn maintenance_course() -> Course {
     Course {
         id: AP_MAINTENANCE.into(),
@@ -426,7 +551,7 @@ pub fn builtin_courses() -> Vec<Course> {
 }
 
 fn build_courses() -> Vec<Course> {
-    let mut courses = vec![naming_course(), brady_course()];
+    let mut courses = vec![naming_course(), brady_course(), production_course()];
     courses.extend(crate::ap_courses::courses());
     courses.extend(crate::rp_courses::courses());
     // Tests in the order they run when several are due: the benchmark before anything is heard.
@@ -435,6 +560,7 @@ fn build_courses() -> Vec<Course> {
         weekly_course(),
         transfer_course(),
         ucsf_course(),
+        screening_course(),
         maintenance_course(),
     ]);
     courses
@@ -909,6 +1035,9 @@ pub struct ApPrefs {
     /// Label set for the contrast course (`gervain_names` or `my_colors`).
     #[serde(default = "d_gervain")]
     pub contrast_labels: String,
+    /// Start the daily set by singing C from memory on days no test is due.
+    #[serde(default = "d_pref_true")]
+    pub daily_anchor_check: bool,
 }
 
 fn d_pref_true() -> bool {
@@ -1166,7 +1295,8 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
                 };
                 let (d, mut note) =
                     recurring_due(*days, *on_test_day, after_ok, last.as_deref(), &plan, now);
-                if d && named_today {
+                // The screening names nothing and is not lifted by a named note.
+                if d && named_today && c.id != AP_SCREENING {
                     note.push_str(
                         " Named notes were heard today, so it is better run first thing tomorrow.",
                     );
@@ -1478,8 +1608,8 @@ pub fn compose_daily_set(
             &mut items,
         );
     }
-    // Then each active ladder course at its current level, in an order that rotates daily.
-    let mut ladder: Vec<(&Course, &PlanCourse, &CourseStatus)> = plan
+    // Then each active ladder course at its current level, in the plan's order.
+    let ladder: Vec<(&Course, &PlanCourse, &CourseStatus)> = plan
         .courses
         .iter()
         .filter(|p| p.active)
@@ -1489,11 +1619,6 @@ pub fn compose_daily_set(
             (!s.complete).then_some((c, p, s))
         })
         .collect();
-    if !ladder.is_empty() {
-        let day = now.with_timezone(&Local).num_days_from_ce() as usize;
-        let k = day % ladder.len();
-        ladder.rotate_left(k);
-    }
     for (c, p, s) in ladder {
         let l = &c.levels[s.level as usize - 1];
         let reason = match &s.pass {
@@ -1515,6 +1640,31 @@ pub fn compose_daily_set(
         return Err(anyhow!(
             "Nothing to practise: turn on a course in the daily plan."
         ));
+    }
+    // Internal anchor accuracy, before anything is heard, on days a test does not already
+    // start the set (the real C would contaminate it).
+    // A course's own anchor check (Brady's) moves to the front instead, keeping its course tag;
+    // later in the set, other notes would already have been heard.
+    let prefs = ap_prefs(db)?;
+    let test_first = items.first().map(|i| i.test).unwrap_or(false);
+    if ap && prefs.daily_anchor_check && !test_first {
+        let is_anchor = |b: &BlockSpec| b.tags.iter().any(|t| t == ANCHOR_CHECK_TAG);
+        let own = blocks.iter().position(is_anchor).map(|i| blocks.remove(i));
+        blocks.retain(|b| !is_anchor(b));
+        let b = own.unwrap_or_else(anchor_check_block);
+        let minutes = block_seconds(&b, ctx) / 60.0;
+        items.insert(
+            0,
+            DailyItem {
+                course: "ap_anchor_check".into(),
+                title: "Your C from memory".into(),
+                level: None,
+                minutes: (minutes * 10.0).round() / 10.0,
+                reason: "Internal anchor accuracy: how far your remembered C is from a real one, day to day.".into(),
+                test: false,
+            },
+        );
+        blocks.insert(0, b);
     }
     // Absolute pitch: clear pitch memory before anything is heard.
     if ap && blocks[0].pre_mask.is_none() {
@@ -1540,7 +1690,7 @@ pub fn compose_daily_set(
         seed: None,
         blocks,
     };
-    apply_session_prefs(&mut spec, &ap_prefs(db)?);
+    apply_session_prefs(&mut spec, &prefs);
     Ok(DailySet {
         spec,
         items,
@@ -1571,10 +1721,50 @@ pub struct ClassProgress {
     /// Recent sung trials of this note and the share in the right category.
     pub singing_trials: u32,
     pub singing_accuracy: Option<f64>,
+    /// Sung within a quarter tone (any octave) on at least 80% of 8 or more recent trials.
+    pub sung_reliably: bool,
+    /// Known: named in time (mastered) and sung reliably.
+    pub known: bool,
+    /// Where the recent naming trials came from (naming, colours, contrast, chord notes, …).
+    pub naming_sources: Vec<SourceCount>,
     /// Mean d′ of recent detection streams for this note.
     pub detection_d_prime: Option<f64>,
     pub last_seen: Option<String>,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, TS)]
+pub struct SourceCount {
+    pub source: String,
+    pub trials: u32,
+}
+
+/// The method a naming trial came from, by its tags. Every method stores the pitch class, so
+/// all of them count towards a note's mastery.
+fn naming_source(t: &TrialRow) -> &'static str {
+    let has = |p: &str| t.tags.iter().any(|g| g.starts_with(p));
+    if has("ap.note_colors") {
+        "colours"
+    } else if has("ap.contrast") {
+        "contrast"
+    } else if has("ap.chord_colors") {
+        "chord notes"
+    } else if has("ap.brady") {
+        "Brady"
+    } else if has("ap.benchmark") || has("ap.weekly") || has("ap.transfer") || has("ap.ucsf_style")
+    {
+        "tests"
+    } else if has("ap.maintenance") {
+        "maintenance"
+    } else if has("ap.naming") {
+        "naming"
+    } else {
+        "other"
+    }
+}
+
+/// Production mastery: at least this many recent sung trials, this share within a quarter tone.
+const SUNG_MIN_TRIALS: usize = 8;
+const SUNG_RELIABLE: f64 = 0.8;
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]
 pub struct AnchorPoint {
@@ -1587,6 +1777,8 @@ pub struct AnchorPoint {
 pub struct ApDashboard {
     pub classes: Vec<ClassProgress>,
     pub classes_mastered: u32,
+    /// Named in time and sung reliably.
+    pub classes_known: u32,
     pub courses: Vec<CourseStatus>,
     /// Each test's runs, oldest first.
     pub benchmark: Vec<TestRun>,
@@ -1670,15 +1862,34 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
             let in_time = share(&named, &|t| {
                 t.correct == Some(true) && t.rt_ms.map(|r| r <= MASTERY_RT_MS).unwrap_or(false)
             });
+            let mastered = named.len() >= MASTERY_MIN_TRIALS && in_time.unwrap_or(0.0) >= 0.9;
+            let singing_accuracy = share(&sung, &|t| t.correct == Some(true));
+            let sung_reliably =
+                sung.len() >= SUNG_MIN_TRIALS && singing_accuracy.unwrap_or(0.0) >= SUNG_RELIABLE;
+            let mut sources: Vec<SourceCount> = Vec::new();
+            for t in &named {
+                let s = naming_source(t);
+                match sources.iter_mut().find(|c| c.source == s) {
+                    Some(c) => c.trials += 1,
+                    None => sources.push(SourceCount {
+                        source: s.into(),
+                        trials: 1,
+                    }),
+                }
+            }
+            sources.sort_by(|a, b| b.trials.cmp(&a.trials));
             ClassProgress {
                 pitch_class: id.to_string(),
                 name: pc.display_name().to_string(),
                 naming_trials: named.len() as u32,
                 naming_in_time: in_time,
                 naming_accuracy: share(&named, &|t| t.correct == Some(true)),
-                mastered: named.len() >= MASTERY_MIN_TRIALS && in_time.unwrap_or(0.0) >= 0.9,
+                mastered,
                 singing_trials: sung.len() as u32,
-                singing_accuracy: share(&sung, &|t| t.correct == Some(true)),
+                singing_accuracy,
+                sung_reliably,
+                known: mastered && sung_reliably,
+                naming_sources: sources,
                 detection_d_prime: (!detected.is_empty())
                     .then(|| detected.iter().sum::<f64>() / detected.len() as f64),
                 last_seen: named.first().or(sung.first()).map(|t| t.started_at.clone()),
@@ -1725,6 +1936,7 @@ pub fn ap_dashboard(db: &Db, now: DateTime<Utc>) -> Result<ApDashboard> {
         .sum::<f64>();
     Ok(ApDashboard {
         classes_mastered: classes.iter().filter(|c| c.mastered).count() as u32,
+        classes_known: classes.iter().filter(|c| c.known).count() as u32,
         classes,
         courses,
         benchmark: test_runs(db, AP_BENCHMARK)?,
@@ -2001,17 +2213,53 @@ mod tests {
         assert!(sunday.spec.blocks.iter().all(|b| b.course.is_some()));
         assert!(validate_session(&sunday.spec, &ctx).ok);
 
+        // The screening is due on its first run too, after the other tests.
+        assert!(courses.contains(&AP_SCREENING));
+        // A test starts the set, so there is no anchor check before it.
+        assert!(!courses.contains(&"ap_anchor_check"));
+
         // Done on Sunday, the two-weekly and four-weekly tests are not due on Monday.
         add_block(&db, AP_BENCHMARK, 1, true, at(25, 9, 0), 60, 0.3);
         add_block(&db, AP_TRANSFER, 1, true, at(25, 9, 30), 60, 0.2);
+        add_block(&db, AP_SCREENING, 1, true, at(25, 10, 0), 22, 0.0);
         let monday = compose_daily_set(&db, &ctx, at(26, 12, 0), ABSOLUTE_PITCH).unwrap();
         assert!(monday.items.iter().all(|i| !i.test), "{:?}", monday.items);
         // About the planned 25 minutes, plus the clearing sound.
         assert!((18.0..34.0).contains(&monday.minutes), "{}", monday.minutes);
         assert_eq!(monday.spec.blocks[0].pre_mask, Some(Mask::ShepardGlissando));
-        // The order of the courses changes from day to day.
+        // With no test first, the set starts by singing C from memory.
+        assert_eq!(monday.items[0].course, "ap_anchor_check");
+        assert!(
+            monday.spec.blocks[0]
+                .tags
+                .iter()
+                .any(|t| t == ANCHOR_CHECK_TAG)
+        );
+        assert!(validate_session(&monday.spec, &ctx).ok);
+        // The courses come in the plan's order, the same every day.
         let tuesday = compose_daily_set(&db, &ctx, at(27, 12, 0), ABSOLUTE_PITCH).unwrap();
-        assert_ne!(monday.items[0].course, tuesday.items[0].course);
+        let order = |s: &DailySet| s.items.iter().map(|i| i.course.clone()).collect::<Vec<_>>();
+        assert_eq!(order(&monday), order(&tuesday));
+        let plan = daily_plan(&db).unwrap();
+        let active: Vec<String> = plan
+            .courses
+            .iter()
+            .filter(|p| {
+                p.active
+                    && find_course(&p.course).map(|c| c.category == ABSOLUTE_PITCH) == Some(true)
+            })
+            .map(|p| p.course.clone())
+            .collect();
+        assert_eq!(&order(&monday)[1..], &active[..]);
+        // Reordering the plan reorders the set.
+        let mut reordered = plan.clone();
+        reordered.courses.reverse();
+        save_daily_plan(&db, &reordered).unwrap();
+        let wednesday = compose_daily_set(&db, &ctx, at(28, 12, 0), ABSOLUTE_PITCH).unwrap();
+        let mut reversed = active.clone();
+        reversed.reverse();
+        assert_eq!(&order(&wednesday)[1..], &reversed[..]);
+        save_daily_plan(&db, &plan).unwrap();
 
         // A test done this week is not due again until next week.
         add_block(&db, AP_WEEKLY, 1, true, at(25, 13, 0), 120, 0.5);
@@ -2033,6 +2281,95 @@ mod tests {
         }
         save_daily_plan(&db, &plan).unwrap();
         assert!(compose_daily_set(&db, &ctx, at(26, 12, 0), ABSOLUTE_PITCH).is_err());
+    }
+
+    #[test]
+    fn the_screening_runs_three_tasks_without_feedback_in_under_twelve_minutes() {
+        use crate::schema::ExerciseKind;
+        let ctx = GenContext::default();
+        let c = find_course(AP_SCREENING).unwrap();
+        let spec = level_session(&c, 1).unwrap();
+        let r = validate_session(&spec, &ctx);
+        assert!(r.ok, "{:?}", r.errors);
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        assert!(r.estimated_minutes < 12.0, "{}", r.estimated_minutes);
+        let kinds: Vec<ExerciseKind> = spec.blocks.iter().map(|b| b.exercise.kind()).collect();
+        assert_eq!(
+            kinds,
+            [
+                ExerciseKind::PitchMemoryMatch,
+                ExerciseKind::NBack,
+                ExerciseKind::NBack,
+                ExerciseKind::Span
+            ]
+        );
+        for b in &spec.blocks {
+            assert!(b.assessment);
+            assert_eq!(b.effective_feedback(), crate::schema::FeedbackMode::None);
+            assert!(b.tags.iter().any(|t| t == SCREENING_TAG));
+            assert_eq!(b.course.as_ref().unwrap().course, AP_SCREENING);
+        }
+        // The N-back blocks are the keyless screening variant.
+        for b in &spec.blocks[1..3] {
+            let crate::schema::Exercise::NBack(p) = &b.exercise else {
+                panic!()
+            };
+            assert_eq!(p.stimuli, crate::schema::NBackStimuli::Tones);
+            assert!(p.octaves.len() >= 3);
+        }
+        // Its JSON round-trips, as queue_session would send it.
+        let json = serde_json::to_value(&spec).unwrap();
+        let (_, r) = crate::validate::validate_value(json, &ctx);
+        assert!(r.ok, "{:?}", r.errors);
+    }
+
+    #[test]
+    fn the_production_course_grows_from_c_and_checks_first() {
+        let ctx = GenContext::default();
+        let c = find_course(AP_PRODUCTION).unwrap();
+        assert_eq!(c.category, ABSOLUTE_PITCH);
+        let first = level_session(&c, 1).unwrap();
+        let crate::schema::Exercise::SingPitch(p) = &first.blocks[0].exercise else {
+            panic!()
+        };
+        assert_eq!(p.classes.classes(), vec![PitchClass::new(0)]);
+        // The check comes before anything is heard: no feedback and no reveal.
+        assert!(first.blocks[0].course.as_ref().unwrap().verify);
+        assert_eq!(first.blocks[0].feedback, crate::schema::FeedbackMode::None);
+        assert!(!p.reveal_target_after);
+        let crate::schema::Exercise::SingPitch(practice) = &first.blocks[1].exercise else {
+            panic!()
+        };
+        assert!(practice.hold_and_compare);
+        assert!((3000..=4000).contains(&practice.response_ms));
+        let last = level_session(&c, c.levels.len() as u32).unwrap();
+        let crate::schema::Exercise::SingPitch(p) = &last.blocks[0].exercise else {
+            panic!()
+        };
+        assert!(p.classes.is_all());
+        // It composes into the daily set once switched on.
+        let db = Db::open_in_memory().unwrap();
+        let mut plan = daily_plan(&db).unwrap();
+        for p in &mut plan.courses {
+            p.active = p.course == AP_PRODUCTION;
+        }
+        save_daily_plan(&db, &plan).unwrap();
+        for t in [
+            AP_BENCHMARK,
+            AP_WEEKLY,
+            AP_TRANSFER,
+            AP_UCSF_STYLE,
+            AP_SCREENING,
+        ] {
+            add_block(&db, t, 1, true, at(25, 9, 0), 10, 0.5);
+        }
+        let set = compose_daily_set(&db, &ctx, at(26, 12, 0), ABSOLUTE_PITCH).unwrap();
+        assert!(
+            set.items.iter().any(|i| i.course == AP_PRODUCTION),
+            "{:?}",
+            set.items
+        );
+        assert!(validate_session(&set.spec, &ctx).ok);
     }
 
     #[test]

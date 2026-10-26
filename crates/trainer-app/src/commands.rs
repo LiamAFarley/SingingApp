@@ -751,6 +751,13 @@ pub fn ap_dashboard(state: State<'_, AppState>) -> Res<ApDashboard> {
 }
 
 #[tauri::command]
+pub fn aptitude_profile(
+    state: State<'_, AppState>,
+) -> Res<trainer_core::aptitude::AptitudeProfile> {
+    trainer_core::aptitude::aptitude_profile(&state.core.db.lock()).map_err(anyhow_err)
+}
+
+#[tauri::command]
 pub fn preview_daily_set(state: State<'_, AppState>, category: Option<String>) -> Res<DailySet> {
     let ctx = state.core.gen_context();
     let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());

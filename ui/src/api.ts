@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Anchor } from "./bindings/Anchor";
 import type { ApDashboard } from "./bindings/ApDashboard";
+import type { AptitudeProfile } from "./bindings/AptitudeProfile";
 import type { DailyPlan } from "./bindings/DailyPlan";
 import type { ApPrefs } from "./bindings/ApPrefs";
 import type { DailySet } from "./bindings/DailySet";
@@ -67,6 +68,8 @@ export interface Backend {
   libraryPlay(id: string, part: number | null): Promise<number>;
   stopPreview(): Promise<void>;
   apDashboard(): Promise<ApDashboard>;
+  /** The aptitude screening's runs over time, with reference lines. */
+  aptitudeProfile(): Promise<AptitudeProfile>;
   /** Today's set for `category` (absolute pitch when omitted). */
   previewDailySet(category?: string): Promise<DailySet>;
   saveDailyPlan(plan: DailyPlan): Promise<void>;
@@ -132,6 +135,7 @@ async function tauriBackend(): Promise<Backend> {
     libraryPlay: (id, part) => call("library_play", { id, part }),
     stopPreview: () => call("stop_preview"),
     apDashboard: () => call("ap_dashboard"),
+    aptitudeProfile: () => call("aptitude_profile"),
     previewDailySet: (category) => call("preview_daily_set", { category: category ?? null }),
     saveDailyPlan: (plan) => call("save_daily_plan", { plan }),
     setCourseLevel: (course, level) => call("set_course_level", { course, level }),

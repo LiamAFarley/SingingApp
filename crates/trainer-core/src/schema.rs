@@ -458,6 +458,36 @@ pub struct SingPitchParams {
     pub reveal_target_after: bool,
     #[serde(default = "d_ref_timbre")]
     pub reveal_timbre: TimbreId,
+    /// How the note is asked for: its name, a label word ("Sarah"), a colour swatch, or the
+    /// label spoken from the speech folder.
+    #[serde(default)]
+    pub prompt: SingPrompt,
+    /// Label set for a `label`, `color` or `spoken` prompt. Defaults to `gervain_names` for words
+    /// and `taneda_colors` for colours.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<String>,
+    /// Hold and compare: after the answer window, keep singing while the target fades in under
+    /// your voice, and the tuner shows the gap. Only the answer window before it is graded.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hold_and_compare: bool,
+    #[serde(default = "d_ms_3000")]
+    pub compare_ms: u32,
+}
+
+/// How a `sing_pitch` target is asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SingPrompt {
+    /// "Sing E♭".
+    #[default]
+    Name,
+    /// "Sing Sarah": the label set's word.
+    Label,
+    /// A colour swatch, with no name.
+    Color,
+    /// The label (or note name) spoken from the speech folder; the word is shown if the file is
+    /// missing.
+    Spoken,
 }
 
 impl Default for SingPitchParams {
@@ -1933,7 +1963,118 @@ pub struct NBackParams {
     pub range: Option<NoteRange>,
     #[serde(default = "d_ref_timbre")]
     pub timbre: TimbreId,
+    /// What the stream is made of: scale degrees in a key (the default), tones from the twelve
+    /// pitch classes over several octaves with no key (the screening), or spoken letters.
+    #[serde(default)]
+    pub stimuli: NBackStimuli,
+    /// Pitch classes for `tones` (all twelve by default).
+    #[serde(default)]
+    pub classes: ClassSet,
+    /// Octaves for `tones`.
+    #[serde(default = "d_octaves")]
+    pub octaves: Vec<i32>,
 }
+
+/// What an N-back stream is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum NBackStimuli {
+    /// Scale degrees over the tonic, after a cadence.
+    #[default]
+    Degrees,
+    /// Tones from the twelve pitch classes over three or more octaves: no key, drone or cadence.
+    /// A match is the same tone.
+    Tones,
+    /// Spoken letters from the speech folder (`letters/B.wav` …). Tones are used when the files
+    /// are missing, and the stored stimulus says so.
+    Letters,
+}
+
+/// The letters a spoken-letter N-back draws from.
+pub const N_BACK_LETTERS: [&str; 8] = ["B", "F", "H", "K", "M", "Q", "R", "T"];
+
+/// Implicit note memory (Van Hedger): a sine tone from a 27-step ladder, about 10 cents a step;
+/// after a short mask you find it again from one end of the ladder with the arrow keys.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PitchMemoryMatchParams {
+    /// The target tone.
+    #[serde(default = "d_ms_1000")]
+    pub tone_ms: u32,
+    /// Noise, then silence, between the target and the search.
+    #[serde(default = "d_ms_2000")]
+    pub mask_ms: u32,
+    /// Each tone played while searching.
+    #[serde(default = "d_ms_700")]
+    pub step_ms: u32,
+    #[serde(default = "d_sine")]
+    pub timbre: TimbreId,
+}
+
+fn d_ms_2000() -> u32 {
+    2000
+}
+fn d_sine() -> TimbreId {
+    "synth:sine".to_string()
+}
+
+/// Steps on the implicit-note-memory ladder.
+pub const INM_STEPS: u32 = 27;
+/// Cents between neighbouring steps.
+pub const INM_STEP_CENTS: f32 = 10.0;
+/// Step 1 is A♯4 + 20 cents (471.58 Hz at A4 = 440).
+pub const INM_BASE_MIDI: i32 = 70;
+pub const INM_BASE_CENTS: f32 = 20.0;
+/// Targets: the odd steps 5–23.
+pub const INM_TARGETS: [u32; 10] = [5, 7, 9, 11, 13, 15, 17, 19, 21, 23];
+/// Where each search starts: two steps below the targets' range and two above.
+pub const INM_STARTS: [u32; 4] = [1, 3, 25, 27];
+
+/// What a span sequence is made of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanStimuli {
+    /// Spoken digits when the speech folder has them, tones otherwise.
+    #[default]
+    Auto,
+    /// Spoken digits (`digits/1.wav` … `digits/9.wav`); tones if they are missing.
+    Digits,
+    /// Tones on a pad of nine notes, replayed in order on the pad.
+    Tones,
+}
+
+/// Auditory span: a sequence plays, then you type it back (digits) or replay it on the pad
+/// (tones). Two sequences at each length; the length grows until both at one length are wrong.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SpanParams {
+    #[serde(default)]
+    pub stimuli: SpanStimuli,
+    #[serde(default = "d_span_start")]
+    pub start_length: u32,
+    #[serde(default = "d_span_max")]
+    pub max_length: u32,
+    /// Sequences at each length.
+    #[serde(default = "d_span_per")]
+    pub per_length: u32,
+    /// Time between items.
+    #[serde(default = "d_ms_1000")]
+    pub ioi_ms: u32,
+    /// Timbre of the tone pad.
+    #[serde(default = "d_ref_timbre")]
+    pub timbre: TimbreId,
+}
+
+fn d_span_start() -> u32 {
+    3
+}
+fn d_span_max() -> u32 {
+    12
+}
+fn d_span_per() -> u32 {
+    2
+}
+
+/// The nine pad notes of a tone span, low to high (C major from C4 to D5).
+pub const SPAN_PAD: [i32; 9] = [60, 62, 64, 65, 67, 69, 71, 72, 74];
 
 /// A change made to a heard melody before singing it (melodic updating).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -2305,6 +2446,8 @@ pub enum Exercise {
     SyllableCheck(SyllableCheckParams),
     CadenceId(CadenceIdParams),
     BassLine(BassLineParams),
+    PitchMemoryMatch(PitchMemoryMatchParams),
+    Span(SpanParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -2340,10 +2483,12 @@ pub enum ExerciseKind {
     SyllableCheck,
     CadenceId,
     BassLine,
+    PitchMemoryMatch,
+    Span,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 30] = [
+    pub const ALL: [ExerciseKind; 32] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -2374,6 +2519,8 @@ impl ExerciseKind {
         ExerciseKind::SyllableCheck,
         ExerciseKind::CadenceId,
         ExerciseKind::BassLine,
+        ExerciseKind::PitchMemoryMatch,
+        ExerciseKind::Span,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -2408,6 +2555,8 @@ impl ExerciseKind {
             ExerciseKind::SyllableCheck => "syllable_check",
             ExerciseKind::CadenceId => "cadence_id",
             ExerciseKind::BassLine => "bass_line",
+            ExerciseKind::PitchMemoryMatch => "pitch_memory_match",
+            ExerciseKind::Span => "span",
         }
     }
 
@@ -2447,6 +2596,8 @@ impl ExerciseKind {
             ExerciseKind::SyllableCheck => "Mislabeled syllables",
             ExerciseKind::CadenceId => "Cadences",
             ExerciseKind::BassLine => "Bass and guide tones",
+            ExerciseKind::PitchMemoryMatch => "Note memory (find the tone)",
+            ExerciseKind::Span => "Memory span",
         }
     }
 
@@ -2482,6 +2633,8 @@ impl ExerciseKind {
             ExerciseKind::SyllableCheck => &["rp.syllable_check"],
             ExerciseKind::CadenceId => &["rp.cadence"],
             ExerciseKind::BassLine => &["rp.bass_line"],
+            ExerciseKind::PitchMemoryMatch => &["ap.inm"],
+            ExerciseKind::Span => &["wm.span"],
         }
     }
 
@@ -2538,6 +2691,8 @@ impl Exercise {
             Exercise::SyllableCheck(_) => ExerciseKind::SyllableCheck,
             Exercise::CadenceId(_) => ExerciseKind::CadenceId,
             Exercise::BassLine(_) => ExerciseKind::BassLine,
+            Exercise::PitchMemoryMatch(_) => ExerciseKind::PitchMemoryMatch,
+            Exercise::Span(_) => ExerciseKind::Span,
         }
     }
 
@@ -2901,6 +3056,18 @@ pub struct SingPitchTrial {
     /// The target's colour, tinted behind the result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answer_color: Option<String>,
+    /// A colour prompt: the swatch shown instead of a name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_color: Option<String>,
+    /// A spoken prompt, relative to the speech folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<String>,
+    /// Hold and compare: the target that fades in under the voice after the answer window, and
+    /// how long to keep singing with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compare: Option<SoundEvent>,
+    #[serde(default)]
+    pub compare_ms: u32,
 }
 
 /// Passive pairing of a tone with its name.
@@ -2923,6 +3090,9 @@ pub struct PairingTrial {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct DetectTone {
     pub events: Vec<SoundEvent>,
+    /// A spoken item (letter N-back), relative to the speech folder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech: Option<String>,
     pub target: bool,
     /// More than an octave from the sung prompt.
     pub far: bool,
@@ -3088,6 +3258,104 @@ pub enum TrialSpec {
     Sung(SungTrial),
     Dictation(DictationTrial),
     Detect(DetectTrial),
+    Match(MatchTrial),
+    Span(SpanTrial),
+}
+
+/// One implicit-note-memory search: hear the target, then step to it from `start_step`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct MatchTrial {
+    pub prompt: String,
+    pub target_step: u32,
+    pub start_step: u32,
+    pub steps: u32,
+    pub step_cents: f32,
+    /// Step 1's pitch.
+    pub base_midi: i32,
+    pub base_cents: f32,
+    pub tone_ms: u32,
+    pub mask_ms: u32,
+    pub step_ms: u32,
+    pub timbre: TimbreId,
+    #[ts(type = "Record<string, unknown>")]
+    pub stimulus: serde_json::Value,
+}
+
+impl MatchTrial {
+    /// Cents of a step above step 1.
+    pub fn step_offset_cents(&self, step: u32) -> f32 {
+        (step.max(1) - 1) as f32 * self.step_cents
+    }
+
+    /// The tone of a step.
+    pub fn tone(&self, step: u32, dur_ms: u32) -> SoundEvent {
+        SoundEvent {
+            midi: self.base_midi,
+            start_ms: 0.0,
+            dur_ms: dur_ms as f64,
+            timbre: self.timbre.clone(),
+            gain_db: -8.0,
+            detune_cents: self.base_cents + self.step_offset_cents(step),
+        }
+    }
+}
+
+/// One sequence of a span ladder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct SpanItem {
+    pub length: u32,
+    /// Digits 1–9 (tones: pad keys 1–9).
+    pub sequence: Vec<u8>,
+}
+
+/// A whole span ladder: sequences grouped by length, shortest first, `per_length` at each.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct SpanTrial {
+    pub prompt: String,
+    /// `digits` or `tones`: what actually plays.
+    pub mode: String,
+    pub items: Vec<SpanItem>,
+    pub per_length: u32,
+    pub ioi_ms: u32,
+    /// Pad notes for tones, key 1 first.
+    pub pad: Vec<i32>,
+    pub timbre: TimbreId,
+    #[ts(type = "Record<string, unknown>")]
+    pub stimulus: serde_json::Value,
+}
+
+impl SpanTrial {
+    /// The speech file for a digit.
+    pub fn digit_speech(d: u8) -> String {
+        format!("digits/{d}.wav")
+    }
+
+    /// The tone of a pad key (1–9).
+    pub fn pad_tone(&self, key: u8, dur_ms: f64) -> Option<SoundEvent> {
+        let midi = *self.pad.get((key as usize).checked_sub(1)?)?;
+        Some(SoundEvent {
+            midi,
+            start_ms: 0.0,
+            dur_ms,
+            timbre: self.timbre.clone(),
+            gain_db: -6.0,
+            detune_cents: 0.0,
+        })
+    }
+
+    /// The next item to present after `results` (one per item given so far, in order), or
+    /// `None` when the ladder stops: every sequence at one length wrong, or the last length done.
+    pub fn next_item(&self, results: &[bool]) -> Option<usize> {
+        let per = self.per_length.max(1) as usize;
+        let done = results.len();
+        if done > 0 && done % per == 0 {
+            let at_length = &results[done - per..];
+            if at_length.iter().all(|ok| !ok) {
+                return None;
+            }
+        }
+        (done < self.items.len()).then_some(done)
+    }
 }
 
 impl TrialSpec {
@@ -3104,6 +3372,8 @@ impl TrialSpec {
             TrialSpec::Sung(t) => &t.stimulus,
             TrialSpec::Dictation(t) => &t.stimulus,
             TrialSpec::Detect(t) => &t.stimulus,
+            TrialSpec::Match(t) => &t.stimulus,
+            TrialSpec::Span(t) => &t.stimulus,
         }
     }
 
@@ -3115,6 +3385,8 @@ impl TrialSpec {
             TrialSpec::Sung(t) => &t.prompt,
             TrialSpec::Dictation(t) => &t.prompt,
             TrialSpec::Detect(t) => &t.prompt,
+            TrialSpec::Match(t) => &t.prompt,
+            TrialSpec::Span(t) => &t.prompt,
         }
     }
 }

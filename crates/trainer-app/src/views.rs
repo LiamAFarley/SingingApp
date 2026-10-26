@@ -47,6 +47,10 @@ pub enum Interaction {
     Dictation,
     /// Press when the target note appears in a stream.
     Detect,
+    /// Find a remembered tone again with the arrow keys (implicit note memory).
+    Match,
+    /// Hear a sequence, then type it back or play it on the pad (span).
+    Span,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -155,6 +159,32 @@ pub struct TrialView {
     pub detect_index: Option<u32>,
     /// A mark during a detection stream: `hit`, `miss` or `false`.
     pub detect_mark: Option<String>,
+    /// Note memory: arrow presses so far (the position itself is not shown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub match_moves: Option<u32>,
+    /// Span: `digits` or `tones`, the current length, and which sequence of the ladder this is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub span_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub span_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub span_item: Option<u32>,
+    /// Sing by colour: the swatch to sing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub prompt_color: Option<String>,
+    /// Hold and compare: the target fades in under the voice until this master-clock time, and
+    /// the tuner compares the voice with `compare_midi`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compare_until_s: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub compare_midi: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -371,6 +401,10 @@ pub enum RunnerCommand {
     },
     /// Detection: the target just played.
     Tap,
+    /// Note memory: move up (positive) or down this many steps.
+    Step {
+        delta: i32,
+    },
     SingAlong,
     Retry,
     Skip,
@@ -577,6 +611,7 @@ mod export_more {
         trainer_core::storage::TrialRow::export_all(&cfg).unwrap();
         trainer_core::schema::Anchor::export_all(&cfg).unwrap();
         trainer_core::courses::ApDashboard::export_all(&cfg).unwrap();
+        trainer_core::aptitude::AptitudeProfile::export_all(&cfg).unwrap();
         trainer_core::courses::DailySet::export_all(&cfg).unwrap();
         trainer_core::courses::ApPrefs::export_all(&cfg).unwrap();
         trainer_core::labels::LabelSet::export_all(&cfg).unwrap();

@@ -8,4 +8,8 @@ trials: number,
 /**
  * Attempts sung with help (practice, sing-along retries), not counted in accuracy.
  */
-assisted: number, graded: number, correct: number, accuracy: number | null, mean_score: number | null, median_rt_ms: number | null, median_abs_cents: number | null, pass_mark: number | null, passed: boolean | null, feedback: string, assessment: boolean, };
+assisted: number, graded: number, correct: number, accuracy: number | null, mean_score: number | null, median_rt_ms: number | null, median_abs_cents: number | null, 
+/**
+ * Sung notes: median time to settle within tolerance after the onset.
+ */
+median_settling_ms?: number, pass_mark: number | null, passed: boolean | null, feedback: string, assessment: boolean, };

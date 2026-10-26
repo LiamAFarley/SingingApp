@@ -1184,6 +1184,7 @@ impl Db {
             labels: crate::labels::sets_from_db(self)?,
             soundfonts: None,
             weak: self.weak_answers()?,
+            speech: None,
         })
     }
 

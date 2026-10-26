@@ -293,6 +293,8 @@ function KindHelp({ kind }: { kind: string | null }) {
     harmony: "The key and your first note are played, then a bar is counted in. Sing your part in time while the other voice plays.",
     pitch_detect: "The target note is named and sung. Then a stream of tones. Press Space whenever you hear that note, in any octave.",
     chord_color_id: "A chord plays. Name its colour. Number keys pick colours. Inversions of the same chord have different colours.",
+    pitch_memory_match: "A sine tone plays, then a hiss. Find the tone again: Up and Down move a step, Shift two, and each move plays the tone. Enter when it matches.",
+    span: "A sequence plays. Enter it back in order: type the digits, or play the tones on the pad (1 low to 9 high). Sequences grow until both at one length are wrong.",
   };
   return kind && text[kind] ? <p className="muted small" style={{ maxWidth: 560 }}>{text[kind]}</p> : null;
 }
@@ -325,7 +327,188 @@ function TrialStage({ runner, trial }: { runner: RunnerState; trial: TrialView }
       return <DictationStage runner={runner} trial={trial} />;
     case "detect":
       return <DetectStage runner={runner} trial={trial} />;
+    case "match":
+      return <MatchStage runner={runner} trial={trial} />;
+    case "span":
+      return <SpanStage runner={runner} trial={trial} />;
   }
+}
+
+/** Implicit note memory: step to the remembered tone. The position is never shown. */
+function MatchStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const phase = runner.phase;
+  const answering = phase === "answering";
+  const step = (delta: number) => command({ kind: "step", delta });
+  useEffect(() => {
+    if (!answering) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const big = e.shiftKey ? 2 : 1;
+      if (e.key === "ArrowUp" || e.key === "ArrowRight") {
+        e.preventDefault();
+        if (!e.repeat) step(big);
+      } else if (e.key === "ArrowDown" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        if (!e.repeat) step(-big);
+      } else if (e.key === "Enter" && !e.repeat) {
+        e.preventDefault();
+        command({ kind: "answer", choice: "match" });
+      } else if (e.key.toLowerCase() === "r" && !e.repeat) {
+        command({ kind: "replay" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [answering]);
+  return (
+    <div className="section" style={{ gap: 18, margin: "auto 0", alignItems: "center" }}>
+      <div className="prompt">{trial.prompt}</div>
+      <div className="prompt-sub">
+        {phase === "listening" || phase === "preparing"
+          ? "Listen, and hold the tone in mind…"
+          : answering
+            ? "Up and Down move a step, Shift two. Enter when it matches."
+            : ""}
+      </div>
+      {answering && (
+        <>
+          <div className="row" style={{ gap: 10 }}>
+            <button className="btn" onClick={() => step(-2)} title="Two steps down (Shift+Down)">
+              ⇊
+            </button>
+            <button className="btn" onClick={() => step(-1)} title="One step down (Down)">
+              ↓ Lower
+            </button>
+            <button className="btn" onClick={() => step(1)} title="One step up (Up)">
+              ↑ Higher
+            </button>
+            <button className="btn" onClick={() => step(2)} title="Two steps up (Shift+Up)">
+              ⇈
+            </button>
+          </div>
+          <div className="row" style={{ gap: 10 }}>
+            <button className="btn" onClick={() => command({ kind: "replay" })}>
+              Play this step again <span className="kbd">R</span>
+            </button>
+            <button className="btn primary" onClick={() => command({ kind: "answer", choice: "match" })}>
+              That's it <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Enter</span>
+            </button>
+          </div>
+          <div className="small faint num">{trial.match_moves ?? 0} moves</div>
+        </>
+      )}
+      {phase === "feedback" && (
+        <>
+          <Result runner={runner} />
+          <NextButton auto={runner.feedback?.auto_advance_ms ?? null} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Span: hear a sequence, then type the digits or play the tones back on the pad. */
+function SpanStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
+  const phase = runner.phase;
+  const answering = phase === "answering";
+  const tones = trial.span_mode === "tones";
+  const [entry, setEntry] = useState("");
+  useEffect(() => setEntry(""), [trial.span_item, runner.trial_index]);
+  const press = (d: number) => {
+    if (!answering) return;
+    if (tones) command({ kind: "play_choice", choice: String(d) });
+    setEntry((s) => (s.length < 16 ? s + d : s));
+  };
+  const submit = () => {
+    if (!answering || entry.length === 0) return;
+    command({ kind: "answer", choice: entry });
+  };
+  useEffect(() => {
+    if (!answering) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 9) {
+        e.preventDefault();
+        press(n);
+      } else if (e.key === "Backspace") {
+        e.preventDefault();
+        setEntry((s) => s.slice(0, -1));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        submit();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  return (
+    <div className="section" style={{ gap: 18, margin: "auto 0", alignItems: "center" }}>
+      <div className="prompt">{trial.prompt}</div>
+      <div className="prompt-sub">
+        {trial.span_length != null && `${trial.span_length} ${tones ? "tones" : "digits"} · sequence ${trial.span_item ?? 1}`}
+      </div>
+      {(phase === "listening" || phase === "preparing") && <div className="big-label">Listen…</div>}
+      {answering && (
+        <>
+          <div className="big-label num" style={{ minHeight: 64, letterSpacing: "0.15em" }}>
+            {tones ? "●".repeat(entry.length) || "…" : entry || "…"}
+          </div>
+          <div className="span-pad">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((d) => (
+              <button key={d} className="btn" onClick={() => press(d)} title={tones ? `Tone ${d} (key ${d})` : undefined}>
+                {d}
+              </button>
+            ))}
+          </div>
+          {tones && <div className="small faint">The pad runs low to high, 1 to 9. Each key plays its tone.</div>}
+          <div className="row" style={{ gap: 10 }}>
+            <button className="btn" onClick={() => setEntry((s) => s.slice(0, -1))} disabled={entry.length === 0}>
+              Back <span className="kbd">⌫</span>
+            </button>
+            <button className="btn primary" onClick={submit} disabled={entry.length === 0}>
+              Done <span className="kbd" style={{ color: "#fff", borderColor: "rgba(255,255,255,.5)", background: "transparent" }}>Enter</span>
+            </button>
+          </div>
+        </>
+      )}
+      {phase === "feedback" && (
+        <>
+          <Result runner={runner} />
+          <NextButton auto={runner.feedback?.auto_advance_ms ?? null} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Hold and compare: how far the voice is from the note fading in, folded to the nearest octave. */
+function CompareGap({ target }: { target: number }) {
+  useAnimationFrame(true);
+  const p = live.latest(0.2);
+  if (!p || p.midi == null) return <div className="prompt-sub">Keep singing…</div>;
+  let gap = (p.midi - target) % 12;
+  if (gap > 6) gap -= 12;
+  if (gap < -6) gap += 12;
+  const cents = gap * 100;
+  const close = Math.abs(cents) <= 25;
+  const width = Math.min(100, Math.abs(cents) / 2);
+  return (
+    <div className="section" style={{ gap: 6, alignItems: "center" }}>
+      <div className={`prompt-sub num ${close ? "correct" : ""}`}>{close ? "On the note" : describeCents(cents)}</div>
+      <div className="compare-bar">
+        <div className="compare-mid" />
+        <div
+          className="compare-fill"
+          style={{
+            width: `${width / 2}%`,
+            left: cents >= 0 ? "50%" : `${50 - width / 2}%`,
+            background: close ? "var(--correct)" : "var(--accent)",
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView }) {
@@ -484,14 +667,27 @@ function SingPitchStage({ runner, trial }: { runner: RunnerState; trial: TrialVi
   const [tunerOpen, setTunerOpen] = useState(false);
   useEffect(() => setTunerOpen(false), [runner.trial_index, trial.attempt]);
   const showTuner = runner.phase === "feedback" && fb?.tuner != null && (fb.correct === false || tunerOpen);
+  const comparing = runner.phase === "recording" && trial.compare_until_s != null && trial.compare_midi != null;
   return (
     <div className="section" style={{ gap: 18, margin: "auto 0" }}>
+      {trial.prompt_color && (open || runner.phase !== "recording") && (
+        <div className="swatch big" style={{ background: trial.prompt_color }} aria-label="The colour to sing" />
+      )}
       <div className="big-label">{open || runner.phase !== "recording" ? trial.prompt : "…"}</div>
       <div className="prompt-sub">
-        {runner.phase === "recording" ? (open ? "Sing now" : "Get ready") : runner.phase === "grading" ? "Analysing…" : ""}
+        {comparing
+          ? "Keep singing: the note fades in under your voice"
+          : runner.phase === "recording"
+            ? open
+              ? "Sing now"
+              : "Get ready"
+            : runner.phase === "grading"
+              ? "Analysing…"
+              : ""}
       </div>
-      {runner.phase === "recording" && <ResponseCountdown trial={trial} />}
-      {runner.phase === "recording" && trial.show_live_pitch && <LivePitchReadout />}
+      {runner.phase === "recording" && !comparing && <ResponseCountdown trial={trial} />}
+      {runner.phase === "recording" && !comparing && trial.show_live_pitch && <LivePitchReadout />}
+      {comparing && <CompareGap target={trial.compare_midi!} />}
       {runner.phase === "feedback" && fb && (
         <>
           <Result runner={runner} />

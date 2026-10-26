@@ -93,6 +93,7 @@ pub fn run() {
             commands::save_anchor,
             commands::remove_anchor,
             commands::ap_dashboard,
+            commands::aptitude_profile,
             commands::preview_daily_set,
             commands::save_daily_plan,
             commands::set_course_level,

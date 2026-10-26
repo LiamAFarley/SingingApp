@@ -13,9 +13,10 @@ use crate::schema::{
     DictationParams, ErrorDetectionParams, ExerciseKind, HarmonyParams, IncidentalPairingParams,
     IntervalComparisonParams, IntervalIdParams, MelodicUpdatingParams, NBackParams,
     PatternDialogueParams, PatternMemoryParams, PatternParams, PitchDetectParams, PitchIdParams,
-    PitchMatchParams, PitchPairingParams, RestingToneParams, ScaleDegreeParams, ScaleIdParams,
-    SessionSpec, SightSingParams, SingIntervalParams, SingPitchParams, SustainParams,
-    SyllableCheckParams, TonalCenterIdParams, TonalPatternParams,
+    PitchMatchParams, PitchMemoryMatchParams, PitchPairingParams, RestingToneParams,
+    ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams,
+    SingPitchParams, SpanParams, SustainParams, SyllableCheckParams, TonalCenterIdParams,
+    TonalPatternParams,
 };
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
 use crate::storage::{Db, SessionRow, SessionStatus, TrialFilter, TrialRow};
@@ -35,6 +36,10 @@ pub struct BlockReport {
     pub mean_score: Option<f64>,
     pub median_rt_ms: Option<f64>,
     pub median_abs_cents: Option<f64>,
+    /// Sung notes: median time to settle within tolerance after the onset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub median_settling_ms: Option<f64>,
     pub pass_mark: Option<f32>,
     pub passed: Option<bool>,
     pub feedback: String,
@@ -129,6 +134,11 @@ pub fn session_report(db: &Db, session_id: &str) -> Result<SessionReport> {
             mean_score: st.and_then(|s| s.mean_score),
             median_rt_ms: st.and_then(|s| s.median_rt_ms),
             median_abs_cents: st.and_then(|s| s.median_abs_cents),
+            median_settling_ms: crate::stats::median(
+                rows.iter()
+                    .filter_map(|t| t.metrics.get("settling_ms").and_then(|v| v.as_f64()))
+                    .collect(),
+            ),
             pass_mark,
             passed: match (pass_mark, accuracy) {
                 (Some(p), Some(a)) => Some(a >= p as f64),
@@ -170,6 +180,7 @@ pub fn session_summary(report: &SessionReport) -> Value {
             "type": b.kind,
             "accuracy": b.accuracy,
             "median_abs_cents": b.median_abs_cents,
+            "median_settling_ms": b.median_settling_ms,
             "passed": b.passed,
         })).collect::<Vec<_>>(),
     })
@@ -334,6 +345,7 @@ pub fn ap_profile(db: &Db) -> Result<Value> {
         .into_iter()
         .filter(|s| s.protocol.as_deref() == Some("ap_assessment"))
         .count();
+    let aptitude = crate::aptitude::aptitude_profile(db)?;
     Ok(json!({
         "scoring": {
             "answer_limit_ms": crate::courses::TEST_DEADLINE_MS,
@@ -348,6 +360,12 @@ pub fn ap_profile(db: &Db) -> Result<Value> {
         "weekly": test_history(&test_runs(db, AP_WEEKLY)?),
         "transfer": test_history(&test_runs(db, AP_TRANSFER)?),
         "ucsf_style": test_history(&test_runs(db, AP_UCSF_STYLE)?),
+        "aptitude": {
+            "latest": aptitude.latest,
+            "capacity_band": aptitude.capacity_band,
+            "runs": { "inm": aptitude.inm.len(), "n_back": aptitude.n_back.len(), "span": aptitude.span.len() },
+            "detail": "get_aptitude_profile",
+        },
         "legacy_assessments": legacy,
         "legacy_note": (legacy > 0).then_some("Runs of the old ap_assessment preset (holdout piano, random-tone masks) are not comparable with these tests and are left out."),
         "guide": "docs/AP_TESTING.md",
@@ -502,9 +520,21 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::NBack,
-            "Musical N-back for tonal working memory: a slow stream of scale degrees (degrees, one every ioi_ms) over a quiet tonic. mode recognize: tap Match when the note is the same as n back (scored as d′ like a detection stream; a lesson passes on d′). mode sing: a canon, singing each note n behind the app while the next sounds (headphones needed).",
+            "Musical N-back for tonal working memory: a slow stream of scale degrees (degrees, one every ioi_ms) over a quiet tonic. mode recognize: tap Match when the note is the same as n back (scored as d′ like a detection stream; a lesson passes on d′). mode sing: a canon, singing each note n behind the app while the next sounds (headphones needed). stimuli tones is the aptitude screening: tones from `classes` over `octaves` (three or more) with no key, drone or cadence, a match being the same tone; stimuli letters uses spoken letters from the speech folder and falls back to tones when they are missing (the stored stimulus says which ran, with `fallback`).",
             schema_of::<NBackParams>(),
             json!({"type": "n_back", "count": 2, "params": {"n": 2, "length": 24}}),
+        ),
+        entry(
+            ExerciseKind::PitchMemoryMatch,
+            "Implicit note memory (Van Hedger): a sine tone from a 27-step ladder (471.58–547.99 Hz, 10 cents a step; targets the odd steps 5–23), a 2 s mask, then the learner finds it again from step 1, 3, 25 or 27 with the arrow keys (Shift for two steps), hearing each step. Metrics: error_steps and error_cents (signed, positive is high) and their absolute values. No right or wrong; run as an assessment. Reference: later-successful adult learners 2.75 steps (27.5 cents), lifelong AP possessors 2.44.",
+            schema_of::<PitchMemoryMatchParams>(),
+            json!({"type": "pitch_memory_match", "count": 20, "assessment": true}),
+        ),
+        entry(
+            ExerciseKind::Span,
+            "Auditory span: a sequence plays (spoken digits from the speech folder, or tones on a nine-key pad when the digits are missing or stimuli is tones), then the learner types the digits or plays the tones back. per_length sequences at each length from start_length; the ladder stops when every sequence at one length is wrong. One trial is one ladder; metrics.span is the longest length recalled, metrics.ladder every sequence, metrics.mode what ran. Reference (spoken digits): successful adult learners 8.83, non-AP musicians 8.1, AP possessors 10.0.",
+            schema_of::<SpanParams>(),
+            json!({"type": "span", "count": 1, "assessment": true}),
         ),
         entry(
             ExerciseKind::MelodicUpdating,

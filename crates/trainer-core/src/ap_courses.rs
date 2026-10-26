@@ -314,18 +314,23 @@ const BLACK: [&str; 5] = ["C#", "D#", "F#", "G#", "A#"];
 
 fn contrast_course() -> Course {
     let mut levels = Vec::new();
-    let steps: [(&[&str], &str); 3] = [
-        (&["D#", "F#"], "E♭ and F♯"),
-        (&["D#", "F#", "A"], "E♭, F♯ and A"),
-        (&BLACK, "the five black keys"),
+    // Three notes from the start: with two, "the one that is not the other" is a complete
+    // strategy, and a mapping learnt the wrong way round still passes errorless training. Level 2
+    // keeps the same three notes but marks errors, so a swapped mapping shows up in training and
+    // not only at the check.
+    let trio: &[&str] = &["D#", "F#", "A"];
+    let steps: [(&[&str], &str, bool); 3] = [
+        (trio, "E♭, F♯ and A", true),
+        (trio, "E♭, F♯ and A, errors marked", false),
+        (&BLACK, "the five black keys", true),
     ];
-    for (i, (classes, title)) in steps.into_iter().enumerate() {
+    for (i, (classes, title, errorless)) in steps.into_iter().enumerate() {
         let n = i as u32 + 1;
-        let params = contrast_params(classes, &[3], true, 0, None);
+        let params = contrast_params(classes, &[3], errorless, 0, None);
         levels.push(contrast_level(
             n,
             title,
-            true,
+            errorless,
             params.clone(),
             params,
             "in one octave",
@@ -455,7 +460,11 @@ fn contrast_level(
                 false,
                 "Name the word",
                 20,
-                "errorless",
+                if errorless {
+                    "errorless"
+                } else {
+                    "after_trial"
+                },
                 train,
                 "Do not hum. Answer with the word.",
             ),

@@ -5,7 +5,11 @@ import type { CourseStatus } from "./CourseStatus";
 import type { DailyPlan } from "./DailyPlan";
 import type { TestRun } from "./TestRun";
 
-export type ApDashboard = { classes: Array<ClassProgress>, classes_mastered: number, courses: Array<CourseStatus>, 
+export type ApDashboard = { classes: Array<ClassProgress>, classes_mastered: number, 
+/**
+ * Named in time and sung reliably.
+ */
+classes_known: number, courses: Array<CourseStatus>, 
 /**
  * Each test's runs, oldest first.
  */
