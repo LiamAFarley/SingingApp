@@ -1,10 +1,15 @@
 # Relative pitch: the core and the workshops
 
 **For:** the coach agent and the user.
-**Basis:** the research report `Relative Pitch App Exercises.pdf` in the repository root
+**Basis:** the research report `documents/Relative Pitch App Exercises.pdf`
 (Gordon's Music Learning Theory, Kodály's inner hearing, Karpinski's dictation phases, the
 working-memory work of Klonoski, Gates and Chenette), plus EarMaster's workshop pattern and
 Functional Ear Trainer's levels. Only the patterns are theirs; the material is this app's own.
+
+**Extracted rationale:** `corpus/knowledge/RPA-PED/` contains the page-addressable
+report text, `COACH_BRIEF.md`, `ACTIVITY_MAP.md`, figure transcriptions, and
+`SYMBOL_RECOVERY.md`. Use it to explain *why* an activity exists; this file is
+the map of what is actually built.
 
 ## The daily routine
 
