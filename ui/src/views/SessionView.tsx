@@ -6,6 +6,7 @@ import type { RunnerState } from "../bindings/RunnerState";
 import type { Score } from "../bindings/Score";
 import type { ScoreNote } from "../bindings/ScoreNote";
 import type { TrialView } from "../bindings/TrialView";
+import type { WalkCue } from "../bindings/WalkCue";
 import { ChoiceGrid, DegreePad, type KeyState, NotesPad, PianoPad } from "../components/AnswerPads";
 import { LockOnTuner } from "../components/LockOnTuner";
 import { PitchLane } from "../components/PitchLane";
@@ -537,11 +538,15 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
   // A score read before it plays (error detection): count down to the playing.
   useAnimationFrame(!!trial.score && phase === "listening");
   const playsIn = trial.score && phase === "listening" && trial.response_start_s != null ? trial.response_start_s - live.now() : 0;
+  useAnimationFrame(!!trial.walk && phase === "listening");
+  const walking = phase === "listening" ? currentWalkCue(trial) : null;
   const sub =
     phase === "preparing" || phase === "listening"
       ? playsIn > 0.5
         ? `Read and audiate it: it plays once in ${Math.ceil(playsIn)} s`
-        : "Listen…"
+        : walking && !walking.heard
+          ? "In your head"
+          : "Listen…"
       : answering
         ? trial.deadline_ms
           ? <Deadline trial={trial} />
@@ -560,6 +565,7 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
           <Staff score={trial.score} maxHeight={260} />
         </Suspense>
       )}
+      {trial.walk && <WalkRow trial={trial} listening={phase === "preparing" || phase === "listening"} />}
       {trial.layout === "pitch_classes" && (
         <PianoPad choices={trial.choices} enabled={enabled} states={states} onPick={pick} keyboard={answering} />
       )}
@@ -592,6 +598,32 @@ function ChoiceStage({ runner, trial }: { runner: RunnerState; trial: TrialView 
         {phase === "feedback" && <NextButton auto={fb?.auto_advance_ms ?? null} />}
       </div>
     </>
+  );
+}
+
+/** The pitch-walk mark showing now: the latest one whose time has come. */
+function currentWalkCue(trial: TrialView): WalkCue | null {
+  if (!trial.walk || trial.walk_start_s == null) return null;
+  const t = (live.now() - trial.walk_start_s) * 1000;
+  let cur: WalkCue | null = null;
+  for (const c of trial.walk) if (t >= c.at_ms) cur = c;
+  return cur;
+}
+
+/** Pitch walk: the start and each arrow as it comes; dashed ones are moved in silence. */
+function WalkRow({ trial, listening }: { trial: TrialView; listening: boolean }) {
+  const cues = trial.walk ?? [];
+  const now = listening ? currentWalkCue(trial) : null;
+  const shown = listening ? (now ? cues.slice(0, cues.indexOf(now) + 1) : []) : cues;
+  return (
+    <div className="walk-row" aria-label="Walk">
+      {shown.map((c, i) => (
+        <span key={i} className={`walk-cue${c.heard ? "" : " silent"}${c === now ? " now" : ""}`}>
+          {c.step === 0 ? "●" : c.step > 0 ? "↑" : "↓"}
+          {Math.abs(c.step) > 1 && <sub>{Math.abs(c.step)}</sub>}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -1060,7 +1092,12 @@ function SungStatus({ runner, trial }: { runner: RunnerState; trial: TrialView }
   if (t < 0) text = "Get ready";
   else if (t < lane.sing_start_s) {
     const refEnd = lane.reference.reduce((m, n) => Math.max(m, n.start_s + n.dur_s), 0);
-    text = t < refEnd && lane.reference.length > 1 ? "Listen" : "Count-in";
+    text =
+      lane.hold_from_s != null && t >= lane.hold_from_s
+        ? "Hold it"
+        : t < refEnd && lane.reference.length > 1
+          ? "Listen"
+          : "Count-in";
   } else if (t > lane.total_s) text = "Done";
   return <div className="prompt-sub">{trial.assisted ? `${text} · with guide` : text}</div>;
 }

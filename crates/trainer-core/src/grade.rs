@@ -9,8 +9,8 @@ use crate::metrics::{
 };
 use crate::pitch::PitchTrack;
 use crate::schema::{
-    DetectTrial, DictationTrial, ExerciseKind, FeedbackMode, GradingOverrides, IdentifyTrial,
-    MatchTrial, PitchRefMode, SingPitchTrial, SpanTrial, SungTrial, Tuning,
+    DetectTrial, DictationTrial, ExerciseKind, FeedbackMode, GradeOn, GradingOverrides,
+    IdentifyTrial, MatchTrial, PitchRefMode, SingPitchTrial, SpanTrial, SungTrial, Tuning,
 };
 use crate::score::{Pitch, ScoreNote};
 use crate::theory::{Note, PitchClass};
@@ -24,6 +24,7 @@ pub struct GradingConfig {
     pub hold_ms: f32,
     pub onset_tol_ms: f32,
     pub tuning: Tuning,
+    pub grade_on: GradeOn,
 }
 
 impl GradingConfig {
@@ -36,6 +37,7 @@ impl GradingConfig {
             hold_ms: overrides.hold_ms.map(|v| v as f32).unwrap_or(400.0),
             onset_tol_ms: overrides.onset_tol_ms.map(|v| v as f32).unwrap_or(120.0),
             tuning: overrides.tuning.unwrap_or_default(),
+            grade_on: overrides.grade_on.unwrap_or_default(),
         }
     }
 
@@ -425,23 +427,43 @@ pub fn grade_span(trial: &SpanTrial, answers: &[String]) -> TrialOutcome {
 // ---------------------------------------------------------------------------------------------
 
 /// Picks the note a single-note response is judged on: the first segment of at least 200 ms
-/// after `from_s`, else the longest one.
+/// after `from_s`, else the longest one, joined to any slide into or out of it.
 fn pick_response_note(segs: &[NoteSegment], from_s: f32) -> Option<NoteSegment> {
-    let candidates: Vec<NoteSegment> = segs
-        .iter()
-        .copied()
-        .filter(|s| s.offset_s > from_s)
+    let candidates: Vec<usize> = (0..segs.len())
+        .filter(|&i| segs[i].offset_s > from_s)
         .collect();
-    candidates
+    let pick = candidates
         .iter()
         .copied()
-        .find(|s| s.duration_s() >= 0.2)
+        .find(|&i| segs[i].duration_s() >= 0.2)
         .or_else(|| {
             candidates
                 .iter()
                 .copied()
-                .max_by(|a, b| a.duration_s().total_cmp(&b.duration_s()))
-        })
+                .max_by(|&a, &b| segs[a].duration_s().total_cmp(&segs[b].duration_s()))
+        })?;
+    Some(whole_note(segs, pick))
+}
+
+/// Segment `j` with the segments that run straight into or out of it within 3 semitones.
+/// Segmentation cuts a long scoop off as a note of its own, and the first attempt is in it.
+fn whole_note(segs: &[NoteSegment], j: usize) -> NoteSegment {
+    let near = |k: usize| (segs[k].median_midi - segs[j].median_midi).abs() < 3.0;
+    let mut a = j;
+    while a > 0 && segs[a - 1].end == segs[a].start && near(a - 1) {
+        a -= 1;
+    }
+    let mut b = j;
+    while b + 1 < segs.len() && segs[b].end == segs[b + 1].start && near(b + 1) {
+        b += 1;
+    }
+    NoteSegment {
+        start: segs[a].start,
+        end: segs[b].end,
+        onset_s: segs[a].onset_s,
+        offset_s: segs[b].offset_s,
+        median_midi: segs[j].median_midi,
+    }
 }
 
 fn nearest_octave_target(pc: PitchClass, sung_midi: f32) -> f32 {
@@ -454,12 +476,25 @@ fn note_json(m: &NoteMetrics) -> serde_json::Value {
     serde_json::to_value(m).unwrap_or_default()
 }
 
-fn single_note_summary(m: &NoteMetrics, category_ok: bool, sung_name: &str) -> String {
-    let mut s = if category_ok {
-        describe_cents(m.centre_cents)
-    } else {
-        format!("Sang {sung_name} ({})", describe_cents(m.centre_cents))
+fn single_note_summary(m: &NoteMetrics, cfg: &GradingConfig, category_ok: bool) -> String {
+    let graded = graded_cents(m, cfg.grade_on);
+    let sung = Note((m.target_midi + graded / 100.0).round() as i32).display_name();
+    let mut s = match (cfg.grade_on, category_ok) {
+        (GradeOn::Settled, true) => describe_cents(graded),
+        (GradeOn::Settled, false) => format!("Sang {sung} ({})", describe_cents(graded)),
+        (GradeOn::Attack, true) => format!("Started {}", describe_cents(graded)),
+        (GradeOn::Attack, false) => format!("Started on {sung} ({})", describe_cents(graded)),
     };
+    // The other end of the note, when it moved.
+    match cfg.grade_on {
+        GradeOn::Settled if (m.attack_cents - m.centre_cents).abs() >= 25.0 => {
+            s.push_str(&format!(", started {}", describe_cents(m.attack_cents)));
+        }
+        GradeOn::Attack if (m.attack_cents - m.centre_cents).abs() >= 10.0 => {
+            s.push_str(&format!(", ended {}", describe_cents(m.centre_cents)));
+        }
+        _ => {}
+    }
     if let Some(ms) = m.settling_ms {
         if ms >= 30.0 {
             s.push_str(&format!(", settled in {} ms", ms.round() as i32));
@@ -471,6 +506,65 @@ fn single_note_summary(m: &NoteMetrics, category_ok: bool, sung_name: &str) -> S
         s.push_str(&format!(", drifting {:+.0} cents/s", m.drift_cents_per_s));
     }
     s
+}
+
+/// The error a note is graded on: its settled centre, or its attack.
+fn graded_cents(m: &NoteMetrics, on: GradeOn) -> f32 {
+    match on {
+        GradeOn::Settled => m.centre_cents,
+        GradeOn::Attack => m.attack_cents,
+    }
+}
+
+/// A sung note's own metrics, kept with a single-note trial so attack, settling and stability
+/// can be compared across trials.
+fn single_note_metrics(metrics: &mut serde_json::Value, m: &NoteMetrics, graded: f32) {
+    if let (Some(dst), serde_json::Value::Object(src)) = (metrics.as_object_mut(), note_json(m)) {
+        for (k, v) in src {
+            dst.entry(k).or_insert(v);
+        }
+    }
+    metrics["cents_error"] = json!(graded);
+    // Whole semitones off: 12 an octave, 7 or −5 a fifth, for spotting confusions.
+    metrics["error_semitones"] = json!((graded / 100.0).round() as i32);
+}
+
+/// The singer's own call on a sung note, made before seeing the result: `flat`, `in_tune` or
+/// `sharp`, scored against the graded error with the in-tune tolerance.
+pub fn apply_judgement(outcome: &mut TrialOutcome, judgement: &str, cfg: &GradingConfig) {
+    outcome.response["judgement"] = json!(judgement);
+    let Some(err) = outcome.metrics.get("cents_error").and_then(|v| v.as_f64()) else {
+        return;
+    };
+    let tol = cfg.in_tune_tol_cents as f64;
+    let actual = if err > tol {
+        "sharp"
+    } else if err < -tol {
+        "flat"
+    } else {
+        "in_tune"
+    };
+    let right = judgement == actual;
+    outcome.metrics["judgement_correct"] = json!(right);
+    outcome.metrics["judged_actual"] = json!(actual);
+    let word = |j: &str| match j {
+        "in_tune" => "in tune".to_string(),
+        other => other.to_string(),
+    };
+    outcome.summary = if right {
+        format!(
+            "{}. You called it: {}.",
+            outcome.summary.trim_end_matches('.'),
+            word(actual)
+        )
+    } else {
+        format!(
+            "{}. You said {}; it was {}.",
+            outcome.summary.trim_end_matches('.'),
+            word(judgement),
+            word(actual)
+        )
+    };
 }
 
 /// "Sing E-flat" with no reference. `prompt_end_s` is when the prompt finished, in capture time.
@@ -498,23 +592,25 @@ pub fn grade_sing_pitch(
     ) else {
         return no_voice_outcome();
     };
-    let category_ok = m.centre_cents.abs() <= cfg.category_tol_cents;
-    let in_tune = m.centre_cents.abs() <= cfg.in_tune_tol_cents;
-    let sung = Note((target + m.centre_cents / 100.0).round() as i32);
+    let graded = graded_cents(&m, cfg.grade_on);
+    let category_ok = graded.abs() <= cfg.category_tol_cents;
+    let in_tune = graded.abs() <= cfg.in_tune_tol_cents;
+    let sung = Note((target + graded / 100.0).round() as i32);
     let latency_ms = ((m.onset_s - prompt_end_s) * 1000.0).max(0.0);
     let mut metrics = note_json(&m);
     metrics["sung_note"] = json!(sung.name());
     metrics["sung_octave"] = json!(sung.octave());
     metrics["category_correct"] = json!(category_ok);
     metrics["in_tune"] = json!(in_tune);
-    metrics["cents_error"] = json!(m.centre_cents);
+    metrics["cents_error"] = json!(graded);
+    metrics["error_semitones"] = json!((graded / 100.0).round() as i32);
     metrics["response_latency_ms"] = json!(latency_ms);
     TrialOutcome {
         correct: Some(category_ok),
         score: Some(if category_ok { 1.0 } else { 0.0 }),
         rt_ms: Some(latency_ms as f64),
         response: json!({ "voiced": true }),
-        summary: single_note_summary(&m, category_ok, &sung.display_name()),
+        summary: single_note_summary(&m, cfg, category_ok),
         metrics,
     }
 }
@@ -550,6 +646,10 @@ pub struct NoteResult {
     /// Sung silently by design (inner hearing): not graded.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub silent: bool,
+    /// The note's first reliable pitch against the target (before reference-mode adjustment).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attack_cents: Option<f32>,
 }
 
 struct Expected {
@@ -729,6 +829,7 @@ fn grade_with_silent(
                 onset_s: None,
                 offset_s: None,
                 silent: true,
+                attack_cents: None,
             });
         } else if let Some(r) = graded.get(k) {
             if i > 0 && trial.silent.contains(&(i - 1)) && reentry.is_none() {
@@ -797,6 +898,7 @@ fn grade_free(
             onset_s: Some(sg.onset_s),
             offset_s: Some(sg.offset_s),
             silent: false,
+            attack_cents: None,
         });
     }
     let count_ok = (f.min_notes as usize..=f.max_notes as usize).contains(&pcs.len());
@@ -920,7 +1022,11 @@ fn grade_targets(
     let mut raw: Vec<Option<NoteMetrics>> = Vec::new();
     for (i, j) in alignment.iter().enumerate() {
         raw.push(j.and_then(|j| {
-            let s = segs[j];
+            let s = if single {
+                whole_note(&segs, j)
+            } else {
+                segs[j]
+            };
             note_metrics(
                 &track.frames[s.start..s.end],
                 track.hop_s,
@@ -933,7 +1039,7 @@ fn grade_targets(
     // Reference-mode adjustment of the errors.
     let abs_errors: Vec<Option<f32>> = raw
         .iter()
-        .map(|m| m.as_ref().map(|m| m.centre_cents))
+        .map(|m| m.as_ref().map(|m| graded_cents(m, cfg.grade_on)))
         .collect();
     let mut offset_cents = 0.0f32;
     let mut drift_cents_per_s = 0.0f32;
@@ -999,6 +1105,7 @@ fn grade_targets(
             onset_s: m.map(|m| m.onset_s),
             offset_s: m.map(|m| m.offset_s),
             silent: false,
+            attack_cents: m.map(|m| m.attack_cents),
         });
         let _ = x.dur;
     }
@@ -1052,11 +1159,13 @@ fn grade_targets(
         }
     }
 
+    if single && let Some(m) = raw[0].as_ref() {
+        single_note_metrics(&mut metrics, m, results[0].cents_error.unwrap_or(0.0));
+    }
     let summary = if single {
         match raw[0].as_ref() {
             Some(m) => {
-                let sung = Note((m.target_midi + m.centre_cents / 100.0).round() as i32);
-                let mut s = single_note_summary(m, results[0].correct, &sung.display_name());
+                let mut s = single_note_summary(m, cfg, results[0].correct);
                 if let Some(v) = &m.vibrato {
                     s.push_str(&format!(
                         ", vibrato {:.1} Hz ±{:.0} cents",
@@ -1064,7 +1173,11 @@ fn grade_targets(
                     ));
                 }
                 if trial.exercise == ExerciseKind::Sustain {
-                    s.push_str(&format!(", held {:.1} s", m.duration_ms / 1000.0));
+                    s.push_str(&format!(
+                        ", wavering ±{:.0} cents, held {:.1} s",
+                        m.stability_cents,
+                        m.duration_ms / 1000.0
+                    ));
                 }
                 s
             }
@@ -1367,6 +1480,82 @@ mod tests {
         assert_eq!(o.metrics["sung_octave"], json!(3));
         let latency = o.rt_ms.unwrap();
         assert!((latency - 300.0).abs() < 40.0, "{latency}");
+    }
+
+    #[test]
+    fn a_scoop_is_right_when_settled_and_wrong_on_the_attack() {
+        // Pitch matching on A3: starts 70 cents flat for 300 ms, then slides into tune.
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 1.5, 440.0, |t| {
+            if t < 0.3 {
+                56.3
+            } else if t < 0.55 {
+                56.3 + 0.7 * (t - 0.3) / 0.25
+            } else {
+                57.0
+            }
+        }));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let mut trial = sung_trial(&[(57, 0.0, 2.0)], 60.0, ExerciseKind::PitchMatch);
+        trial.sing_start_beat = 1.0;
+        trial.timed = false;
+        let grade = |on: GradeOn| {
+            let overrides = GradingOverrides {
+                grade_on: Some(on),
+                ..GradingOverrides::default()
+            };
+            grade_sung(
+                &trial,
+                &tr,
+                &GradingConfig::resolve(&overrides, PitchRefMode::AnyOctave),
+                1.0,
+            )
+        };
+        let settled = grade(GradeOn::Settled);
+        assert_eq!(settled.correct, Some(true), "{settled:?}");
+        assert!(settled.summary.contains("started 7"), "{}", settled.summary);
+        let attack = settled.metrics["attack_cents"].as_f64().unwrap();
+        assert!((attack + 70.0).abs() < 10.0, "{attack}");
+        assert!(settled.metrics["correction_cents"].as_f64().unwrap() > 55.0);
+        assert_eq!(settled.metrics["error_semitones"], json!(0));
+        let first = grade(GradeOn::Attack);
+        assert_eq!(first.correct, Some(false), "{first:?}");
+        assert!(
+            first.summary.starts_with("Started on A♭"),
+            "{}",
+            first.summary
+        );
+        assert_eq!(first.metrics["error_semitones"], json!(-1));
+    }
+
+    #[test]
+    fn self_judgement_is_scored_against_the_graded_error() {
+        let cfg = GradingConfig::resolve(&GradingOverrides::default(), PitchRefMode::AnyOctave);
+        let outcome = |cents: f64| TrialOutcome {
+            correct: Some(true),
+            score: Some(1.0),
+            rt_ms: None,
+            response: json!({ "voiced": true }),
+            metrics: json!({ "cents_error": cents }),
+            summary: "Fine.".into(),
+        };
+        let mut sharp = outcome(32.0);
+        apply_judgement(&mut sharp, "sharp", &cfg);
+        assert_eq!(sharp.metrics["judgement_correct"], json!(true));
+        assert_eq!(sharp.response["judgement"], json!("sharp"));
+        let mut missed = outcome(-25.0);
+        apply_judgement(&mut missed, "in_tune", &cfg);
+        assert_eq!(missed.metrics["judgement_correct"], json!(false));
+        assert_eq!(missed.metrics["judged_actual"], json!("flat"));
+        assert!(
+            missed.summary.ends_with("You said in tune; it was flat."),
+            "{}",
+            missed.summary
+        );
+        let mut close = outcome(12.0);
+        apply_judgement(&mut close, "in_tune", &cfg);
+        assert_eq!(close.metrics["judgement_correct"], json!(true));
     }
 
     fn sung_trial(notes: &[(i32, f32, f32)], tempo: f32, exercise: ExerciseKind) -> SungTrial {

@@ -52,6 +52,19 @@ const SECTIONS: Section[] = [
     activities: [
       { course: "rp_memory", title: "Working memory", desc: "Same or different, probe notes, N-back and canon, changing a melody in your head", glyph: "memory" },
       { course: "rp_inner", title: "Inner hearing", desc: "Silent bars, silent beats, flash scores sung from memory", glyph: "eye" },
+      { course: "rp_walk", title: "Silent pitch walk", desc: "Follow arrows up and down the scale in your head, then check a probe note", glyph: "memory" },
+    ],
+  },
+  {
+    title: "Voice",
+    accent: "#a34a28",
+    activities: [
+      {
+        course: "rp_match",
+        title: "Pitch matching",
+        desc: "The first attempt graded on its attack, notes held through silence and other notes, calling your own pitch, long notes",
+        glyph: "voice",
+      },
     ],
   },
   {

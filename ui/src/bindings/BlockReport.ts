@@ -12,4 +12,13 @@ assisted: number, graded: number, correct: number, accuracy: number | null, mean
 /**
  * Sung notes: median time to settle within tolerance after the onset.
  */
-median_settling_ms?: number, pass_mark: number | null, passed: boolean | null, feedback: string, assessment: boolean, };
+median_settling_ms?: number, 
+/**
+ * Single sung notes: median size of the first attempt's error (its attack), and how far the
+ * note then moved toward the target.
+ */
+median_abs_attack_cents?: number, median_correction_cents?: number, 
+/**
+ * Self-judged trials: the fraction judged right (flat, in tune or sharp).
+ */
+judgement_accuracy?: number, pass_mark: number | null, passed: boolean | null, feedback: string, assessment: boolean, };

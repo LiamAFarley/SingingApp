@@ -6,6 +6,7 @@ import type { Interaction } from "./Interaction";
 import type { LaneSpec } from "./LaneSpec";
 import type { PitchRefMode } from "./PitchRefMode";
 import type { Score } from "./Score";
+import type { WalkCue } from "./WalkCue";
 
 export type TrialView = { kind: ExerciseKind, interaction: Interaction, prompt: string, choices: Array<Choice>, layout: ChoiceLayout, deadline_ms: number | null, can_replay: boolean, can_reference: boolean, lane: LaneSpec | null, 
 /**
@@ -72,4 +73,9 @@ prompt_color?: string,
  * Hold and compare: the target fades in under the voice until this master-clock time, and
  * the tuner compares the voice with `compare_midi`.
  */
-compare_until_s?: number, compare_midi?: number, };
+compare_until_s?: number, compare_midi?: number, 
+/**
+ * Pitch walk: the start and the arrows, each shown from `walk_start_s + at_ms / 1000` on
+ * the master clock.
+ */
+walk?: Array<WalkCue>, walk_start_s?: number, };

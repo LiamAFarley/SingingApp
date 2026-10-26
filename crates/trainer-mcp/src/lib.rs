@@ -81,7 +81,7 @@ N-back and canon, additive and complementary interval singing), inner hearing an
 melodic updating, bass and guide-tone singing), structure and error detection (single-pass score-against-sound, \
 mislabeled syllables, cadences, singback). Each session passes when every checked part is at 80% in one go. Prefer the \
 core for daily work and the single-exercise workshops for targeted practice where the dashboard shows a weakness: \
-rp_home, rp_patterns, rp_memory, rp_inner, rp_singback, rp_harmony, rp_errors, rp_degrees, rp_intervals_key, rp_sing, \
+rp_home, rp_patterns, rp_memory, rp_inner, rp_singback, rp_harmony, rp_errors, rp_walk, rp_match, rp_degrees, rp_intervals_key, rp_sing, \
 rp_intervals, rp_compare, rp_chords, rp_inversions, rp_scales, rp_dictation, rp_sight. A course's levels are lessons \
 grouped into modules (get_workshop shows them with scores); one run at 90% passes a lesson (N-back recognition: d′ 2). \
 The category has its own \"Today's set\" (preview_daily_set with category \"Relative pitch\"); set_daily_plan and \
@@ -101,6 +101,13 @@ two-voice or SATB, sung exactly as written with any intervals, tritones included
 practice: true plays the singer's part along (stored as assisted); grading {\"tuning\": \"just\"} scores against pure \
 intervals. Presets harmony_01–08 are a course, one interval each. \
 Anchor songs need anchors the user confirmed (list_anchors, save_anchor).\n\
+- Singing diagnostics: before advising on sung accuracy, read docs/SINGING_DIAGNOSTICS.md. Every single sung note stores \
+attack_cents (first reliable pitch), centre_cents (settled), correction_cents, settling_ms, stability_cents and \
+error_semitones; block grading {\"grade_on\": \"attack\"} grades the first attempt, block self_judge asks flat, in tune \
+or sharp before the result, and pitch_match delay_ms and distractor_tones hold a note through silence or other notes. \
+rp_match is the pitch-matching workshop (first attempt, hold the note, through other notes, judge it first, long notes \
+with and without a drone); rp_walk is the silent pitch walk (imagery with no voice). Keep each ability's measure \
+separate rather than one score, and test one hypothesis at a time.\n\
 - Respect comfort reports: mild fatigue -> fewer sung blocks; discomfort -> no range or intensity work; pain or new hoarseness \
 -> no demanding vocal work, and suggest professional evaluation if it persists. Never diagnose; a correct pitch is not evidence \
 of healthy technique.\n\

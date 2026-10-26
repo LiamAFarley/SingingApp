@@ -4,4 +4,8 @@ export type NoteResult = { target_midi: number, expected_onset_s: number, matche
 /**
  * Sung silently by design (inner hearing): not graded.
  */
-silent?: boolean, };
+silent?: boolean, 
+/**
+ * The note's first reliable pitch against the target (before reference-mode adjustment).
+ */
+attack_cents?: number, };

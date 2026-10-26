@@ -13,8 +13,8 @@ use serde_json::json;
 use trainer_audio::{AudioEngine, Bus, SoundBuffer};
 use trainer_core::generate::{block_seed, default_mode, generate_block};
 use trainer_core::grade::{
-    GradingConfig, TrialOutcome, grade_choice, grade_dictation, grade_match, grade_sing_pitch,
-    grade_span, grade_sung,
+    GradingConfig, TrialOutcome, apply_judgement, grade_choice, grade_dictation, grade_match,
+    grade_sing_pitch, grade_span, grade_sung,
 };
 use trainer_core::pitch::{PitchTrack, TrackOptions, track};
 use trainer_core::reports::{session_report, session_summary};
@@ -464,9 +464,23 @@ impl<'a> SessionRun<'a> {
                         TrialSpec::Match(t) => self.run_match(&engine, t, attempt),
                         TrialSpec::Span(t) => self.run_span(&engine, t, attempt),
                     }?;
-                    let Some((outcome, extras)) = res else {
+                    let Some((mut outcome, extras)) = res else {
                         break; // skipped
                     };
+                    // The singer's own call, before any result.
+                    if block.self_judge
+                        && !assisted
+                        && judgeable(&trial)
+                        && outcome.response["voiced"] == json!(true)
+                        // Hold and compare has already played the target.
+                        && outcome.response.get("held_and_compared").is_none()
+                    {
+                        let Some(j) = self.ask_judgement(stored_kind(block, &trial), attempt)?
+                        else {
+                            break;
+                        };
+                        apply_judgement(&mut outcome, &j, &cfg);
+                    }
                     last_correct = outcome.correct;
                     let row = self.store(
                         block,
@@ -642,6 +656,34 @@ impl<'a> SessionRun<'a> {
             prompt_color: None,
             compare_until_s: None,
             compare_midi: None,
+            walk: None,
+            walk_start_s: None,
+        }
+    }
+
+    /// Flat, in tune or sharp: asked after a sung note and before its result.
+    fn ask_judgement(&mut self, kind: ExerciseKind, attempt: u32) -> R<Option<String>> {
+        const CALLS: [(&str, &str); 3] =
+            [("flat", "Flat"), ("in_tune", "In tune"), ("sharp", "Sharp")];
+        let mut view = self.base_view(
+            kind,
+            Interaction::Choice,
+            "Was it flat, in tune or sharp?",
+            attempt,
+        );
+        view.choices = CALLS.iter().map(|(id, l)| Choice::new(id, l)).collect();
+        self.set(|st| {
+            st.phase = Phase::Answering;
+            st.trial = Some(view);
+        });
+        loop {
+            match self.wait(None)? {
+                Some(RunnerCommand::Answer { choice }) if CALLS.iter().any(|c| c.0 == choice) => {
+                    return Ok(Some(choice));
+                }
+                Some(RunnerCommand::Skip) => return Ok(None),
+                _ => {}
+            }
         }
     }
 
@@ -719,6 +761,10 @@ impl<'a> SessionRun<'a> {
         // A test plays each tone once, whatever its answer limit; so does a single-pass trial.
         let can_replay = deadline_ms.is_none() && !assessment && !t.no_replay;
         view.score = t.score.clone();
+        if !t.walk.is_empty() {
+            view.walk = Some(t.walk.clone());
+            view.walk_start_s = Some(secs(engine, onset_frame));
+        }
         view.can_replay = can_replay;
         view.can_reference = t.reference.is_some();
         // The countdown starts where response times do.
@@ -1847,6 +1893,15 @@ fn trial_choice_sound<'t>(trial: &'t TrialSpec, choice: &str) -> Option<&'t [Sou
 }
 
 /// The exercise stored for a trial. A note pulled out of a chord is a `pitch_id` trial.
+/// A single sung note, which the singer can judge.
+fn judgeable(t: &TrialSpec) -> bool {
+    match t {
+        TrialSpec::SingPitch(_) => true,
+        TrialSpec::Sung(t) => t.notes.len() == 1 && t.free.is_none(),
+        _ => false,
+    }
+}
+
 fn stored_kind(block: &BlockSpec, trial: &TrialSpec) -> ExerciseKind {
     match trial {
         TrialSpec::Identify(t) => t.exercise,
@@ -1942,7 +1997,15 @@ fn lane_for(t: &SungTrial) -> LaneSpec {
         cursor: t.follow_cursor,
         score_until_s: t.score_until_beat.map(|b| b * beat),
         silent: t.silent.iter().map(|i| *i as u32).collect(),
+        hold_from_s: hold_from(t).map(|b| b * beat),
     }
+}
+
+/// Delayed pitch matching: the beat the reference note ends, when a held silence follows it.
+fn hold_from(t: &SungTrial) -> Option<f32> {
+    let r = t.reference_beats.first()?;
+    let end = r.start_beat + r.beats;
+    (t.exercise == ExerciseKind::PitchMatch && t.sing_start_beat - end > 1.0).then_some(end)
 }
 
 /// A dictation's playback: cadence, count-in clicks and the melody in one buffer.

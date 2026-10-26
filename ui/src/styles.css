@@ -1095,6 +1095,38 @@ pre.code {
   color: var(--correct);
 }
 
+/* Pitch walk: the start and the arrows; dashed ones are moved in silence */
+.walk-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.walk-cue {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  height: 40px;
+  border: 2px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 20px;
+}
+
+.walk-cue.silent {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.walk-cue.now {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
 /* Span: a 3 × 3 keypad, 1–9 */
 .span-pad {
   display: grid;

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use trainer_audio::{EngineInfo, EngineSettings, EngineStatus};
 use trainer_core::grade::NoteResult;
 use trainer_core::reports::{BlockReport, SessionReport};
-use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode, PitchRefMode};
+use trainer_core::schema::{Choice, ExerciseKind, FeedbackMode, PitchRefMode, WalkCue};
 use trainer_core::score::{Score, ScoreNote};
 use trainer_core::storage::CalibrationRow;
 use ts_rs::TS;
@@ -105,6 +105,11 @@ pub struct LaneSpec {
     pub score_until_s: Option<f32>,
     /// Indexes of notes sung silently (inner hearing).
     pub silent: Vec<u32>,
+    /// Delayed pitch matching: from here (seconds on the timeline) to the singing, the note is
+    /// held in the head.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub hold_from_s: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]
@@ -185,6 +190,14 @@ pub struct TrialView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub compare_midi: Option<i32>,
+    /// Pitch walk: the start and the arrows, each shown from `walk_start_s + at_ms / 1000` on
+    /// the master clock.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub walk: Option<Vec<WalkCue>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub walk_start_s: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, TS)]

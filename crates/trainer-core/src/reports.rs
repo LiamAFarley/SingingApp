@@ -13,10 +13,10 @@ use crate::schema::{
     DictationParams, ErrorDetectionParams, ExerciseKind, HarmonyParams, IncidentalPairingParams,
     IntervalComparisonParams, IntervalIdParams, MelodicUpdatingParams, NBackParams,
     PatternDialogueParams, PatternMemoryParams, PatternParams, PitchDetectParams, PitchIdParams,
-    PitchMatchParams, PitchMemoryMatchParams, PitchPairingParams, RestingToneParams,
-    ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams, SingIntervalParams,
-    SingPitchParams, SpanParams, SustainParams, SyllableCheckParams, TonalCenterIdParams,
-    TonalPatternParams,
+    PitchMatchParams, PitchMemoryMatchParams, PitchPairingParams, PitchWalkParams,
+    RestingToneParams, ScaleDegreeParams, ScaleIdParams, SessionSpec, SightSingParams,
+    SingIntervalParams, SingPitchParams, SpanParams, SustainParams, SyllableCheckParams,
+    TonalCenterIdParams, TonalPatternParams,
 };
 use crate::stats::{StatsQuery, aggregate, confusion, get_stats};
 use crate::storage::{Db, SessionRow, SessionStatus, TrialFilter, TrialRow};
@@ -40,6 +40,18 @@ pub struct BlockReport {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub median_settling_ms: Option<f64>,
+    /// Single sung notes: median size of the first attempt's error (its attack), and how far the
+    /// note then moved toward the target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub median_abs_attack_cents: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub median_correction_cents: Option<f64>,
+    /// Self-judged trials: the fraction judged right (flat, in tune or sharp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub judgement_accuracy: Option<f64>,
     pub pass_mark: Option<f32>,
     pub passed: Option<bool>,
     pub feedback: String,
@@ -139,6 +151,25 @@ pub fn session_report(db: &Db, session_id: &str) -> Result<SessionReport> {
                     .filter_map(|t| t.metrics.get("settling_ms").and_then(|v| v.as_f64()))
                     .collect(),
             ),
+            median_abs_attack_cents: crate::stats::median(
+                rows.iter()
+                    .filter_map(|t| t.metrics.get("attack_cents").and_then(|v| v.as_f64()))
+                    .map(f64::abs)
+                    .collect(),
+            ),
+            median_correction_cents: crate::stats::median(
+                rows.iter()
+                    .filter_map(|t| t.metrics.get("correction_cents").and_then(|v| v.as_f64()))
+                    .collect(),
+            ),
+            judgement_accuracy: {
+                let judged: Vec<bool> = rows
+                    .iter()
+                    .filter_map(|t| t.metrics.get("judgement_correct").and_then(|v| v.as_bool()))
+                    .collect();
+                (!judged.is_empty())
+                    .then(|| judged.iter().filter(|j| **j).count() as f64 / judged.len() as f64)
+            },
             pass_mark,
             passed: match (pass_mark, accuracy) {
                 (Some(p), Some(a)) => Some(a >= p as f64),
@@ -181,6 +212,9 @@ pub fn session_summary(report: &SessionReport) -> Value {
             "accuracy": b.accuracy,
             "median_abs_cents": b.median_abs_cents,
             "median_settling_ms": b.median_settling_ms,
+            "median_abs_attack_cents": b.median_abs_attack_cents,
+            "median_correction_cents": b.median_correction_cents,
+            "judgement_accuracy": b.judgement_accuracy,
             "passed": b.passed,
         })).collect::<Vec<_>>(),
     })
@@ -442,13 +476,13 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
         ),
         entry(
             ExerciseKind::PitchMatch,
-            "Hear a note and sing it back (or sing along with it). Range defaults to the comfortable range.",
+            "Hear a note and sing it back (or sing along with it). Range defaults to the comfortable range. delay_ms holds the note in memory through silence before singing (the lane hides the target), and distractor_tones play random notes within a fifth during the delay to interfere with it. Every single sung note stores attack_cents (the first reliable pitch, 40–140 ms in), centre_cents (settled), correction_cents (|attack| − |centre|: how far it moved toward the target), settling_ms, drift_cents_per_s, stability_cents and error_semitones; block grading grade_on \"attack\" marks it on the attack instead of where it settled. A block with self_judge asks flat, in tune or sharp before the result (judgement_correct, judged_actual).",
             schema_of::<PitchMatchParams>(),
             json!({"type": "pitch_match", "count": 15, "feedback": "continuous", "params": {}}),
         ),
         entry(
             ExerciseKind::Sustain,
-            "Hold a note; reports centre error, drift, stability and vibrato (vibrato never counts as out of tune).",
+            "Hold a note; reports centre error, drift, stability (stability_cents, the wavering left after the drift is removed) and vibrato (vibrato never counts as out of tune). drone true keeps the note sounding under the voice; comparing drone on and off separates losing the pitch from uneven production.",
             schema_of::<SustainParams>(),
             json!({"type": "sustain", "count": 4, "params": {"hold_ms": 5000, "drone": true}}),
         ),
@@ -535,6 +569,12 @@ pub fn exercise_catalogue() -> Vec<ExerciseTypeInfo> {
             "Auditory span: a sequence plays (spoken digits from the speech folder, or tones on a nine-key pad when the digits are missing or stimuli is tones), then the learner types the digits or plays the tones back. per_length sequences at each length from start_length; the ladder stops when every sequence at one length is wrong. One trial is one ladder; metrics.span is the longest length recalled, metrics.ladder every sequence, metrics.mode what ran. Reference (spoken digits): successful adult learners 8.83, non-AP musicians 8.1, AP possessors 10.0.",
             schema_of::<SpanParams>(),
             json!({"type": "span", "count": 1, "assessment": true}),
+        ),
+        entry(
+            ExerciseKind::PitchWalk,
+            "Silent pitch walk (the Pitch Imagery Arrow Task, Gelding et al. 2015): the tonic chord, a starting note on do, mi, sol or the upper do, then arrows one per beat moving up or down the scale (jumps 1 a step, 2 a third, 3 a fourth). The first `heard` arrows sound their notes, the next `steps` (one drawn per trial) are moved in silence; then a probe tone: is it where the walk ended? Wrong probes are a scale step off (probe_change chromatic: a semitone). Nothing is sung, so it measures pitch imagery without the voice. Stimulus: silent_steps, heard_steps, arrows, start, end, match; group get_stats by stimulus.silent_steps for accuracy against walk length.",
+            schema_of::<PitchWalkParams>(),
+            json!({"type": "pitch_walk", "count": 20, "params": {"steps": [2, 3], "heard": 2}}),
         ),
         entry(
             ExerciseKind::MelodicUpdating,

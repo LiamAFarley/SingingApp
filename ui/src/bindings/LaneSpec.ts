@@ -37,4 +37,9 @@ score_until_s: number | null,
 /**
  * Indexes of notes sung silently (inner hearing).
  */
-silent: Array<number>, };
+silent: Array<number>, 
+/**
+ * Delayed pitch matching: from here (seconds on the timeline) to the singing, the note is
+ * held in the head.
+ */
+hold_from_s?: number, };

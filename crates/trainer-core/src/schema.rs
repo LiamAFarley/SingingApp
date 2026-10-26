@@ -210,6 +210,17 @@ pub enum PitchRefMode {
     RelativeDriftTolerant,
 }
 
+/// Which part of a sung note decides whether it is right.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum GradeOn {
+    /// The settled centre of the note: a scoop that ends in tune is right.
+    #[default]
+    Settled,
+    /// The attack (40–140 ms after the voice starts): the first attempt, before any slide.
+    Attack,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum Tuning {
@@ -240,6 +251,9 @@ pub struct GradingOverrides {
     pub onset_tol_ms: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tuning: Option<Tuning>,
+    /// `attack` grades each sung note on its first reliable pitch instead of where it settled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade_on: Option<GradeOn>,
 }
 
 /// What plays alongside a sung multi-note exercise.
@@ -921,6 +935,14 @@ pub struct PitchMatchParams {
     pub response_ms: u32,
     #[serde(default)]
     pub mode: MatchMode,
+    /// Silence between the reference and singing, holding the note in memory (up to 30 s).
+    /// The target stays hidden on the lane until the result.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub delay_ms: u32,
+    /// Tones played during the delay to interfere with the held note: random notes within a
+    /// fifth of it, never the note itself. Each needs half a second of the delay, plus a second.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub distractor_tones: u32,
 }
 
 /// Hold a note steadily; reports centre error, drift, stability and vibrato.
@@ -2213,6 +2235,47 @@ pub struct PatternMemoryParams {
     pub timbres: Vec<TimbreId>,
 }
 
+fn d_walk_steps() -> Vec<u32> {
+    vec![2]
+}
+fn d_walk_heard() -> u32 {
+    2
+}
+fn d_one_step() -> Vec<u32> {
+    vec![1]
+}
+
+/// Silent pitch walk, after the Pitch Imagery Arrow Task (Gelding, Thompson and Johnson 2015):
+/// the key and a starting note sound, the first arrows move up or down the scale with their notes,
+/// the rest in silence, then a probe tone: is it where the walk ended? Nothing is sung.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PitchWalkParams {
+    /// Silent steps before the probe, 1–8; one is drawn per trial.
+    #[serde(default = "d_walk_steps")]
+    pub steps: Vec<u32>,
+    /// Steps heard with their notes before the silent ones, 0–6.
+    #[serde(default = "d_walk_heard")]
+    pub heard: u32,
+    /// Sizes of one arrow in scale steps: 1 a step, 2 a third, 3 a fourth.
+    #[serde(default = "d_one_step")]
+    pub jumps: Vec<u32>,
+    /// A wrong probe is a scale step from the end of the walk, or (chromatic) a semitone.
+    #[serde(default)]
+    pub probe_change: ChangeSize,
+    #[serde(default)]
+    pub keys: ClassSet,
+    #[serde(default)]
+    pub key_change: KeyChange,
+    #[serde(default = "d_major")]
+    pub modes: Vec<KeyMode>,
+    #[serde(default = "d_tempo_80")]
+    pub tempo_bpm: f32,
+    #[serde(default)]
+    pub labels: DegreeLabels,
+    #[serde(default)]
+    pub timbres: Vec<TimbreId>,
+}
+
 fn d_error_melody() -> MelodySource {
     MelodySource::Generate(MelodyParams {
         bars: 2,
@@ -2448,6 +2511,7 @@ pub enum Exercise {
     BassLine(BassLineParams),
     PitchMemoryMatch(PitchMemoryMatchParams),
     Span(SpanParams),
+    PitchWalk(PitchWalkParams),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
@@ -2485,10 +2549,11 @@ pub enum ExerciseKind {
     BassLine,
     PitchMemoryMatch,
     Span,
+    PitchWalk,
 }
 
 impl ExerciseKind {
-    pub const ALL: [ExerciseKind; 32] = [
+    pub const ALL: [ExerciseKind; 33] = [
         ExerciseKind::PitchId,
         ExerciseKind::SingPitch,
         ExerciseKind::PitchPairing,
@@ -2521,6 +2586,7 @@ impl ExerciseKind {
         ExerciseKind::BassLine,
         ExerciseKind::PitchMemoryMatch,
         ExerciseKind::Span,
+        ExerciseKind::PitchWalk,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -2557,6 +2623,7 @@ impl ExerciseKind {
             ExerciseKind::BassLine => "bass_line",
             ExerciseKind::PitchMemoryMatch => "pitch_memory_match",
             ExerciseKind::Span => "span",
+            ExerciseKind::PitchWalk => "pitch_walk",
         }
     }
 
@@ -2598,6 +2665,7 @@ impl ExerciseKind {
             ExerciseKind::BassLine => "Bass and guide tones",
             ExerciseKind::PitchMemoryMatch => "Note memory (find the tone)",
             ExerciseKind::Span => "Memory span",
+            ExerciseKind::PitchWalk => "Silent pitch walk",
         }
     }
 
@@ -2635,6 +2703,7 @@ impl ExerciseKind {
             ExerciseKind::BassLine => &["rp.bass_line"],
             ExerciseKind::PitchMemoryMatch => &["ap.inm"],
             ExerciseKind::Span => &["wm.span"],
+            ExerciseKind::PitchWalk => &["rp.imagery"],
         }
     }
 
@@ -2693,6 +2762,7 @@ impl Exercise {
             Exercise::BassLine(_) => ExerciseKind::BassLine,
             Exercise::PitchMemoryMatch(_) => ExerciseKind::PitchMemoryMatch,
             Exercise::Span(_) => ExerciseKind::Span,
+            Exercise::PitchWalk(_) => ExerciseKind::PitchWalk,
         }
     }
 
@@ -2747,6 +2817,10 @@ pub struct BlockSpec {
     /// The course level this block belongs to, for course progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub course: Option<CourseRef>,
+    /// After each single sung note, before any result, the singer says whether it was flat, in
+    /// tune or sharp; stored with the trial and scored against the measured error.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub self_judge: bool,
 }
 
 /// A block's place in a course: which course and level, and whether it is the level's check.
@@ -2765,6 +2839,10 @@ impl CourseRef {
     pub fn tag(&self) -> String {
         format!("course.{}.{:02}", self.course, self.level)
     }
+}
+
+fn is_zero(v: &u32) -> bool {
+    *v == 0
 }
 
 fn is_default_grading(g: &GradingOverrides) -> bool {
@@ -2786,6 +2864,7 @@ impl BlockSpec {
             assessment: false,
             pre_mask: None,
             course: None,
+            self_judge: false,
         }
     }
 
@@ -2980,6 +3059,19 @@ pub struct IdentifyTrial {
     /// Heard once: no replay (error detection, where hearing again overwrites the score).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub no_replay: bool,
+    /// Pitch walk: the start and each arrow, shown as they come.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub walk: Vec<WalkCue>,
+}
+
+/// One mark of a pitch walk: the start (`step` 0) or an arrow of `step` scale steps.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct WalkCue {
+    /// From the start of the trial's sound.
+    pub at_ms: f64,
+    pub step: i32,
+    /// Its note sounds; otherwise it is moved in silence.
+    pub heard: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -3023,6 +3115,7 @@ impl IdentifyTrial {
             requeue_octaves: Vec::new(),
             score: None,
             no_replay: false,
+            walk: Vec::new(),
         }
     }
 }

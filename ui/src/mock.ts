@@ -757,6 +757,15 @@ function startScenario() {
     const base = { session_id: "demo", title: "Absolute pitch: today's set", block_index: 1, block_count: 3, block_title: "Contrast · Name the word", block_kind: "pitch_id" as const, trial_index: 7, trial_count: 20, done_in_block: 7, correct_in_block: 6, feedback_mode: "errorless" as const, outline: OUTLINE, trial: contrastTrial() };
     if (scenario === "contrast") emit({ phase: "answering", ...base });
     else emit({ phase: "feedback", ...base, feedback: { correct: true, summary: "Correct: Oscar.", correct_choice: "D#", answered: "D#", dictation: null, cents: null, notes: [], trace: [], lit: [], can_retry: false, can_sing_along: false, can_listen: false, can_show_answer: true, can_play_answer: false, can_hear_choices: true, tuner: null, auto_advance_ms: null, hidden: false, errorless: true, flash_color: "#1f5e57", answer_color: null } });
+  } else if (scenario === "walk" || scenario === "walk-answer") {
+    // Start, two heard arrows, three silent ones; the third silent arrow is showing.
+    const t0 = clock() - (scenario === "walk" ? 4.7 * 0.75 : 0);
+    const walk = [0, 1, 1, -1, 2, -1].map((step, i) => ({ at_ms: 750 * (1.6 + i), step, heard: i < 3 }));
+    emit({
+      phase: scenario === "walk" ? "listening" : "answering", session_id: "demo", title: "Silent pitch walk", block_count: 1, block_title: "Three silent steps", block_kind: "pitch_walk",
+      trial_index: 3, trial_count: 16, done_in_block: 3, correct_in_block: 3, feedback_mode: "after_trial",
+      trial: { ...choiceTrial(), kind: "pitch_walk", prompt: "Follow the arrows in your head. Is the last note where you landed?", layout: "list", choices: [{ id: "yes", label: "Yes, it is" }, { id: "no", label: "No" }], walk, walk_start_s: t0 },
+    });
   } else if (scenario === "pitch") {
     emit({ phase: "answering", session_id: "demo", title: "Absolute pitch: stage 1", block_count: 2, block_title: "Name the note", block_kind: "pitch_id", trial_index: 6, trial_count: 60, done_in_block: 6, correct_in_block: 5, trial: choiceTrial() });
   } else if (scenario === "sung" || scenario === "sung-feedback") {
@@ -1216,6 +1225,8 @@ const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; descript
   rp_inner: { title: "Inner hearing", exercise: "sight_sing", description: "Silent bars, silent beats, flash scores.", modules: [["Silent bars", [["Bars 2 and 3 silent, do to sol", { silent: "bars" }]]], ["Flash scores", [["One bar, 8 s", { mode: "flash" }]]]] },
   rp_harmony: { title: "Cadences and bass lines", exercise: "cadence_id", description: "How phrases end; bass and guide tones.", modules: [["Cadences", [["Authentic or half", {}]]], ["Bass lines", [["Roots with the bass", {}]]]] },
   rp_errors: { title: "Error detection", exercise: "error_detection", description: "Find the note played wrong; the wrong syllable.", modules: [["Score against sound", [["One bar, 10 s", {}]]]] },
+  rp_walk: { title: "Silent pitch walk", exercise: "pitch_walk", description: "Arrows move the note in your head; is the probe where you landed?", modules: [["Steps of the scale", [["Two silent steps", { steps: [2] }], ["Three silent steps", { steps: [3] }]]]] },
+  rp_match: { title: "Pitch matching", exercise: "pitch_match", description: "First attempt, holding the note, judging it, long notes.", modules: [["First attempt", [["Piano", { timbres: ["gm:0"] }]]], ["Hold the note", [["2 seconds", { delay_ms: 2000 }]]]] },
   rp_singback: { title: "Melody singback", exercise: "sight_sing", description: "Hear a melody, sing it back.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { mode: "singback" }]]]] },
   rp_degrees: {
     title: "Scale degrees",

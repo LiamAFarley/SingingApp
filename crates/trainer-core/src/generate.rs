@@ -132,6 +132,7 @@ pub fn generate_block(
         Exercise::BassLine(p) => audiation::gen_bass_line(p, n, &mut rng, ctx),
         Exercise::PitchMemoryMatch(p) => screening::gen_pitch_memory_match(p, n, &mut rng),
         Exercise::Span(p) => screening::gen_span(p, n, &mut rng, ctx),
+        Exercise::PitchWalk(p) => audiation::gen_pitch_walk(p, n, &mut rng),
     }?;
     if block.effective_feedback().shows_trial_result() {
         color_answers(&mut trials, ctx);
@@ -1098,6 +1099,7 @@ fn gen_chord_color(
             requeue_octaves: Vec::new(),
             score: None,
             no_replay: false,
+            walk: Vec::new(),
         }));
         if p.single_note_after {
             let from_chord = !any_white || rng.chance(0.5);
@@ -1153,6 +1155,7 @@ fn gen_chord_color(
                 requeue_octaves: Vec::new(),
                 score: None,
                 no_replay: false,
+                walk: Vec::new(),
             }));
         }
     }
@@ -2845,6 +2848,15 @@ fn gen_pitch_match(
     rng: &mut Rng,
     ctx: &GenContext,
 ) -> Result<Vec<TrialSpec>, GenError> {
+    if p.delay_ms > 30_000 {
+        return err("delay_ms must be at most 30000");
+    }
+    if p.distractor_tones > 0 && p.delay_ms < 1000 + 500 * p.distractor_tones {
+        return err("distractor_tones need a delay of at least 1 s plus 0.5 s per tone");
+    }
+    if p.mode == MatchMode::Unison && (p.delay_ms > 0 || p.distractor_tones > 0) {
+        return err("a delay needs mode `after`");
+    }
     let range = sung_range(p.range, ctx);
     let mut out = Vec::with_capacity(n);
     let mut last = None;
@@ -2854,25 +2866,58 @@ fn gen_pitch_match(
         // One beat = one second on this timeline.
         let ref_s = p.reference_ms.max(300) as f32 / 1000.0;
         let resp_s = p.response_ms.max(1000) as f32 / 1000.0;
+        let delay_s = p.delay_ms as f32 / 1000.0;
+        let held = p.delay_ms > 0;
+        // Interfering tones spread over the delay, leaving its first and last half-second silent.
+        let mut distractors = Vec::new();
+        if p.distractor_tones > 0 {
+            let span = delay_s - 1.0;
+            let step = span / p.distractor_tones as f32;
+            let mut prev = 0;
+            for k in 0..p.distractor_tones {
+                let offset = loop {
+                    let o = rng.range_i32(-7, 7);
+                    if o != 0 && o != prev {
+                        break o;
+                    }
+                };
+                prev = offset;
+                distractors.push(TargetNote {
+                    midi: midi + offset,
+                    start_beat: ref_s + 0.3 + 0.5 + k as f32 * step,
+                    beats: (step * 0.8).min(0.4),
+                });
+            }
+        }
         let (sing_start, reference, guide) = match p.mode {
-            MatchMode::After => (
-                ref_s + 0.3,
-                vec![TargetNote {
+            MatchMode::After => {
+                let mut reference = vec![TargetNote {
                     midi,
                     start_beat: 0.0,
                     beats: ref_s,
-                }],
-                false,
-            ),
+                }];
+                reference.extend(distractors.iter().cloned());
+                (ref_s + 0.3 + delay_s, reference, false)
+            }
             MatchMode::Unison => (0.5, vec![], true),
         };
         out.push(TrialSpec::Sung(SungTrial {
             exercise: ExerciseKind::PitchMatch,
             prompt: match p.mode {
+                MatchMode::After if !distractors.is_empty() => {
+                    "Listen, hold the note through the others, then sing it".into()
+                }
+                MatchMode::After if held => {
+                    "Listen, hold the note in your head, then sing it".into()
+                }
                 MatchMode::After => "Listen, then sing the note".into(),
                 MatchMode::Unison => "Sing along with the note".into(),
             },
-            notes: vec![TargetNote { midi, start_beat: 0.0, beats: resp_s }],
+            notes: vec![TargetNote {
+                midi,
+                start_beat: 0.0,
+                beats: resp_s,
+            }],
             tempo_bpm: 60.0,
             beats_per_bar: 4,
             sing_start_beat: sing_start,
@@ -2883,7 +2928,12 @@ fn gen_pitch_match(
             backing_volume: 0.8,
             guide,
             drone_midi: None,
-            lane_targets: LaneTargets::Shown,
+            // Held from memory: the lane would show where the note is.
+            lane_targets: if held {
+                LaneTargets::HiddenUntilDone
+            } else {
+                LaneTargets::Shown
+            },
             timed: false,
             score: None,
             count_in_beat: None,
@@ -2895,7 +2945,11 @@ fn gen_pitch_match(
             reveal: None,
             free: None,
             score_until_beat: None,
-            stimulus: json!({ "midi": midi, "note": Note(midi).name(), "timbre": timbre, "mode": p.mode }),
+            stimulus: json!({
+                "midi": midi, "note": Note(midi).name(), "timbre": timbre, "mode": p.mode,
+                "delay_ms": p.delay_ms,
+                "distractors": distractors.iter().map(|d| d.midi).collect::<Vec<_>>(),
+            }),
         }));
     }
     Ok(out)
@@ -4479,6 +4533,34 @@ mod tests {
             })
             .collect();
         assert_eq!(tonics, vec![48, 49, 50, 51]);
+    }
+
+    #[test]
+    fn delayed_matching_holds_the_note_through_distractors() {
+        let ctx = GenContext::default();
+        let b = block(
+            r#"{"type": "pitch_match", "count": 10, "params": {"delay_ms": 6000, "distractor_tones": 6}}"#,
+        );
+        for t in generate_block(&b, 4, &ctx).unwrap() {
+            let TrialSpec::Sung(t) = t else { panic!() };
+            let target = t.notes[0].midi;
+            assert_eq!(t.reference_beats[0].midi, target);
+            let others = &t.reference_beats[1..];
+            assert_eq!(others.len(), 6);
+            for (i, d) in others.iter().enumerate() {
+                assert!(d.midi != target && (d.midi - target).abs() <= 7, "{d:?}");
+                assert!(d.start_beat >= 1.5 && d.start_beat + d.beats <= t.sing_start_beat - 0.4);
+                if i > 0 {
+                    assert_ne!(d.midi, others[i - 1].midi);
+                }
+            }
+            assert!((t.sing_start_beat - (1.2 + 0.3 + 6.0)).abs() < 1e-4);
+            assert_eq!(t.lane_targets, LaneTargets::HiddenUntilDone);
+        }
+        let crowded = block(
+            r#"{"type": "pitch_match", "params": {"delay_ms": 2000, "distractor_tones": 6}}"#,
+        );
+        assert!(generate_block(&crowded, 1, &ctx).is_err());
     }
 
     #[test]

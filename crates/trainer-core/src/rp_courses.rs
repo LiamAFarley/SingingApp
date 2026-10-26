@@ -59,6 +59,8 @@ pub(crate) struct Lesson {
     pub(crate) kind: Option<&'static str>,
     /// Another question count than the workshop's.
     pub(crate) count: Option<u32>,
+    /// Block fields beside the params, e.g. `grading` or `self_judge`.
+    pub(crate) block: Value,
 }
 
 pub(crate) fn lesson(
@@ -73,6 +75,7 @@ pub(crate) fn lesson(
         test: false,
         kind: None,
         count: None,
+        block: json!({}),
     }
 }
 
@@ -81,6 +84,11 @@ impl Lesson {
     pub(crate) fn of(mut self, kind: &'static str, count: u32) -> Lesson {
         self.kind = Some(kind);
         self.count = Some(count);
+        self
+    }
+
+    pub(crate) fn with(mut self, block: Value) -> Lesson {
+        self.block = merge(self.block, block);
         self
     }
 }
@@ -134,6 +142,7 @@ pub(crate) fn workshop(
             if l.test {
                 b["instructions"] = json!("A test: no results until the end.");
             }
+            b = merge(b, l.block);
             // Detection streams (N-back) are scored as d′, not as answers right.
             let pass = if kind == "n_back"
                 && l.params.get("mode").and_then(|m| m.as_str()) != Some("sing")

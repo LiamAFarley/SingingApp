@@ -19,6 +19,8 @@ pub const RP_SINGBACK: &str = "rp_singback";
 pub const RP_INNER: &str = "rp_inner";
 pub const RP_HARMONY: &str = "rp_harmony";
 pub const RP_ERRORS: &str = "rp_errors";
+pub const RP_WALK: &str = "rp_walk";
+pub const RP_MATCH: &str = "rp_match";
 
 pub fn workshops() -> Vec<Course> {
     vec![
@@ -29,6 +31,8 @@ pub fn workshops() -> Vec<Course> {
         inner_course(),
         harmony_course(),
         errors_course(),
+        walk_course(),
+        match_course(),
     ]
 }
 
@@ -596,6 +600,222 @@ fn inner_course() -> Course {
                         g(4, 7, json!([]), false, "4/4"),
                         json!({ "mode": "flash", "flash_s": 20 }),
                     ),
+                ],
+            ),
+        ],
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Silent pitch walk
+// ---------------------------------------------------------------------------------------------
+
+fn walk_course() -> Course {
+    let w = |t: &str, s: &str, p: Value| lesson(t, s, p);
+    workshop(
+        RP_WALK,
+        "pitch_walk",
+        16,
+        "Silent pitch walk",
+        "Pitch walk",
+        "The Pitch Imagery Arrow Task: the key and a starting note sound, arrows move the note up or down the scale, the first ones with their notes and the rest in silence, then a probe: is it where you landed? Nothing is sung, so it trains and measures hearing pitches in your head apart from the voice. The walks grow longer, then take thirds, lose the heard steps and change key.",
+        vec![
+            module(
+                "Steps of the scale",
+                vec![
+                    w(
+                        "Two silent steps",
+                        "Two steps heard, two in your head.",
+                        merge(one_key(), json!({ "steps": [2] })),
+                    ),
+                    w(
+                        "Three silent steps",
+                        "Three in your head.",
+                        merge(one_key(), json!({ "steps": [3] })),
+                    ),
+                    w(
+                        "Four silent steps",
+                        "Four in your head.",
+                        merge(one_key(), json!({ "steps": [4] })),
+                    ),
+                    w(
+                        "Five or six",
+                        "Five or six in your head.",
+                        merge(one_key(), json!({ "steps": [5, 6] })),
+                    ),
+                    w(
+                        "Up to eight",
+                        "Six to eight in your head.",
+                        merge(one_key(), json!({ "steps": [6, 7, 8] })),
+                    ),
+                ],
+            ),
+            module(
+                "Harder walks",
+                vec![
+                    w(
+                        "Thirds too",
+                        "Arrows marked 2 move a third.",
+                        merge(one_key(), json!({ "steps": [3, 4], "jumps": [1, 2] })),
+                    ),
+                    w(
+                        "Nothing heard",
+                        "Only the starting note sounds.",
+                        merge(one_key(), json!({ "steps": [3, 4], "heard": 0 })),
+                    ),
+                    w(
+                        "A semitone off",
+                        "A wrong probe is only a semitone away.",
+                        merge(
+                            one_key(),
+                            json!({ "steps": [3, 4], "probe_change": "chromatic" }),
+                        ),
+                    ),
+                    w(
+                        "Minor",
+                        "In minor keys.",
+                        merge(one_key(), json!({ "steps": [3, 4], "modes": ["minor"] })),
+                    ),
+                    w(
+                        "A new key each time",
+                        "Thirds and fourths, nothing heard, a new key every walk.",
+                        merge(
+                            new_keys(),
+                            json!({ "steps": [4, 5, 6], "heard": 0, "jumps": [1, 2, 3], "probe_change": "any" }),
+                        ),
+                    ),
+                ],
+            ),
+        ],
+    )
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pitch matching: the first attempt, holding a note, judging it, long notes
+// ---------------------------------------------------------------------------------------------
+
+/// Timbres with strong overtones, where the octave or the fifth is easy to mistake.
+const BRIGHT_TIMBRES: [&str; 3] = ["synth:saw", "synth:square", "gm:68"];
+
+fn match_course() -> Course {
+    let first = json!({ "grading": { "grade_on": "attack" } });
+    let m = |t: &str, s: &str, p: Value| lesson(t, s, p);
+    let held = |t: &str, s: &str, delay: u32, tones: u32| {
+        lesson(
+            t,
+            s,
+            json!({ "delay_ms": delay, "distractor_tones": tones, "timbres": ["gm:0"] }),
+        )
+    };
+    let hold = |t: &str, s: &str, ms: u32, drone: bool| {
+        lesson(t, s, json!({ "hold_ms": ms, "drone": drone })).of("sustain", 4)
+    };
+    workshop(
+        RP_MATCH,
+        "pitch_match",
+        12,
+        "Pitch matching",
+        "Match",
+        "Hear a note and sing it, measured to separate where it goes wrong: the first attempt graded on its attack (before any slide), through new and bright timbres; the note held in silence and then through other notes; calling your own note flat, in tune or sharp before the result; and long notes with and without a drone. Every note stores its attack, settled error, correction and steadiness.",
+        vec![
+            module(
+                "First attempt",
+                vec![
+                    m(
+                        "Piano",
+                        "Graded on the attack: land on it, don't slide to it.",
+                        json!({ "timbres": ["gm:0"] }),
+                    )
+                    .with(first.clone()),
+                    m(
+                        "Strings and flute",
+                        "Softer attacks.",
+                        json!({ "timbres": ["gm:48", "gm:73"] }),
+                    )
+                    .with(first.clone()),
+                    m(
+                        "Bright timbres",
+                        "Saw, square and oboe: strong overtones.",
+                        json!({ "timbres": BRIGHT_TIMBRES }),
+                    )
+                    .with(first.clone()),
+                    m("Any timbre", "A mix of instruments.", json!({})).with(first.clone()),
+                ],
+            ),
+            module(
+                "Hold the note",
+                vec![
+                    held(
+                        "2 seconds",
+                        "Hold it in your head for 2 s, then sing.",
+                        2000,
+                        0,
+                    ),
+                    held("5 seconds", "Five seconds.", 5000, 0),
+                    held("10 seconds", "Ten seconds.", 10_000, 0),
+                    held("20 seconds", "Twenty seconds.", 20_000, 0),
+                ],
+            ),
+            module(
+                "Through other notes",
+                vec![
+                    held(
+                        "Two notes",
+                        "Two other notes in 4 s; then sing the first.",
+                        4000,
+                        2,
+                    ),
+                    held("Four notes", "Four other notes in 5 s.", 5000, 4),
+                    held("Six notes", "Six other notes in 6 s.", 6000, 6),
+                    held("Eight notes", "Eight other notes in 10 s.", 10_000, 8),
+                ],
+            ),
+            module(
+                "Judge it first",
+                vec![
+                    m(
+                        "Flat, in tune or sharp",
+                        "After singing, call it before the result.",
+                        json!({ "timbres": ["gm:0"] }),
+                    )
+                    .with(json!({ "self_judge": true })),
+                    m(
+                        "On the attack",
+                        "Call the start of the note, which is what is graded.",
+                        json!({ "timbres": ["gm:0"] }),
+                    )
+                    .with(merge(first.clone(), json!({ "self_judge": true }))),
+                    m(
+                        "After 5 seconds",
+                        "Held in silence first.",
+                        json!({ "timbres": ["gm:0"], "delay_ms": 5000 }),
+                    )
+                    .with(json!({ "self_judge": true })),
+                    m(
+                        "Bright timbres",
+                        "Saw, square and oboe.",
+                        json!({ "timbres": BRIGHT_TIMBRES }),
+                    )
+                    .with(json!({ "self_judge": true })),
+                ],
+            ),
+            module(
+                "Long notes",
+                vec![
+                    hold(
+                        "5 s over a drone",
+                        "The note keeps sounding under you.",
+                        5000,
+                        true,
+                    ),
+                    hold(
+                        "5 s alone",
+                        "The note sounds first, then you hold it alone.",
+                        5000,
+                        false,
+                    ),
+                    hold("10 s over a drone", "Ten seconds.", 10_000, true),
+                    hold("10 s alone", "Ten seconds alone.", 10_000, false),
                 ],
             ),
         ],

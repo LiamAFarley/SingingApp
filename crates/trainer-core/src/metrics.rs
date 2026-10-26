@@ -310,6 +310,12 @@ pub struct NoteMetrics {
     /// Median pitch of the whole note.
     pub sung_midi: f32,
     pub initial_cents: f32,
+    /// The first reliable pitch: median error 40–140 ms after voicing starts, past the onset
+    /// transient and before most corrections.
+    pub attack_cents: f32,
+    /// How far the note moved toward the target after the attack, |attack| − |centre|;
+    /// negative when it moved away.
+    pub correction_cents: f32,
     /// Error of the note centre over the settled part (vibrato excluded).
     pub centre_cents: f32,
     pub settled: bool,
@@ -376,6 +382,17 @@ pub fn note_metrics(
 
     let initial_frames = ((0.08 / hop_s).round() as usize).clamp(2, cents.len());
     let initial_cents = median(&mut cents[..initial_frames].to_vec());
+    let mut attack: Vec<f32> = times
+        .iter()
+        .zip(&cents)
+        .filter(|(t, _)| (0.04..0.14).contains(&(**t - onset_s)))
+        .map(|(_, c)| *c)
+        .collect();
+    let attack_cents = if attack.len() >= 2 {
+        median(&mut attack)
+    } else {
+        initial_cents
+    };
 
     let hold_frames = ((opts.hold_ms / 1000.0 / hop_s).round() as usize).max(1);
     let hold_frames = hold_frames
@@ -422,6 +439,8 @@ pub fn note_metrics(
         target_midi,
         sung_midi: median(&mut all),
         initial_cents,
+        attack_cents,
+        correction_cents: attack_cents.abs() - centre_cents.abs(),
         centre_cents,
         settled: settle_idx.is_some(),
         settling_ms: settle_idx.map(|i| (times[i] - onset_s) * 1000.0),
@@ -566,6 +585,26 @@ mod tests {
         let settle = m.settling_ms.expect("should settle");
         assert!((60.0..=220.0).contains(&settle), "{settle}");
         assert!(m.centre_cents.abs() < 3.0, "{m:?}");
+    }
+
+    #[test]
+    fn attack_and_correction() {
+        // Starts 60 cents flat for 250 ms, then slides onto the target over 250 ms.
+        let m = single_note(
+            harmonic_tone(SR, 1.5, 440.0, |t| {
+                if t < 0.25 {
+                    59.4
+                } else if t < 0.5 {
+                    59.4 + 0.6 * (t - 0.25) / 0.25
+                } else {
+                    60.0
+                }
+            }),
+            60.0,
+        );
+        assert!((m.attack_cents - -60.0).abs() < 8.0, "{m:?}");
+        assert!(m.centre_cents.abs() < 5.0, "{m:?}");
+        assert!((m.correction_cents - 60.0).abs() < 10.0, "{m:?}");
     }
 
     #[test]

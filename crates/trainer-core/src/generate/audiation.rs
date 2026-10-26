@@ -1432,6 +1432,149 @@ pub(super) fn gen_pattern_memory(
 }
 
 // ---------------------------------------------------------------------------------------------
+// Silent pitch walk (Pitch Imagery Arrow Task)
+// ---------------------------------------------------------------------------------------------
+
+/// Lowest and highest scale index a walk may reach: sol below to fa above the upper do.
+const WALK_LOW: i32 = -3;
+const WALK_HIGH: i32 = 10;
+
+pub(super) fn gen_pitch_walk(
+    p: &PitchWalkParams,
+    n: usize,
+    rng: &mut Rng,
+) -> Result<Vec<TrialSpec>, GenError> {
+    if p.steps.is_empty() || p.steps.iter().any(|s| !(1..=8).contains(s)) {
+        return err("steps must be 1–8");
+    }
+    if p.heard > 6 {
+        return err("heard must be 0–6");
+    }
+    if p.jumps.is_empty() || p.jumps.iter().any(|j| !(1..=3).contains(j)) {
+        return err("jumps must be 1–3");
+    }
+    let keys = keys_for(&p.keys, &p.modes, p.key_change, n, rng)?;
+    let beat = 60_000.0 / p.tempo_bpm.clamp(40.0, 160.0) as f64;
+    let mut answers = BalancedBag::allowing_repeats(vec![true, false]);
+    let mut out = Vec::with_capacity(n);
+    for (tonic, mode) in keys {
+        let steps = mode_steps(mode);
+        let semis = |d: i32| index_semis(&steps, d);
+        let name = |s: i32| note_in_key(p.labels, tonic, mode, s);
+        let silent = *rng.choose(&p.steps).unwrap() as usize;
+        let total = p.heard as usize + silent;
+        // Start on do, mi or sol and walk within the bounds.
+        let start: i32 = *rng.choose(&[0, 2, 4, 7]).unwrap();
+        let mut path = vec![start];
+        let mut arrows = Vec::with_capacity(total);
+        for _ in 0..total {
+            let cur = *path.last().unwrap();
+            let size = *rng.choose(&p.jumps).unwrap() as i32;
+            let up = if cur + size > WALK_HIGH {
+                false
+            } else if cur - size < WALK_LOW {
+                true
+            } else {
+                rng.chance(0.5)
+            };
+            let step = if up { size } else { -size };
+            arrows.push(step);
+            path.push(cur + step);
+        }
+        let end = *path.last().unwrap();
+        let t = place_tonic(
+            tonic,
+            semis(WALK_LOW),
+            semis(WALK_HIGH),
+            NoteRange::new(50, 84),
+        );
+        let timbre = pick_timbre(&p.timbres, rng)?;
+        let yes = answers.draw(rng).unwrap();
+        let mut events: Vec<SoundEvent> = tonic_chord(t, third_of(mode), 0.0, 1.0)
+            .iter()
+            .map(|c| ev(c.midi, 0.0, beat, &timbre, -10.0))
+            .collect();
+        let at = |k: usize| beat * (1.6 + k as f64);
+        let mut walk = vec![WalkCue {
+            at_ms: at(0),
+            step: 0,
+            heard: true,
+        }];
+        events.push(ev(t + semis(start), at(0), beat * 0.9, &timbre, -6.0));
+        for (k, step) in arrows.iter().enumerate() {
+            let heard = k < p.heard as usize;
+            walk.push(WalkCue {
+                at_ms: at(k + 1),
+                step: *step,
+                heard,
+            });
+            if heard {
+                events.push(ev(
+                    t + semis(path[k + 1]),
+                    at(k + 1),
+                    beat * 0.9,
+                    &timbre,
+                    -6.0,
+                ));
+            }
+        }
+        let end_semis = semis(end);
+        let probe_semis = if yes {
+            end_semis
+        } else {
+            let chromatic = match p.probe_change {
+                ChangeSize::Step => false,
+                ChangeSize::Chromatic => true,
+                ChangeSize::Any => rng.chance(0.5),
+            };
+            let outside: Vec<i32> = [end_semis - 1, end_semis + 1]
+                .into_iter()
+                .filter(|s| !steps.contains(&s.rem_euclid(12)))
+                .collect();
+            if chromatic && !outside.is_empty() {
+                *rng.choose(&outside).unwrap()
+            } else {
+                let d = if end <= WALK_LOW || (end < WALK_HIGH && rng.chance(0.5)) {
+                    end + 1
+                } else {
+                    end - 1
+                };
+                semis(d)
+            }
+        };
+        let probe_at = at(total + 1) + beat * 0.5;
+        events.push(ev(t + probe_semis, probe_at, beat * 1.2, &timbre, -6.0));
+        let explain = if yes {
+            format!("The walk ended on {}.", name(end_semis))
+        } else {
+            format!(
+                "The walk ended on {}; the probe was {}.",
+                name(end_semis),
+                name(probe_semis)
+            )
+        };
+        out.push(TrialSpec::Identify(IdentifyTrial {
+            exercise: ExerciseKind::PitchWalk,
+            prompt: "Follow the arrows in your head. Is the last note where you landed?".into(),
+            events,
+            choices: vec![Choice::new("yes", "Yes, it is"), Choice::new("no", "No")],
+            correct: if yes { "yes" } else { "no" }.into(),
+            answer_after_ms: Some(probe_at),
+            after_answer: Some(vec![ev(t + end_semis, 0.0, beat * 1.2, &timbre, -6.0)]),
+            explain: Some(explain),
+            walk,
+            no_replay: true,
+            stimulus: json!({
+                "key": tonic.name(), "mode": mode, "start": start, "arrows": arrows,
+                "heard_steps": p.heard, "silent_steps": silent, "end": end, "match": yes,
+            }),
+            ..IdentifyTrial::skeleton()
+        }));
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------------------------
 // Single-pass error detection
 // ---------------------------------------------------------------------------------------------
 
@@ -2240,5 +2383,45 @@ mod tests {
                 .collect();
             assert_eq!(answers.len(), 2, "{task}");
         }
+    }
+
+    #[test]
+    fn pitch_walk_probes_the_end_of_the_walk() {
+        let ctx = GenContext::default();
+        let b = block(json!({
+            "type": "pitch_walk", "count": 40,
+            "params": { "steps": [3, 5], "heard": 2, "jumps": [1, 2], "keys": ["C"] }
+        }));
+        let trials = generate_block(&b, 7, &ctx).unwrap();
+        let mut matches = 0;
+        for t in &trials {
+            let TrialSpec::Identify(t) = t else { panic!() };
+            let silent = t.stimulus["silent_steps"].as_u64().unwrap() as usize;
+            assert!([3, 5].contains(&silent));
+            // The start, then one cue per arrow; only the first two arrows sound.
+            assert_eq!(t.walk.len(), 1 + 2 + silent);
+            assert_eq!(t.walk.iter().filter(|c| !c.heard).count(), silent);
+            let mut d: i32 = t.stimulus["start"].as_i64().unwrap() as i32;
+            for c in &t.walk[1..] {
+                assert!((1..=2).contains(&c.step.abs()));
+                d += c.step;
+                assert!((WALK_LOW..=WALK_HIGH).contains(&d));
+            }
+            assert_eq!(d as i64, t.stimulus["end"].as_i64().unwrap());
+            // Tonic chord (3), the start, the heard arrows, the probe.
+            assert_eq!(t.events.len(), 3 + 1 + 2 + 1);
+            let probe = t.events.last().unwrap();
+            assert_eq!(t.answer_after_ms, Some(probe.start_ms));
+            assert!(t.walk.last().unwrap().at_ms < probe.start_ms);
+            let tonic = t.events[0].midi + 12;
+            let end = tonic + index_semis(&mode_steps(KeyMode::Major), d);
+            let yes = t.correct == "yes";
+            assert_eq!(probe.midi == end, yes, "{:?}", t.stimulus);
+            assert_eq!(t.after_answer.as_ref().unwrap()[0].midi, end);
+            matches += yes as u32;
+        }
+        assert!((15..=25).contains(&matches), "{matches}");
+        let bad = block(json!({ "type": "pitch_walk", "params": { "steps": [9] } }));
+        assert!(generate_block(&bad, 1, &ctx).is_err());
     }
 }
