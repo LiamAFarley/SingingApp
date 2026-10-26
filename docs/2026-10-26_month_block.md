@@ -36,23 +36,23 @@ Nothing is read from a single session. Weekly, at most:
 | Classes with any signal | `get_ap_dashboard` | how many notes are above chance at all |
 | The quality question | your own answer | for C, E, A♭: did the note arrive as a quality today, yes or no |
 
-The quality question is the one thing the app cannot record and the thing Burge's method is actually about. One line a day is enough.
+Each day, tell me whether any of the notes you worked on had a distinct quality (a colour, a texture, a character). If none did, say that.
 
 ## 5. What counts as progress at roughly 30 days
 
 Set in advance so the result cannot be reinterpreted afterwards.
 
-**Memory-driven performance** means: the answer arrives by retrieval rather than computation. Concretely — median correct RT under about 1 s, no collapse when feedback is removed, and accuracy that holds across octaves and instruments rather than only in one register.
+**Memory-driven performance** is fast recognition of the pitch class itself. Speed alone does not distinguish it from the alternative: a fast answer can come from memorising what one note sounds like in one octave on one instrument, which is timbre and register rather than pitch class. The measures are median correct RT under about 1 s, the same accuracy at other octaves and other instruments, and no drop when feedback is removed.
 
 **The primary test** is the benchmark, one or two runs in the block. The baseline is 15.0% (95% range 8.1–26.1%) against an 8.3% floor. Per `docs/AP_TESTING.md` §5, a change is only real if `change_from_previous.beyond_noise` says so — roughly 16 points at these trial counts, so around 31% or better.
 
 **Leading indicators**, which should move first: in-time %, median correct RT, MAD, and the number of classes showing any above-chance signal.
 
-**The honest caveat about dose.** At 25 minutes a day, 30 days is about 12 hours. Wong's completers averaged 21.4 hours and Van Hedger's 32. So the block is roughly half a dose by the literature's own accounting, and a null benchmark result at day 30 would mean *under-dosed*, not *impossible*. That is why the leading indicators decide the next step and the benchmark only confirms it.
+**Dose.** At 25 minutes a day, 30 days is about 12 hours. Wong's completers averaged 21.4 hours and Van Hedger's 32. So the block is roughly half a dose by the literature's own accounting, and a null benchmark result at day 30 would mean *under-dosed*, not *impossible*. So the leading indicators decide the next step, and the benchmark confirms it.
 
 ## 6. The stop rule
 
-If at the end of the block the colour check is still at chance (≈33% for three colours), the benchmark is unchanged, and RT is flat, then the channel is not working — change the channel, not the minutes. Candidates, in the order the literature supports them: chord colours as the primary binding route, then an over-exposed anchor, then a label vocabulary change.
+If at the end of the block the colour check is still at chance (≈33% for three colours), the benchmark is unchanged, and RT is flat, then change what is trained rather than how long: chord colours as the primary route first, then an over-exposed anchor note, then a different label set.
 
 Conversely, if the leading indicators moved but the benchmark did not, the learning is bound to the colour labels. That is the transfer question the benchmark exists to answer, and it points at adding letter alignment rather than abandoning the colour work.
 
