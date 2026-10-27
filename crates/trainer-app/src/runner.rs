@@ -1648,7 +1648,11 @@ impl<'a> SessionRun<'a> {
             correct: shown.correct,
             summary: shown.summary.clone(),
             correct_choice: match trial {
-                TrialSpec::Identify(t) if show => Some(t.correct.clone()),
+                // An answer that counts as right (1 for 8) is marked as the right one.
+                TrialSpec::Identify(t) if show => match (outcome.correct, &shown.answered) {
+                    (Some(true), Some(a)) => Some(a.clone()),
+                    _ => Some(t.correct.clone()),
+                },
                 _ => None,
             },
             answered: shown.answered.clone(),

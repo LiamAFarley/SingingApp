@@ -403,6 +403,11 @@ fn memory_course() -> Course {
                         "Three back.",
                         json!({ "n": 3, "length": 30 }),
                     ),
+                    nb(
+                        "3-back on the whole scale",
+                        "Three back, every degree and the upper do.",
+                        json!({ "n": 3, "length": 30, "degrees": ["1", "2", "3", "4", "5", "6", "7", "8"] }),
+                    ),
                 ],
             ),
             module(

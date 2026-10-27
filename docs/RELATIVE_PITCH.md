@@ -115,7 +115,7 @@ The Practice page no longer lists ear-training presets; it points here.
 | --- | --- | --- |
 | `rp_home` Find home | `resting_tone` | Major and minor (sing, then name) → the modes (Dorian, Mixolydian, Lydian, Phrygian, all eight) |
 | `rp_patterns` Tonal patterns | `tonal_pattern`, `pattern_dialogue` | Tonic and dominant in major → in minor → with the subdominant → longer patterns → tendency tones → dialogue |
-| `rp_memory` Working memory | `pattern_memory`, `n_back`, `melodic_updating` | Same or different → was it in the melody → N-back match (1, 2, 3 back; d′ 2 passes) → N-back canon → melodic updating |
+| `rp_memory` Working memory | `pattern_memory`, `n_back`, `melodic_updating` | Same or different → was it in the melody → N-back match (1, 2, 3 back, 2 and 3 back also on the whole scale; d′ 2 passes) → N-back canon → melodic updating |
 | `rp_inner` Inner hearing | `sight_sing` | Silent bars → strong and weak beats → flash scores |
 | `rp_singback` Melody singback | `sight_sing` `singback` | The melody ladder (do and re first, a degree more each lesson, then rhythm, keys, minor) |
 | `rp_harmony` Cadences and bass lines | `cadence_id`, `bass_line` | Cadences → bass lines → guide tones |
@@ -167,6 +167,7 @@ Any of these can go into a custom level, a session (`queue_session`) or a saved 
   - `degrees`: numbered against the major scale, with `b` and `#`. `8` is the tonic above, and
     can be asked without `1`.
   - `upper_tonic: false` leaves 8 out when 1 is in.
+  - 1 and 8 answer each other: any tonic counts as right under either, whatever its octave.
   - `keys`, `modes`, `key_change`: a fixed tonic, one random key for the session (`keys: "all"`,
     `per_block`) or a new key every question (`per_trial`).
   - `octaves`: `[0]` one octave, `[-1, 0, 1]` many.

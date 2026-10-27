@@ -98,7 +98,7 @@ pub fn grade_choice(
     answer: Option<&str>,
     rt_ms: Option<f64>,
 ) -> TrialOutcome {
-    let correct = answer == Some(trial.correct.as_str());
+    let correct = answer.is_some_and(|a| a == trial.correct || same_degree(trial, a));
     let label_of = |id: &str| {
         trial
             .choices
@@ -144,7 +144,7 @@ pub fn grade_choice(
     }
     let mut summary = match answer {
         None => format!("No answer. It was {}.", label_of(&trial.correct)),
-        Some(_) if correct => format!("Correct: {}.", label_of(&trial.correct)),
+        Some(a) if correct => format!("Correct: {}.", label_of(a)),
         Some(a) => format!(
             "You answered {}. It was {}.",
             label_of(a),
@@ -162,6 +162,13 @@ pub fn grade_choice(
         metrics,
         summary,
     }
+}
+
+/// Scale degrees: the tonic is one degree whatever its octave, so 1 and 8 answer each other.
+/// Over several octaves there is no telling which tonic a lone note is.
+fn same_degree(trial: &IdentifyTrial, answer: &str) -> bool {
+    let tonic = |id: &str| id == "1" || id == "8";
+    trial.exercise == ExerciseKind::ScaleDegreeId && tonic(answer) && tonic(&trial.correct)
 }
 
 /// What the feedback screen shows. Errorless mode keeps the stored result and hides the error.
@@ -1433,6 +1440,35 @@ mod tests {
         assert_eq!(points("C", None), (None, None));
         // "Other" on a tone from inside the set has no class error.
         assert_eq!(points("C", Some("other")), (None, None));
+    }
+
+    #[test]
+    fn scale_degree_tonic_answers_as_1_or_8() {
+        let t = IdentifyTrial {
+            exercise: ExerciseKind::ScaleDegreeId,
+            choices: vec![
+                Choice::new("1", "do"),
+                Choice::new("5", "sol"),
+                Choice::new("8", "do"),
+            ],
+            correct: "8".into(),
+            ..IdentifyTrial::skeleton()
+        };
+        let low = grade_choice(&t, Some("1"), Some(600.0));
+        assert_eq!(low.correct, Some(true));
+        assert_eq!(grade_choice(&t, Some("8"), None).correct, Some(true));
+        assert_eq!(grade_choice(&t, Some("5"), None).correct, Some(false));
+        let lower = IdentifyTrial {
+            correct: "1".into(),
+            ..t.clone()
+        };
+        assert_eq!(grade_choice(&lower, Some("8"), None).correct, Some(true));
+        // Other exercises keep exact answers.
+        let other = IdentifyTrial {
+            exercise: ExerciseKind::IntervalId,
+            ..t
+        };
+        assert_eq!(grade_choice(&other, Some("1"), None).correct, Some(false));
     }
 
     #[test]
