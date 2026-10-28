@@ -15,7 +15,6 @@ pub const RP_CORE: &str = "rp_core";
 pub const RP_HOME: &str = "rp_home";
 pub const RP_PATTERNS: &str = "rp_patterns";
 pub const RP_MEMORY: &str = "rp_memory";
-pub const RP_SINGBACK: &str = "rp_singback";
 pub const RP_INNER: &str = "rp_inner";
 pub const RP_HARMONY: &str = "rp_harmony";
 pub const RP_ERRORS: &str = "rp_errors";
@@ -27,7 +26,6 @@ pub fn workshops() -> Vec<Course> {
         home_course(),
         patterns_course(),
         memory_course(),
-        singback_course(),
         inner_course(),
         harmony_course(),
         errors_course(),
@@ -476,29 +474,6 @@ fn memory_course() -> Course {
                 ],
             ),
         ],
-    )
-}
-
-// ---------------------------------------------------------------------------------------------
-// Melody singback
-// ---------------------------------------------------------------------------------------------
-
-fn singback_course() -> Course {
-    let mut modules = crate::rp_courses::melody_modules(&[1, 2]);
-    for m in &mut modules {
-        for l in &mut m.lessons {
-            l.params["mode"] = json!("singback");
-            l.params["start"] = json!("key_only");
-        }
-    }
-    workshop(
-        RP_SINGBACK,
-        "sight_sing",
-        4,
-        "Melody singback",
-        "Singback",
-        "Hear a melody after its key, then sing it back with the score hidden, graded on pitch and timing. Do and re first, a degree more each lesson, then rhythm, other keys and minor.",
-        modules,
     )
 }
 

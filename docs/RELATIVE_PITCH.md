@@ -1,5 +1,7 @@
 # Relative pitch: the core and the workshops
 
+Feature and to-do tracker: `../../FEATURE_TRACKER.md`.
+
 **For:** the coach agent and the user.
 **Basis:** the research report `documents/Relative Pitch App Exercises.pdf`
 (Gordon's Music Learning Theory, Kodály's inner hearing, Karpinski's dictation phases, the
@@ -117,7 +119,7 @@ The Practice page no longer lists ear-training presets; it points here.
 | `rp_patterns` Tonal patterns | `tonal_pattern`, `pattern_dialogue` | Tonic and dominant in major → in minor → with the subdominant → longer patterns → tendency tones → dialogue |
 | `rp_memory` Working memory | `pattern_memory`, `n_back`, `melodic_updating` | Same or different → was it in the melody → N-back match (1, 2, 3 back, 2 and 3 back also on the whole scale; d′ 2 passes) → N-back canon → melodic updating |
 | `rp_inner` Inner hearing | `sight_sing` | Silent bars → strong and weak beats → flash scores |
-| `rp_singback` Melody singback | `sight_sing` `singback` | The melody ladder (do and re first, a degree more each lesson, then rhythm, keys, minor) |
+| `rp_singback_v2` Melody singback | `sight_sing` `singback` | The shared 26-step ladder: two bars of do–sol, then the full scale; rhythm and leaps grow before keys, eight trials a lesson and a 7/8 pass. |
 | `rp_harmony` Cadences and bass lines | `cadence_id`, `bass_line` | Cadences → bass lines → guide tones |
 | `rp_errors` Error detection | `error_detection`, `syllable_check` | Score against sound → mislabeled syllables |
 | `rp_walk` Silent pitch walk | `pitch_walk` | Steps of the scale (2 → 8 silent steps) → harder walks (thirds, nothing heard, semitone probes, minor, a new key each walk) |
@@ -130,8 +132,9 @@ The Practice page no longer lists ear-training presets; it points here.
 | `rp_chords` Chord identification | `chord_id` | 22 modules: triads in contrasting pairs, all triads, sevenths by the tone added to each triad, then the families. Each set has four lessons: arpeggio up, down, block, all three. |
 | `rp_inversions` Chord inversions | `chord_id`, `answer_inversion` | 18 modules: each triad, triads with altered fifths, then sevenths in pairs and families, four drills each. The augmented triad and the diminished seventh have no inversions to name. Sus2 is left out because its inversions are sus4 chords on another root. |
 | `rp_scales` Scale identification | `scale_id` | Modes (by how they begin, then all), the melodic minor family, the harmonic minor family, the pentatonics, then descending. |
-| `rp_dictation` Melodic dictation | `melodic_dictation` | Notes only: 3–4, 5–6, then 7–8 notes in C major, on do and re first and one degree more each lesson. Then rhythm: C major in 4/4 and 3/4, with and without 8th notes, then other major keys, then A minor, then all minor keys. Each rhythm module runs 1-bar then 2-bar melodies through the same degree ramp. |
-| `rp_sight` Melodic sight singing | `sight_sing` | The same ladder, with 1, 2 and 4-bar melodies. |
+| `rp_dictation_v2` Melodic dictation | `melodic_dictation` | The same 26-step ladder as sight singing, heard and written instead of read: eight trials, key and first note given, 7/8 to pass. |
+| `rp_sight_v2` Melodic sight singing | `sight_sing` | The shared 26-step ladder: do–sol in two bars, then the full scale; eighth, dotted and sixteenth rhythms and wider leaps before the keys widen to all major spellings, then minor and mixed review. |
+| `melodia` Melodia | `sight_sing`, library | The Cole–Lewis course in its own module and lesson order, 381 lessons and 1,646 lines. Two-part series are one part per trial. Separate from the generated ladder. |
 
 ### Not built yet
 

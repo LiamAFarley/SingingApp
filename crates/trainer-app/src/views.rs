@@ -153,6 +153,11 @@ pub struct TrialView {
     /// Staff notation for sight singing (drawn instead of the pitch lane), or the editor's
     /// starting score for dictation.
     pub score: Option<Score>,
+    /// Fixed-do name per `score.notes` entry (None for rests), in the app's chromatic fixed-do
+    /// style. Used by the optional sight-singing label aid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub solfege: Option<Vec<Option<String>>>,
     /// Dictation: hearings so far and the limit (0 for none).
     pub plays: u32,
     pub max_plays: u32,
@@ -454,10 +459,16 @@ pub enum StartRequest {
         #[ts(optional)]
         category: Option<String>,
     },
-    /// One level of a course.
+    /// One level of a course. `minutes` and `checks` default to the course's daily plan entry.
     CourseLevel {
         course: String,
         level: u32,
+        #[serde(default)]
+        #[ts(optional)]
+        minutes: Option<f32>,
+        #[serde(default)]
+        #[ts(optional)]
+        checks: Option<bool>,
     },
     /// A session that was ended early, from where it stopped.
     Resume {

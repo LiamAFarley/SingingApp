@@ -15,6 +15,7 @@ import { tint } from "../colors";
 import { offerKey, useKeyOwner } from "../keyboard";
 import { live, useAnimationFrame } from "../live";
 import { beatTicks, describeKey } from "../notation/layout";
+import { pitchClassId, usePitchColors } from "../pitchColors";
 
 // VexFlow is large; load it with the first notated exercise.
 const Staff = lazy(() => import("../notation/Staff").then((m) => ({ default: m.Staff })));
@@ -177,7 +178,6 @@ export function SessionView({ runner, onClose }: { runner: RunnerState; onClose:
           )}
           {confirmEnd && (
             <>
-              <span className="small muted">End this session? Trials so far are kept, and today's set can be resumed.</span>
               <button className="btn" onClick={() => setConfirmEnd(false)}>
                 Keep going <span className="kbd">Esc</span>
               </button>
@@ -901,6 +901,34 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
   const ticksPerBeat = beatTicks(score);
   const singing = recording && t >= lane.sing_start_s && t <= lane.total_s;
   const cursorTick = singing && lane.cursor ? ((t - lane.sing_start_s) / lane.beat_s) * ticksPerBeat : null;
+  const colors = usePitchColors();
+  const [aid, setAid] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("sight.solfege") === "1" ||
+        (typeof location !== "undefined" && new URLSearchParams(location.search).get("solfege") === "1")
+      );
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("sight.solfege", aid ? "1" : "0");
+    } catch {
+      // Private mode or a locked-down webview: the aid still works for this session.
+    }
+  }, [aid]);
+  const noteLabels = aid
+    ? score.notes.map((n, i) => (n.pitch && !lane.silent.includes(i) ? trial.solfege?.[i] ?? null : null))
+    : undefined;
+  const noteLabelColors = aid
+    ? score.notes.map((n) => {
+        if (!n.pitch) return null;
+        const pc = pitchClassId(n.pitch);
+        return pc ? colors[pc] : null;
+      })
+    : undefined;
   const liveTrace =
     recording && trial.show_live_pitch
       ? live.since(start + lane.sing_start_s - 0.3).map((p) => [p.t - start, p.midi] as [number, number | null])
@@ -915,6 +943,13 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
             : `${describeKey(score)} · ${score.time} · ${Math.round(score.tempo_bpm)} bpm${trial.assisted ? " · sing-along attempt" : ""}`}
         </div>
       </div>
+      <div className="row" style={{ justifyContent: "center", gap: 10 }}>
+        <label className="check small" title="Fixed-do names under each note">
+          <input type="checkbox" checked={aid} onChange={(e) => setAid(e.target.checked)} />
+          Solf&egrave;ge names
+        </label>
+        {aid && <span className="small faint">fixed chromatic do &middot; pitch-class colours</span>}
+      </div>
       {recording && <Cue lane={lane} start={start} />}
       {recording && lane.score_until_s != null && t >= lane.score_until_s ? (
         <div className="staff-wrap memory-blank">Sing it from memory</div>
@@ -928,6 +963,8 @@ function SightStage({ runner, trial, score }: { runner: RunnerState; trial: Tria
             results={graded ? graded.notes : null}
             cursorTick={cursorTick}
             noteColors={graded ? undefined : silentColors(score, lane.silent)}
+            noteLabels={noteLabels}
+            noteLabelColors={noteLabelColors}
           />
         </Suspense>
       )}

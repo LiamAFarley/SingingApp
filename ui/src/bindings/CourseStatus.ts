@@ -33,4 +33,9 @@ due_note: string | null,
 /**
  * In the daily plan, with its minutes.
  */
-in_plan: boolean, minutes: number | null, };
+in_plan: boolean, minutes: number | null, 
+/**
+ * The current level has both a practice block and a check block, so **Check** can be
+ * turned off for a drill.
+ */
+can_drill: boolean, };

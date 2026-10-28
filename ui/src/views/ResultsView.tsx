@@ -111,6 +111,30 @@ function Report({ report, onRepeat }: { report: SessionReport; onRepeat: (id: st
           </tbody>
         </table>
       </div>
+      {report.by_timbre.length > 1 && (
+        <div className="card flush">
+          <table>
+            <thead>
+              <tr>
+                <th>Timbre</th>
+                <th>Trials</th>
+                <th>Accuracy</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[...report.by_timbre]
+                .sort((a, b) => b.accuracy - a.accuracy)
+                .map((t) => (
+                  <tr key={t.timbre}>
+                    <td>{t.timbre}</td>
+                    <td className="num">{t.trials}</td>
+                    <td className="num">{pct(t.accuracy)}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="card flush">
         <table>
           <thead>

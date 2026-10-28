@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ts_rs::TS;
 
-use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, test_runs};
+use crate::ap_tests::{CHANCE, IN_TIME_MS, TestRun, TimbreAccuracy, test_runs};
 use crate::schema::{
     AnchorSongParams, BassLineParams, CadenceIdParams, ChordColorParams, ChordIdParams,
     DictationParams, ErrorDetectionParams, ExerciseKind, HarmonyParams, IncidentalPairingParams,
@@ -82,6 +82,9 @@ pub struct SessionReport {
     pub trials: Vec<TrialBrief>,
     /// Accuracy over graded, unassisted trials.
     pub accuracy: Option<f64>,
+    /// Accuracy per stimulus timbre. A single timbre far above the rest in the random-timbre
+    /// colour course is stimulus-specific learning, not transfer.
+    pub by_timbre: Vec<TimbreAccuracy>,
     pub duration_s: Option<f64>,
 }
 
@@ -183,6 +186,21 @@ pub fn session_report(db: &Db, session_id: &str) -> Result<SessionReport> {
     }
     let unassisted: Vec<TrialRow> = trials.iter().filter(|t| !t.assisted).cloned().collect();
     let accuracy = aggregate(&unassisted, &[]).first().and_then(|s| s.accuracy);
+    let by_timbre: Vec<TimbreAccuracy> = aggregate(&unassisted, &["stimulus.timbre".to_string()])
+        .into_iter()
+        .filter_map(|r| {
+            let timbre = r
+                .group
+                .get("stimulus.timbre")
+                .and_then(Value::as_str)?
+                .to_string();
+            Some(TimbreAccuracy {
+                timbre,
+                trials: r.trials as u32,
+                accuracy: r.accuracy.unwrap_or(0.0),
+            })
+        })
+        .collect();
     let duration_s = match (&session.started_at, &session.completed_at) {
         (Some(a), Some(b)) => {
             let a = chrono::DateTime::parse_from_rfc3339(a).ok();
@@ -197,6 +215,7 @@ pub fn session_report(db: &Db, session_id: &str) -> Result<SessionReport> {
         blocks,
         trials: trials.iter().map(brief).collect(),
         accuracy,
+        by_timbre,
         duration_s,
     })
 }

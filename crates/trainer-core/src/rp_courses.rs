@@ -18,8 +18,6 @@ pub const RP_SING: &str = "rp_sing";
 pub const RP_CHORDS: &str = "rp_chords";
 pub const RP_INVERSIONS: &str = "rp_inversions";
 pub const RP_SCALES: &str = "rp_scales";
-pub const RP_DICTATION: &str = "rp_dictation";
-pub const RP_SIGHT: &str = "rp_sight";
 
 pub const CATEGORY: &str = "Relative pitch";
 
@@ -37,8 +35,10 @@ pub fn courses() -> Vec<Course> {
         chords_course(),
         inversions_course(),
         scales_course(),
-        dictation_course(),
-        sight_course(),
+        crate::melody_ladder::course(crate::melody_ladder::LadderMode::Sight),
+        crate::melody_ladder::course(crate::melody_ladder::LadderMode::Dictation),
+        crate::melody_ladder::course(crate::melody_ladder::LadderMode::Singback),
+        crate::melodia_course::course(),
     ]
     .into_iter()
     .chain(crate::audiation_courses::workshops())
@@ -1288,20 +1288,7 @@ fn scales_course() -> Course {
     )
 }
 
-// ---------------------------------------------------------------------------------------------
-// Melodies (EarMaster's ladder: degrees grow from do and re, then rhythm, keys, minor)
-// ---------------------------------------------------------------------------------------------
-
-/// "do re mi" for the first `n` degrees, in major or (do-based) minor.
-fn degree_title(n: usize, minor: bool) -> String {
-    let names = if minor {
-        ["do", "re", "me", "fa", "sol", "le", "te"]
-    } else {
-        ["do", "re", "mi", "fa", "sol", "la", "ti"]
-    };
-    names[..n].join(" ")
-}
-
+/// A generated melody block with the app's usual early defaults.
 pub(crate) fn melody(g: Value) -> Value {
     let mut g = merge(
         json!({ "max_leap": 2, "step_rate": 0.8, "start_degrees": [1, 3, 5] }),
@@ -1313,126 +1300,17 @@ pub(crate) fn melody(g: Value) -> Value {
     json!({ "melody": { "generate": g } })
 }
 
-/// The melody ladder shared by dictation and sight singing. `bar_steps` are the lengths of the
-/// rhythm modules (1 and 2 bars for dictation, 1, 2 and 4 for sight singing).
-pub(crate) fn melody_modules(bar_steps: &[u32]) -> Vec<Module> {
-    let mut modules = Vec::new();
-    // Notes only, in C major: the degrees grow by one each lesson, at two lengths.
-    for (title, lengths, from) in [
-        ("3 to 4 notes in C major", [3, 4], 2),
-        ("5 to 6 notes in C major", [5, 6], 2),
-        ("7 to 8 notes in C major", [7, 8], 3),
-    ] {
-        let mut lessons = Vec::new();
-        for notes in lengths {
-            for d in from..=7 {
-                lessons.push(lesson(
-                    format!("{notes} notes: {}", degree_title(d, false)),
-                    format!("{notes}-note melodies on {}.", degree_title(d, false)),
-                    melody(json!({ "degrees": (1..=d as u8).collect::<Vec<_>>(), "notes": notes })),
-                ));
-            }
-        }
-        modules.push(module(title, lessons));
-    }
-    let rhythm_module = |title: String, meter: &str, eighths: bool, keys: Value, minor: bool| {
-        let mut rhythms = if meter == "3/4" {
-            vec!["dotted_half", "half", "quarter"]
-        } else {
-            vec!["whole", "half", "quarter"]
-        };
-        if eighths {
-            rhythms.push("eighth");
-        }
-        let mut lessons = Vec::new();
-        for (k, bars) in bar_steps.iter().enumerate() {
-            let from = if k == 0 { 2 } else { 3 };
-            for d in from..=7 {
-                let mut g = json!({
-                    "degrees": (1..=d as u8).collect::<Vec<_>>(), "bars": bars,
-                    "meters": [meter], "rhythms": rhythms, "keys": keys,
-                });
-                if minor {
-                    g["modes"] = json!(["minor"]);
-                }
-                lessons.push(lesson(
-                    format!(
-                        "{bars} bar{}: {}",
-                        if *bars == 1 { "" } else { "s" },
-                        degree_title(d, minor)
-                    ),
-                    format!(
-                        "{bars}-bar melodies in {meter} on {}.",
-                        degree_title(d, minor)
-                    ),
-                    melody(g),
-                ));
-            }
-        }
-        module(title, lessons)
-    };
-    let meters = [("4/4", false), ("3/4", false), ("4/4", true), ("3/4", true)];
-    let with_eighths = |e: bool| if e { ", with 8th notes" } else { "" };
-    for (meter, e) in meters {
-        modules.push(rhythm_module(
-            format!("C major{}, {meter}", with_eighths(e)),
-            meter,
-            e,
-            json!(["C"]),
-            false,
-        ));
-    }
-    // Empty keys: any key with up to two sharps or flats.
-    for (meter, e) in meters {
-        modules.push(rhythm_module(
-            format!("Other major keys{}, {meter}", with_eighths(e)),
-            meter,
-            e,
-            json!([]),
-            false,
-        ));
-    }
-    for (meter, e) in meters {
-        modules.push(rhythm_module(
-            format!("A minor{}, {meter}", with_eighths(e)),
-            meter,
-            e,
-            json!(["A"]),
-            true,
-        ));
-    }
-    modules.push(rhythm_module(
-        "All minor keys, with 8th notes, 4/4".into(),
-        "4/4",
-        true,
-        json!([]),
-        true,
-    ));
-    modules
-}
-
-fn dictation_course() -> Course {
-    workshop(
-        RP_DICTATION,
-        "melodic_dictation",
-        4,
-        "Melodic dictation",
-        "Dictation",
-        "Hear a melody after its key and write it on the staff. Do and re first, a degree more each lesson; then rhythm in 4/4 and 3/4, 8th notes, other keys and minor keys.",
-        melody_modules(&[1, 2]),
-    )
-}
-
-fn sight_course() -> Course {
-    workshop(
-        RP_SIGHT,
-        "sight_sing",
-        4,
-        "Melodic sight singing",
-        "Sight singing",
-        "Sing a melody from the staff after its key. The same ladder as dictation, with 1, 2 and 4-bar melodies.",
-        melody_modules(&[1, 2, 4]),
-    )
+/// A tiny library piece for tests. The real library is the folder in the data
+/// directory.
+#[cfg(test)]
+pub(crate) fn test_library_pieces() -> Vec<crate::library::LibraryPiece> {
+    let text = r#"{"collection":"Melodia/1-01","pieces":[{
+        "id":"test-1","title":"Test","key":"C major","time":"4/4",
+        "tags":["key.C","key.F","key.G","key.Bb","key.D","key.Eb",
+                "bars.short","bars.medium","leap.step"],
+        "notes":[{"note":"C4","beats":4}]
+    }]}"#;
+    crate::library::parse_json(text).unwrap()
 }
 
 #[cfg(test)]
@@ -1444,10 +1322,19 @@ mod tests {
     use crate::storage::Db;
     use crate::validate::validate_session;
 
+    fn test_context() -> GenContext {
+        let mut ctx = GenContext::default();
+        ctx.library = test_library_pieces();
+        ctx
+    }
+
     #[test]
     fn every_lesson_generates_in_any_key() {
-        let ctx = GenContext::default();
-        for c in courses() {
+        let ctx = test_context();
+        for c in courses()
+            .into_iter()
+            .filter(|c| c.id != crate::melodia_course::MELODIA)
+        {
             for (i, l) in c.levels.iter().enumerate() {
                 for b in level_session(&c, i as u32 + 1).unwrap().blocks {
                     for seed in 0..8 {

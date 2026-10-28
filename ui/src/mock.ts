@@ -310,6 +310,7 @@ function sightTrial(phaseOffset: number): TrialView {
     attempt: 0,
     assisted: false,
     score: sightScore(),
+    solfege: ["sol", "la", "ti", "do", "ti", "la", null, "re", "ti", "di", "re", "re", "do", "la", "sol"],
     plays: 0,
     max_plays: 0,
     flash_color: null,
@@ -704,6 +705,7 @@ const report: SessionReport = {
   session: pastSessions[0],
   accuracy: 0.86,
   duration_s: 541,
+  by_timbre: [{ timbre: "gm:0", trials: 60, accuracy: 0.883 }],
   blocks: [
     { index: 0, title: "Name the note", kind: "pitch_id", trials: 60, assisted: 0, graded: 60, correct: 53, accuracy: 0.883, mean_score: 0.883, median_rt_ms: 1240, median_abs_cents: null, pass_mark: 0.9, passed: false, feedback: "after_trial", assessment: false },
     { index: 1, title: "Sing the note", kind: "sing_pitch", trials: 12, assisted: 2, graded: 12, correct: 9, accuracy: 0.75, mean_score: 0.75, median_rt_ms: 820, median_abs_cents: 23, pass_mark: null, passed: null, feedback: "after_trial", assessment: false },
@@ -1174,10 +1176,10 @@ export function mockBackend(): Backend {
 
 let apPlan: DailyPlan = {
   courses: [
-    { course: "ap_naming", minutes: 15, active: true },
-    { course: "ap_brady", minutes: 10, active: true },
-    { course: "rp_degrees", minutes: 8, active: true },
-    { course: "rp_core", minutes: 12, active: true },
+    { course: "ap_naming", minutes: 15, active: true, checks: true },
+    { course: "ap_brady", minutes: 10, active: true, checks: true },
+    { course: "rp_degrees", minutes: 8, active: true, checks: true },
+    { course: "rp_core", minutes: 12, active: true, checks: true },
   ],
   test_day: 6,
 };
@@ -1227,7 +1229,7 @@ const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; descript
   rp_errors: { title: "Error detection", exercise: "error_detection", description: "Find the note played wrong; the wrong syllable.", modules: [["Score against sound", [["One bar, 10 s", {}]]]] },
   rp_walk: { title: "Silent pitch walk", exercise: "pitch_walk", description: "Arrows move the note in your head; is the probe where you landed?", modules: [["Steps of the scale", [["Two silent steps", { steps: [2] }], ["Three silent steps", { steps: [3] }]]]] },
   rp_match: { title: "Pitch matching", exercise: "pitch_match", description: "First attempt, holding the note, judging it, long notes.", modules: [["First attempt", [["Piano", { timbres: ["gm:0"] }]]], ["Hold the note", [["2 seconds", { delay_ms: 2000 }]]]] },
-  rp_singback: { title: "Melody singback", exercise: "sight_sing", description: "Hear a melody, sing it back.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { mode: "singback" }]]]] },
+  rp_singback_v2: { title: "Melody singback", exercise: "sight_sing", description: "Hear the shared ladder, then sing it back.", modules: [["Start", [["Do to sol", { mode: "singback", start: "key_only", melody: { generate: { bars: 2, degrees: [1, 2, 3, 4, 5] } } }]]]] },
   rp_degrees: {
     title: "Scale degrees",
     exercise: "scale_degree_id",
@@ -1276,8 +1278,8 @@ const MOCK_WORKSHOPS: Record<string, { title: string; exercise: string; descript
   },
   rp_inversions: { title: "Chord inversions", exercise: "chord_id", description: "Name the chord and its inversion.", modules: [["Major", [["Ascending", { qualities: ["major"], answer_inversion: true, inversions: [0, 1, 2] }]]]] },
   rp_scales: { title: "Scale identification", exercise: "scale_id", description: "Name the scale or mode.", modules: [["Modes", [["Starting with two whole tones", { scales: ["major", "lydian", "mixolydian"] }]]]] },
-  rp_sight: { title: "Melodic sight singing", exercise: "sight_sing", description: "Sing a melody from the staff after its key.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { melody: { generate: { keys: ["C"], degrees: [1, 2], notes: 3 } } }]]]] },
-  rp_dictation: { title: "Melodic dictation", exercise: "melodic_dictation", description: "Hear a melody and write it on the staff.", modules: [["3 to 4 notes in C major", [["3 notes: do re", { melody: { generate: { keys: ["C"], degrees: [1, 2], notes: 3 } } }]]]] },
+  rp_sight_v2: { title: "Melodic sight singing", exercise: "sight_sing", description: "Read the shared 26-step ladder from the staff.", modules: [["Start", [["Do to sol", { melody: { generate: { bars: 2, degrees: [1, 2, 3, 4, 5] } } }]]], ["C major, 4 bars", [["Eighth notes", {}]]]] },
+  rp_dictation_v2: { title: "Melodic dictation", exercise: "melodic_dictation", description: "Hear the shared ladder and write it on the staff.", modules: [["Start", [["Do to sol", { melody: { generate: { bars: 2, degrees: [1, 2, 3, 4, 5] } } }]]]] },
 };
 
 let mockPrefs: Record<string, Record<string, unknown>> = { scale_degree_id: { tempo_bpm: 84 } };
@@ -1357,6 +1359,7 @@ function mockCourses(): CourseStatus[] {
       due_note: null,
       in_plan: plan(id)?.active ?? false,
       minutes: plan(id)?.minutes ?? null,
+      can_drill: !["ap_speed", "ap_brady"].includes(id),
     };
   };
   const test = (id: string, title: string, short: string, description: string, due: boolean, note: string, last: string | null): CourseStatus => ({
@@ -1379,6 +1382,7 @@ function mockCourses(): CourseStatus[] {
     due_note: note,
     in_plan: false,
     minutes: null,
+    can_drill: false,
   });
   return [
     ladder(

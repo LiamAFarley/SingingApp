@@ -136,7 +136,7 @@ hypotheses, not findings.
    - `stability_cents` that stays high over the drone is production.
    - Check `vibrato` before calling regular wavering a fault.
 4. **Turning complex song melodies into sung notes.**
-   - Measure with singback (`rp_singback`) per-note errors, `melodic_updating`, and `rp_walk`
+   - Measure with singback (`rp_singback_v2`) per-note errors, `melodic_updating`, and `rp_walk`
      span.
    - Separate contour errors from interval-size errors, and starting pitch from the rest.
    - For song material, see `song_practice_ingestion_playback_pipeline.md`.

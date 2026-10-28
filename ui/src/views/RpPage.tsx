@@ -95,9 +95,15 @@ const SECTIONS: Section[] = [
     title: "Melodies",
     accent: "#7a4fd1",
     activities: [
-      { course: "rp_singback", title: "Melody singback", desc: "Hear a melody, sing it back", glyph: "voice" },
-      { course: "rp_sight", title: "Melodic sight singing", desc: "Sing a melody from the staff", glyph: "eye" },
-      { course: "rp_dictation", title: "Melodic dictation", desc: "Write down a melody you hear", glyph: "pencil" },
+      { course: "rp_singback_v2", title: "Melody singback", desc: "Hear a melody, sing it back", glyph: "voice" },
+      { course: "rp_sight_v2", title: "Melodic sight singing", desc: "Sing a melody from the staff", glyph: "eye" },
+      {
+        course: "melodia",
+        title: "Melodia",
+        desc: "The Cole-Lewis course in its own module and lesson order: eleven exercise modules, one line at a time, with no generated or randomly filtered material",
+        glyph: "eye",
+      },
+      { course: "rp_dictation_v2", title: "Melodic dictation", desc: "Write down a melody you hear", glyph: "pencil" },
       { course: "rp_errors", title: "Error detection", desc: "Find the note played wrong, heard once; the wrong syllable", glyph: "search" },
     ],
   },

@@ -735,6 +735,55 @@ fn median_f32(mut v: Vec<f32>) -> Option<f32> {
     Some(v[v.len() / 2])
 }
 
+/// A performed segment that can stand in for an expected note whose onset was not
+/// detected separately. A sustained vowel with a repeated pitch is one segment, but
+/// the score can still contain two notes; missing the second one is a false negative.
+///
+/// This is deliberately generous about the onset, but strict about pitch: a held
+/// wrong note cannot satisfy a different target.
+fn continuation_segment(
+    expected: &Expected,
+    segs: &[NoteSegment],
+    pitch_offset: f32,
+) -> Option<usize> {
+    let min_overlap = (expected.dur * 0.30).clamp(0.08, 0.25);
+    segs.iter()
+        .enumerate()
+        .filter(|(_, s)| {
+            (s.median_midi - expected.midi - pitch_offset).abs() <= 1.0
+                && s.onset_s <= expected.onset + 0.15
+                && s.offset_s >= expected.onset + 0.10
+        })
+        .filter_map(|(j, s)| {
+            let overlap = (s.offset_s.min(expected.onset + expected.dur)
+                - s.onset_s.max(expected.onset))
+            .max(0.0);
+            (overlap >= min_overlap).then_some((j, overlap, (s.onset_s - expected.onset).abs()))
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1).then_with(|| b.2.total_cmp(&a.2)))
+        .map(|(j, _, _)| j)
+}
+
+/// The part of a performed segment that covers one expected note. Used only for a
+/// continuation, so the whole sustained segment is not reused as one note's metrics.
+fn continuation_range(
+    track: &PitchTrack,
+    seg: &NoteSegment,
+    expected: &Expected,
+) -> (usize, usize) {
+    let start = track.frames[seg.start..seg.end]
+        .iter()
+        .position(|f| f.t >= expected.onset - 0.02)
+        .map(|k| seg.start + k)
+        .unwrap_or(seg.start);
+    let end = track.frames[seg.start..seg.end]
+        .iter()
+        .rposition(|f| f.t < expected.onset + expected.dur)
+        .map(|k| seg.start + k + 1)
+        .unwrap_or(seg.end);
+    (start, end.max(start))
+}
+
 /// "an octave lower", "two octaves higher", or nothing for no move.
 fn octave_words(shift_semis: f32) -> Option<String> {
     let k = (shift_semis / 12.0).round() as i32;
@@ -993,6 +1042,7 @@ fn grade_targets(
         .collect();
 
     let single = expected.len() == 1;
+    let mut pitch_offset = 0.0f32;
     let alignment: Vec<Option<usize>> = if single {
         // Untimed single note: the longest segment that overlaps the response window.
         let e = &expected[0];
@@ -1008,21 +1058,19 @@ fn grade_targets(
             cfg.mode,
             PitchRefMode::RelativeToFirst | PitchRefMode::RelativeDriftTolerant
         );
-        let offset = if relative {
+        if relative {
             // First pass on timing alone to estimate the singer's transposition.
             let first = align(&expected, &segs, 0.0, beat_s, true);
-            median_f32(
+            pitch_offset = median_f32(
                 first
                     .iter()
                     .enumerate()
                     .filter_map(|(i, j)| j.map(|j| segs[j].median_midi - expected[i].midi))
                     .collect(),
             )
-            .unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        align(&expected, &segs, offset, beat_s, trial.timed)
+            .unwrap_or(0.0);
+        }
+        align(&expected, &segs, pitch_offset, beat_s, trial.timed)
     };
 
     // Per-note metrics against the absolute target first.
@@ -1041,6 +1089,33 @@ fn grade_targets(
                 &cfg.note_opts(),
             )
         }));
+    }
+
+    // A repeated pitch can be one continuous performed segment: the second note has
+    // no separate onset for the segmenter to find. Credit it when the same segment
+    // covers it at the target pitch, and leave onset/timing unset rather than calling
+    // it missed. False negatives here are worse than a generous continuation.
+    let mut continued = vec![false; expected.len()];
+    for i in 0..expected.len() {
+        if raw[i].is_some() {
+            continue;
+        }
+        let Some(j) = continuation_segment(&expected[i], &segs, pitch_offset) else {
+            continue;
+        };
+        let (from, to) = continuation_range(track, &segs[j], &expected[i]);
+        if to <= from {
+            continue;
+        }
+        if let Some(m) = note_metrics(
+            &track.frames[from..to],
+            track.hop_s,
+            expected[i].midi,
+            &cfg.note_opts(),
+        ) {
+            raw[i] = Some(m);
+            continued[i] = true;
+        }
     }
 
     // Reference-mode adjustment of the errors.
@@ -1087,8 +1162,12 @@ fn grade_targets(
     for (i, x) in expected.iter().enumerate() {
         let m = raw[i].as_ref();
         let err = adjusted[i];
-        let onset_err = m.map(|m| (m.onset_s - x.onset) * 1000.0);
-        let on_time = if trial.timed && !single {
+        let onset_err = if continued[i] {
+            None
+        } else {
+            m.map(|m| (m.onset_s - x.onset) * 1000.0)
+        };
+        let on_time = if trial.timed && !single && !continued[i] {
             onset_err.map(|e| e.abs() <= cfg.onset_tol_ms)
         } else {
             None
@@ -1109,10 +1188,18 @@ fn grade_targets(
                 .map(|e| e.abs() <= cfg.in_tune_tol_cents)
                 .unwrap_or(false),
             on_time,
-            onset_s: m.map(|m| m.onset_s),
+            onset_s: if continued[i] {
+                None
+            } else {
+                m.map(|m| m.onset_s)
+            },
             offset_s: m.map(|m| m.offset_s),
             silent: false,
-            attack_cents: m.map(|m| m.attack_cents),
+            attack_cents: if continued[i] {
+                None
+            } else {
+                m.map(|m| m.attack_cents)
+            },
         });
         let _ = x.dur;
     }
@@ -1668,6 +1755,51 @@ mod tests {
         assert!((e0 - 10.0).abs() < 2.0, "{e0}");
         assert_eq!(o.correct, Some(false));
         assert!((o.score.unwrap() - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_sustained_pitch_covers_repeated_targets_without_a_false_miss() {
+        // Two `mi`s in a row, sung as one continuous vowel: the segmenter has no
+        // reason to invent an onset, but both written notes are still there.
+        let targets = [(64, 0.0, 1.0), (64, 1.0, 1.0), (65, 2.0, 1.0)];
+        let trial = sung_trial(&targets, 120.0, ExerciseKind::Pattern);
+        let sung = |t: f32| if t < 1.0 { 64.0 } else { 65.0 };
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 1.5, 440.0, sung));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let cfg = GradingConfig::resolve(&GradingOverrides::default(), PitchRefMode::Absolute);
+        let o = grade_sung(&trial, &tr, &cfg, 1.0);
+        let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert_eq!(notes.len(), 3);
+        assert!(notes[0].matched && notes[0].correct, "{notes:#?}");
+        assert!(
+            notes[1].matched && notes[1].correct,
+            "sustained repeated note was marked missed: {notes:#?}"
+        );
+        assert!(notes[2].matched && notes[2].correct, "{notes:#?}");
+        assert!(notes[1].onset_s.is_none());
+        assert!(notes[1].on_time.is_none());
+        assert_eq!(o.metrics["notes_missed"], json!(0));
+    }
+
+    #[test]
+    fn a_sustained_wrong_pitch_does_not_cover_a_later_note() {
+        let targets = [(64, 0.0, 1.0), (65, 1.0, 1.0)];
+        let trial = sung_trial(&targets, 120.0, ExerciseKind::Pattern);
+        let sung = |_t: f32| 64.0;
+        let mut sig = silence(SR, 1.0);
+        sig.extend(harmonic_tone(SR, 1.0, 440.0, sung));
+        sig.extend(silence(SR, 0.5));
+        let tr = track(&sig, &TrackOptions::new(SR));
+        let cfg = GradingConfig::resolve(&GradingOverrides::default(), PitchRefMode::Absolute);
+        let o = grade_sung(&trial, &tr, &cfg, 1.0);
+        let notes: Vec<NoteResult> = serde_json::from_value(o.metrics["notes"].clone()).unwrap();
+        assert!(notes[0].matched && notes[0].correct, "{notes:#?}");
+        assert!(
+            !notes[1].matched || !notes[1].correct,
+            "a held wrong pitch must not satisfy a later target: {notes:#?}"
+        );
     }
 
     #[test]

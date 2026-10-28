@@ -101,6 +101,7 @@ pub const AP_MAINTENANCE: &str = "ap_maintenance";
 pub const AP_SPEED: &str = "ap_speed";
 pub const AP_CHORD_COLORS: &str = "ap_chord_colors";
 pub const AP_NOTE_COLORS: &str = "ap_note_colors";
+pub const AP_NOTE_COLORS_SINE: &str = "ap_note_colors_sine";
 pub const AP_CONTRAST: &str = "ap_contrast";
 pub const AP_SCREENING: &str = "ap_screening";
 pub const AP_PRODUCTION: &str = "ap_production";
@@ -602,6 +603,32 @@ pub fn level_session(course: &Course, level: u32) -> Result<SessionSpec> {
     })
 }
 
+/// A level session started from the course page or a card: fitted to the chosen minutes and,
+/// when `checks` is off, with the no-feedback check blocks removed so it is a drill.
+pub fn level_session_for_start(
+    course: &Course,
+    level: u32,
+    minutes: f32,
+    checks: bool,
+    ctx: &GenContext,
+) -> Result<SessionSpec> {
+    if !(1.0..=90.0).contains(&minutes) {
+        return Err(anyhow!("minutes must be 1–90"));
+    }
+    // Tests keep their fixed length; only ladder levels are fitted to a practice length.
+    if course.schedule != Schedule::Ladder {
+        return level_session(course, level);
+    }
+    let mut spec = level_session(course, level)?;
+    if !checks {
+        spec.blocks = practice_only(&spec.blocks);
+        spec.title = format!("{} – practice", spec.title);
+    }
+    spec.blocks = fit_level(&spec.blocks, minutes, ctx);
+    spec.planned_minutes = Some(minutes);
+    Ok(spec)
+}
+
 // ---------------------------------------------------------------------------------------------
 // Progress
 // ---------------------------------------------------------------------------------------------
@@ -982,6 +1009,10 @@ pub struct PlanCourse {
     pub course: String,
     pub minutes: f32,
     pub active: bool,
+    /// End the level with its no-feedback check. Off makes the card a drill: practice blocks
+    /// only, so nothing counts towards a level pass.
+    #[serde(default = "d_pref_true")]
+    pub checks: bool,
 }
 
 /// Which ladder courses go into the daily set and for how long, and the day tests are taken.
@@ -1000,11 +1031,13 @@ impl Default for DailyPlan {
                     course: AP_NAMING.into(),
                     minutes: 15.0,
                     active: true,
+                    checks: true,
                 },
                 PlanCourse {
                     course: AP_BRADY.into(),
                     minutes: 10.0,
                     active: true,
+                    checks: true,
                 },
             ],
             test_day: 6,
@@ -1016,10 +1049,13 @@ fn suggested_minutes(id: &str) -> f32 {
     match id {
         AP_SPEED => 4.0,
         AP_CHORD_COLORS => 3.0,
-        AP_NOTE_COLORS => 8.0,
+        AP_NOTE_COLORS | AP_NOTE_COLORS_SINE => 8.0,
         AP_CONTRAST => 6.0,
         crate::rp_courses::RP_DEGREES | crate::rp_courses::RP_INTERVALS_KEY => 8.0,
-        crate::rp_courses::RP_SING | crate::rp_courses::RP_SIGHT => 6.0,
+        crate::rp_courses::RP_SING => 6.0,
+        crate::melody_ladder::RP_SIGHT_V2
+        | crate::melody_ladder::RP_DICTATION_V2
+        | crate::melody_ladder::RP_SINGBACK_V2 => 8.0,
         crate::audiation_courses::RP_CORE => 12.0,
         id if id.starts_with("rp_") => 6.0,
         _ => 10.0,
@@ -1114,6 +1150,7 @@ pub fn daily_plan(db: &Db) -> Result<DailyPlan> {
                 course: c.id,
                 minutes,
                 active,
+                checks: true,
             });
         }
     }
@@ -1168,6 +1205,9 @@ pub struct CourseStatus {
     /// In the daily plan, with its minutes.
     pub in_plan: bool,
     pub minutes: Option<f32>,
+    /// The current level has both a practice block and a check block, so **Check** can be
+    /// turned off for a drill.
+    pub can_drill: bool,
 }
 
 fn days_since(at: Option<&str>, now: DateTime<Utc>) -> Option<f64> {
@@ -1305,6 +1345,10 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
             }
         };
         let in_plan = plan.courses.iter().find(|p| p.course == c.id);
+        let can_drill = current.is_some_and(|l| {
+            l.blocks.iter().any(is_check_block)
+                && l.blocks.iter().any(|b| !is_check_block(b) && b.count > 3)
+        });
         out.push(CourseStatus {
             id: c.id.clone(),
             title: c.title.clone(),
@@ -1331,6 +1375,7 @@ pub fn course_statuses(db: &Db, now: DateTime<Utc>) -> Result<Vec<CourseStatus>>
             due_note,
             in_plan: in_plan.map(|p| p.active).unwrap_or(false),
             minutes: in_plan.map(|p| p.minutes),
+            can_drill,
         });
     }
     Ok(out)
@@ -1368,11 +1413,29 @@ fn block_seconds(b: &BlockSpec, ctx: &GenContext) -> f64 {
         + b.pre_mask.map(|m| m.seconds() as f64).unwrap_or(0.0)
 }
 
+/// A check block (the ones pass rules count).
+fn is_check_block(b: &BlockSpec) -> bool {
+    b.course.as_ref().map(|c| c.verify).unwrap_or(false)
+}
+
+/// The practice blocks of a level, or all of them if a level has nothing but checks.
+fn practice_only(blocks: &[BlockSpec]) -> Vec<BlockSpec> {
+    let kept: Vec<BlockSpec> = blocks
+        .iter()
+        .filter(|b| !is_check_block(b))
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        blocks.to_vec()
+    } else {
+        kept
+    }
+}
+
 /// A level's blocks fitted to `minutes`: check blocks and single trials keep their size, the
 /// practice blocks are scaled.
 fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockSpec> {
-    let fixed =
-        |b: &BlockSpec| b.course.as_ref().map(|c| c.verify).unwrap_or(false) || b.count <= 3;
+    let fixed = |b: &BlockSpec| is_check_block(b) || b.count <= 3;
     let fixed_s: f64 = blocks
         .iter()
         .filter(|b| fixed(b))
@@ -1394,7 +1457,7 @@ fn fit_level(blocks: &[BlockSpec], minutes: f32, ctx: &GenContext) -> Vec<BlockS
         .map(|b| {
             let mut b = b.clone();
             if !fixed(&b) {
-                b.count = ((b.count as f64 * scale).round() as u32).clamp(6, 400);
+                b.count = ((b.count as f64 * scale).round() as u32).clamp(6, 1200);
             }
             // A stream whose check is the stream itself scales too, but keeps a usable length.
             if b.count > 3 && fixed(&b) && scalable_s == 0.0 {
@@ -1621,16 +1684,30 @@ pub fn compose_daily_set(
         .collect();
     for (c, p, s) in ladder {
         let l = &c.levels[s.level as usize - 1];
-        let reason = match &s.pass {
-            Some(ps) if !ps.summary.is_empty() => {
-                format!("Level {} of {}. {}", s.level, s.levels, ps.summary)
+        let reason = if !p.checks {
+            format!(
+                "Level {} of {}. Practice only: the check is off.",
+                s.level, s.levels
+            )
+        } else {
+            match &s.pass {
+                Some(ps) if !ps.summary.is_empty() => {
+                    format!("Level {} of {}. {}", s.level, s.levels, ps.summary)
+                }
+                _ => format!("Level {} of {}.", s.level, s.levels),
             }
-            _ => format!("Level {} of {}.", s.level, s.levels),
         };
         add(
             c,
             s.level,
-            fit_level(&l.blocks, p.minutes, ctx),
+            {
+                let blocks = if p.checks {
+                    l.blocks.clone()
+                } else {
+                    practice_only(&l.blocks)
+                };
+                fit_level(&blocks, p.minutes, ctx)
+            },
             reason,
             false,
             &mut items,
@@ -2064,8 +2141,12 @@ mod tests {
 
     #[test]
     fn every_course_level_is_a_valid_session() {
-        let ctx = GenContext::default();
-        for c in builtin_courses() {
+        let mut ctx = GenContext::default();
+        ctx.library = crate::rp_courses::test_library_pieces();
+        for c in builtin_courses()
+            .into_iter()
+            .filter(|c| c.id != crate::melodia_course::MELODIA)
+        {
             for n in 1..=c.levels.len() as u32 {
                 let spec = level_session(&c, n).unwrap();
                 let r = validate_session(&spec, &ctx);
@@ -2189,6 +2270,92 @@ mod tests {
         set_level(&db, AP_NAMING, 5).unwrap();
         assert_eq!(current_level(&db, &naming).unwrap(), 5);
         assert!(set_level(&db, AP_NAMING, 12).is_err());
+    }
+
+    #[test]
+    fn a_started_level_uses_its_minutes_and_can_skip_the_check() {
+        let c = find_course(AP_NOTE_COLORS).unwrap();
+        let ctx = GenContext::default();
+        let practice = |s: &SessionSpec| {
+            s.blocks
+                .iter()
+                .filter(|b| !is_check_block(b))
+                .map(|b| b.count)
+                .sum::<u32>()
+        };
+        let short = level_session_for_start(&c, 1, 5.0, true, &ctx).unwrap();
+        let long = level_session_for_start(&c, 1, 90.0, true, &ctx).unwrap();
+        assert!(
+            practice(&long) > practice(&short),
+            "90 min must ask more than 5 min: {} vs {}",
+            practice(&long),
+            practice(&short)
+        );
+        assert_eq!(short.planned_minutes, Some(5.0));
+        assert!(long.blocks.iter().any(is_check_block));
+
+        let drill = level_session_for_start(&c, 1, 20.0, false, &ctx).unwrap();
+        assert!(drill.blocks.iter().all(|b| !is_check_block(b)));
+        assert_eq!(drill.planned_minutes, Some(20.0));
+        assert!(drill.title.ends_with("– practice"));
+    }
+
+    #[test]
+    fn a_drill_plan_removes_checks_from_today_set() {
+        let db = Db::open_in_memory().unwrap();
+        let mut plan = daily_plan(&db).unwrap();
+        let p = plan
+            .courses
+            .iter_mut()
+            .find(|p| p.course == AP_NOTE_COLORS)
+            .unwrap();
+        p.active = true;
+        p.minutes = 5.0;
+        p.checks = false;
+        save_daily_plan(&db, &plan).unwrap();
+        let set =
+            compose_daily_set(&db, &GenContext::default(), at(26, 12, 0), ABSOLUTE_PITCH).unwrap();
+        let blocks: Vec<&BlockSpec> = set
+            .spec
+            .blocks
+            .iter()
+            .filter(|b| {
+                b.course
+                    .as_ref()
+                    .is_some_and(|c| c.course == AP_NOTE_COLORS)
+            })
+            .collect();
+        assert!(!blocks.is_empty(), "the colour course is not in the set");
+        assert!(blocks.iter().all(|b| !is_check_block(b)));
+    }
+
+    #[test]
+    fn a_fixed_test_keeps_its_length_when_started_directly() {
+        let c = find_course(AP_BENCHMARK).unwrap();
+        let ctx = GenContext::default();
+        let plain = level_session(&c, 1).unwrap();
+        let started = level_session_for_start(&c, 1, 90.0, false, &ctx).unwrap();
+        assert_eq!(started.blocks.len(), plain.blocks.len());
+        assert_eq!(
+            started.blocks.iter().map(|b| b.count).collect::<Vec<_>>(),
+            plain.blocks.iter().map(|b| b.count).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn only_courses_with_a_practice_block_offer_a_drill() {
+        let db = Db::open_in_memory().unwrap();
+        let statuses = course_statuses(&db, at(25, 12, 0)).unwrap();
+        let status = |id: &str| statuses.iter().find(|s| s.id == id).unwrap();
+        assert!(status(AP_NOTE_COLORS).can_drill);
+        assert!(
+            !status(AP_SPEED).can_drill,
+            "the speed course is one check block"
+        );
+        assert!(
+            !status(AP_BRADY).can_drill,
+            "its only practice block is one note"
+        );
     }
 
     #[test]

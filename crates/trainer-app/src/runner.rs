@@ -11,7 +11,7 @@ use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use parking_lot::RwLock;
 use serde_json::json;
 use trainer_audio::{AudioEngine, Bus, SoundBuffer};
-use trainer_core::generate::{block_seed, default_mode, generate_block};
+use trainer_core::generate::{block_seed, default_mode, fixed_do_score, generate_block};
 use trainer_core::grade::{
     GradingConfig, TrialOutcome, apply_judgement, grade_choice, grade_dictation, grade_match,
     grade_sing_pitch, grade_span, grade_sung,
@@ -643,6 +643,7 @@ impl<'a> SessionRun<'a> {
             attempt,
             assisted: false,
             score: None,
+            solfege: None,
             plays: 0,
             max_plays: 0,
             flash_color: None,
@@ -761,6 +762,7 @@ impl<'a> SessionRun<'a> {
         // A test plays each tone once, whatever its answer limit; so does a single-pass trial.
         let can_replay = deadline_ms.is_none() && !assessment && !t.no_replay;
         view.score = t.score.clone();
+        view.solfege = t.score.as_ref().map(fixed_do_score);
         if !t.walk.is_empty() {
             view.walk = Some(t.walk.clone());
             view.walk_start_s = Some(secs(engine, onset_frame));
@@ -1292,6 +1294,7 @@ impl<'a> SessionRun<'a> {
         let mut view = self.base_view(t.exercise, Interaction::Sung, &t.prompt, attempt);
         view.lane = Some(lane_for(t));
         view.score = t.score.clone();
+        view.solfege = t.score.as_ref().map(fixed_do_score);
         // On a staff the live line never gives the notes away, so it shows on every attempt
         // whose result the block shows.
         view.show_live_pitch = feedback == FeedbackMode::Continuous

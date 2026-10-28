@@ -38,6 +38,11 @@ response_start_s: number | null, response_end_s: number | null, attempt: number,
  */
 score: Score | null, 
 /**
+ * Fixed-do name per `score.notes` entry (None for rests), in the app's chromatic fixed-do
+ * style. Used by the optional sight-singing label aid.
+ */
+solfege?: Array<string | null>, 
+/**
  * Dictation: hearings so far and the limit (0 for none).
  */
 plays: number, max_plays: number, 

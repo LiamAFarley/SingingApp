@@ -1718,6 +1718,26 @@ fn note_in_key(labels: DegreeLabels, tonic: PitchClass, mode: KeyMode, rel: i32)
     }
 }
 
+/// Fixed-do names for every note in a score, in the app's existing chromatic fixed-do style.
+/// `None` for rests. The staff carries the octave; these names do not.
+pub fn fixed_do_score(score: &Score) -> Vec<Option<String>> {
+    let tonic = PitchClass::new(score.key.tonic_pc());
+    score
+        .notes
+        .iter()
+        .map(|n| {
+            n.pitch.map(|p| {
+                note_in_key(
+                    DegreeLabels::FixedDo,
+                    tonic,
+                    score.key.mode,
+                    p.midi() - score.key.tonic_pc(),
+                )
+            })
+        })
+        .collect()
+}
+
 /// The lower and upper note of an interval of `s` semitones whose first note heard is `first`.
 fn from_first(first: i32, s: i32, dir: IntervalDirection) -> (i32, i32) {
     match dir {
@@ -3495,7 +3515,11 @@ fn gen_pattern(
 /// The melodies of a block: generated one by one, or a list (the coach's or the library's) used
 /// in turn.
 enum Melodies<'a> {
-    Generate(&'a MelodyParams),
+    Generate {
+        params: &'a MelodyParams,
+        /// One key per trial in order, so a two-key lesson hears both keys.
+        keys: Vec<String>,
+    },
     /// Melodies with the library piece each came from.
     List(Vec<(CompactMelody, Option<String>)>),
 }
@@ -3503,7 +3527,10 @@ enum Melodies<'a> {
 impl<'a> Melodies<'a> {
     fn new(source: &'a MelodySource, ctx: &GenContext, rng: &mut Rng) -> Result<Self, GenError> {
         Ok(match source {
-            MelodySource::Generate(m) => Melodies::Generate(m),
+            MelodySource::Generate(m) => Melodies::Generate {
+                params: m,
+                keys: m.keys.clone(),
+            },
             MelodySource::Given(list) => {
                 if list.is_empty() {
                     return err("melody.given must contain at least one melody");
@@ -3518,7 +3545,7 @@ impl<'a> Melodies<'a> {
                     .map(|p| {
                         let mut m = p.melody(sel.part);
                         if sel.fit_range {
-                            library::fit_octaves(&mut m, ctx.comfortable);
+                            library::fit_practice_octaves(&mut m, ctx.comfortable);
                         }
                         if !sel.piece_tempo {
                             m.tempo_bpm = None;
@@ -3534,6 +3561,10 @@ impl<'a> Melodies<'a> {
         })
     }
 
+    fn is_generated(&self) -> bool {
+        matches!(self, Melodies::Generate { .. })
+    }
+
     /// The melody for trial `i`, and the library piece it came from.
     fn score(
         &self,
@@ -3543,9 +3574,15 @@ impl<'a> Melodies<'a> {
         ctx: &GenContext,
     ) -> Result<(Score, Option<String>), GenError> {
         match self {
-            Melodies::Generate(m) => generate_melody(m, ctx.comfortable, tempo_bpm, rng)
-                .map(|s| (s, None))
-                .map_err(|e| GenError(format!("melody: {e}"))),
+            Melodies::Generate { params, keys } => {
+                let mut p = (*params).clone();
+                if !keys.is_empty() {
+                    p.keys = vec![keys[i % keys.len()].clone()];
+                }
+                generate_melody(&p, ctx.comfortable, tempo_bpm, rng)
+                    .map(|s| (s, None))
+                    .map_err(|e| GenError(format!("melody: {e}")))
+            }
             Melodies::List(list) => {
                 let k = i % list.len();
                 let (m, piece) = &list[k];
@@ -3586,6 +3623,13 @@ fn score_stimulus(score: &Score) -> serde_json::Value {
     })
 }
 
+/// A generated melody's pitch-and-rhythm fingerprint, for duplicate control in one lesson.
+pub(crate) fn melody_fingerprint(score: &Score) -> String {
+    let pitches: Vec<i32> = score.pitched().map(|(_, p)| p.midi()).collect();
+    let rhythm: Vec<(u32, u32)> = score.notes.iter().map(|n| (n.start, n.dur)).collect();
+    format!("{pitches:?}|{rhythm:?}")
+}
+
 fn gen_sight_sing(
     p: &SightSingParams,
     n: usize,
@@ -3594,7 +3638,7 @@ fn gen_sight_sing(
 ) -> Result<Vec<TrialSpec>, GenError> {
     check_timbres(std::slice::from_ref(&p.timbre))?;
     if !(30.0..=220.0).contains(&p.tempo_bpm) {
-        return err("tempo_bpm must be 30–220");
+        return err("tempo_bpm must be 30-220");
     }
     if p.backing.has_melody() {
         return err(
@@ -3602,9 +3646,18 @@ fn gen_sight_sing(
         );
     }
     let melodies = Melodies::new(&p.melody, ctx, rng)?;
+    let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let (score, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+        let mut attempts = 0;
+        let (score, piece) = loop {
+            let candidate = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+            let fingerprint = melody_fingerprint(&candidate.0);
+            if !melodies.is_generated() || seen.insert(fingerprint) || attempts >= 12 {
+                break candidate;
+            }
+            attempts += 1;
+        };
         let mut t = sight_trial(score, p);
         if let Some(id) = piece {
             t.stimulus["piece"] = json!(id);
@@ -3906,9 +3959,18 @@ fn gen_dictation(
         return err("tempo_bpm must be 30–220");
     }
     let melodies = Melodies::new(&p.melody, ctx, rng)?;
+    let mut seen = std::collections::BTreeSet::new();
     let mut out = Vec::with_capacity(n);
     for i in 0..n {
-        let (score, piece) = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+        let mut attempts = 0;
+        let (score, piece) = loop {
+            let candidate = melodies.score(i, p.tempo_bpm, rng, ctx)?;
+            let fingerprint = melody_fingerprint(&candidate.0);
+            if !melodies.is_generated() || seen.insert(fingerprint) || attempts >= 12 {
+                break candidate;
+            }
+            attempts += 1;
+        };
         // The editor starts with the first note (and any rest before it) when it is given.
         let mut given = score.clone();
         given.title = None;
@@ -4813,10 +4875,11 @@ mod tests {
         let TrialSpec::Sung(t) = &trials[0] else {
             panic!()
         };
-        // D5–G4 moved down an octave into G2–E4; the piece's own tempo is kept.
+        // D5–G4 moved into the practice register (two octaves down, not the old one-octave
+        // "just inside the range" placement); the piece's own tempo is kept.
         assert_eq!(
             t.notes.iter().map(|n| n.midi).collect::<Vec<_>>(),
-            [62, 59, 55]
+            [50, 47, 43]
         );
         assert_eq!(t.tempo_bpm, 66.0);
 
@@ -5292,6 +5355,39 @@ mod tests {
             let TrialSpec::Identify(t) = t else { panic!() };
             assert_eq!(t.answer_after_ms, Some(6.0 * 1000.0), "six beats at 60 bpm");
         }
+    }
+
+    #[test]
+    fn fixed_do_score_names_every_note_in_the_key() {
+        let score = Score {
+            key: KeySig::new("G", KeyMode::Major).unwrap(),
+            time: crate::score::TimeSig::COMMON,
+            clef: crate::score::Clef::Treble,
+            tempo_bpm: 72.0,
+            bars: 1,
+            notes: vec![
+                ScoreNote {
+                    pitch: Some("G4".parse().unwrap()),
+                    start: 0,
+                    dur: 4,
+                },
+                ScoreNote {
+                    pitch: Some("C#5".parse().unwrap()),
+                    start: 4,
+                    dur: 4,
+                },
+                ScoreNote {
+                    pitch: None,
+                    start: 8,
+                    dur: 4,
+                },
+            ],
+            title: None,
+        };
+        assert_eq!(
+            fixed_do_score(&score),
+            vec![Some("sol".into()), Some("di".into()), None]
+        );
     }
 
     #[test]

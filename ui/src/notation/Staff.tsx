@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEven
 import { Accidental, BarlineType, Beam, Dot, Formatter, Fraction, Renderer, Stave, StaveNote, StaveTie, Voice } from "vexflow/bravura";
 import type { NoteResult } from "../bindings/NoteResult";
 import type { Score } from "../bindings/Score";
+import { tint as tintColor } from "../colors";
 import {
   barTicks,
   beatTicks,
@@ -94,6 +95,10 @@ interface Props {
   cursorTick?: number | null;
   /** Colour per score.notes index (noteheads). */
   noteColors?: (string | null | undefined)[];
+  /** Text under each note, indexed by score.notes (the sight-singing solfège aid). */
+  noteLabels?: (string | null | undefined)[];
+  /** Pill colour per score.notes index; falls back to a neutral grey. */
+  noteLabelColors?: (string | null | undefined)[];
   /** Colour of rests that only fill unwritten space (the editor's placeholders). */
   fillerColor?: string;
   /** Highlight for the editor: a score.notes index. */
@@ -106,7 +111,7 @@ interface Props {
   onPointerDown?: (p: StaffPointer) => void;
 }
 
-export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, tint = false, foldOctaves = false, timing, results, cursorTick, noteColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
+export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, tint = false, foldOctaves = false, timing, results, cursorTick, noteColors, noteLabels, noteLabelColors, selected, caretTick, ghost, onPointerMove, onPointerDown }: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -197,6 +202,9 @@ export function Staff({ score, scale, maxHeight = 460, fillerColor, trace, tint 
             <Trace geom={geom} trace={trace} timing={timing} beatTicks={bt} toDiatonic={toDiatonic} score={score} tint={tint} fold={foldOctaves} />
           )}
           {results && <Markers geom={geom} results={results} />}
+          {noteLabels && (
+            <NoteLabels geom={geom} labels={noteLabels} colors={noteLabelColors} belowMarkers={results != null} />
+          )}
           {cursorTick != null && <Cursor geom={geom} tick={cursorTick} />}
         </svg>
       )}
@@ -378,6 +386,51 @@ function render(
   });
 
   return { scale, width, height, systems: geomSystems, tokens: geomTokens };
+}
+
+/** Solfège names in small pills under the staff, one per sounding note. */
+function NoteLabels({
+  geom,
+  labels,
+  colors,
+  belowMarkers = false,
+}: {
+  geom: StaffGeometry;
+  labels: (string | null | undefined)[];
+  colors?: (string | null | undefined)[];
+  /** When result arrows are drawn, place the pills under them rather than over them. */
+  belowMarkers?: boolean;
+}) {
+  const lastX = new Map<number, number>();
+  return (
+    <g className="staff-note-labels" pointerEvents="none">
+      {geom.tokens.map((t, i) => {
+        if (t.token.kind !== "note" || t.token.tiedFromPrev) return null;
+        const idx = t.token.scoreIndex;
+        const label = idx >= 0 ? labels[idx] : null;
+        if (!label) return null;
+        // Dense rhythms would otherwise stack pills on top of one another.
+        const previous = lastX.get(t.system);
+        if (previous != null && t.x - previous < 24) return null;
+        lastX.set(t.system, t.x);
+        const system = geom.systems[t.system];
+        const baseline = system.topLineY + 4 * SPACING + 17;
+        const y = belowMarkers
+          ? Math.max(baseline + 18, Math.max(lineY(system, 1) + 24, t.y + 20) + 18)
+          : Math.max(baseline, t.y + 17);
+        const color = (idx >= 0 ? colors?.[idx] : null) ?? "#59636e";
+        const text = tintColor(color, "#ffffff", 1);
+        return (
+          <g key={i}>
+            <rect x={t.x - 13} y={y - 8} width={26} height={16} rx={8} fill={text?.background ?? color} opacity={0.94} />
+            <text x={t.x} y={y + 3.5} textAnchor="middle" fontSize={9.5} fontWeight={600} fill={text?.color ?? "#ffffff"}>
+              {label}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
 }
 
 // ---------------------------------------------------------------------------------------------

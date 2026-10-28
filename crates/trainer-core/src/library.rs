@@ -1015,6 +1015,11 @@ pub fn select<'a>(
                     .iter()
                     .any(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
         })
+        .filter(|p| {
+            sel.all_tags
+                .iter()
+                .all(|t| p.tags.iter().any(|x| x.eq_ignore_ascii_case(t)))
+        })
         .filter(|p| p.parts.len() >= min_parts)
         .collect();
     if out.is_empty() {
@@ -1024,6 +1029,9 @@ pub fn select<'a>(
         }
         if !sel.tags.is_empty() {
             what.push(format!("tagged {}", sel.tags.join(" or ")));
+        }
+        if !sel.all_tags.is_empty() {
+            what.push(format!("tagged all of {}", sel.all_tags.join(", ")));
         }
         if min_parts > 1 {
             what.push(format!("with {min_parts} or more parts"));
@@ -1067,6 +1075,64 @@ pub fn shift_octaves(m: &mut CompactMelody, k: i32) {
     m.clef = ClefChoice::Auto;
 }
 
+/// The register a melody is practised in: floor a whole tone above the comfortable low, target a
+/// fifth above it, and ceiling below the comfortable high.
+pub fn practice_window(range: NoteRange) -> (i32, i32, i32) {
+    let floor = range.low.0 + 2;
+    let target = range.low.0 + 7;
+    let ceiling = (range.high.0 - 2).min(range.low.0 + 12);
+    (floor, target, ceiling)
+}
+
+/// The whole-octave move that puts a melody in the practice register. Unlike `best_octave` this
+/// aims for the lower-middle of the comfortable range, not merely "inside" it.
+pub fn best_practice_octave(lo: i32, hi: i32, median: i32, range: NoteRange) -> i32 {
+    let (floor, target, ceiling) = practice_window(range);
+    // A melody already sitting low is not pushed up just because the range is wide.
+    if lo >= floor && hi <= ceiling && median <= target {
+        return 0;
+    }
+    (-3..=3)
+        .min_by_key(|k| {
+            let l = lo + 12 * k;
+            let h = hi + 12 * k;
+            let m = median + 12 * k;
+            let outside = (floor - l).max(0) * 4 + (h - ceiling).max(0) * 4;
+            let high = (m - target).max(0) * 2;
+            let low = (target - m).max(0);
+            (outside + high + low, k.abs())
+        })
+        .unwrap_or(0)
+}
+
+/// Moves a melody by whole octaves into the practice register; key and spelling stay.
+pub fn fit_practice_octaves(m: &mut CompactMelody, range: NoteRange) -> i32 {
+    let Some((lo, hi)) = melody_range(m) else {
+        return 0;
+    };
+    let median = melody_median(m).unwrap_or((lo + hi) / 2);
+    let k = best_practice_octave(lo, hi, median, range);
+    shift_octaves(m, k);
+    k
+}
+
+/// The median sounding note of a melody, for register placement.
+pub fn melody_median(m: &CompactMelody) -> Option<i32> {
+    let mut midis: Vec<i32> = m
+        .notes
+        .iter()
+        .filter_map(|n| match n {
+            CompactNote::Note { note, .. } => Some(note.midi()),
+            CompactNote::Rest { .. } => None,
+        })
+        .collect();
+    if midis.is_empty() {
+        return None;
+    }
+    midis.sort_unstable();
+    Some(midis[midis.len() / 2])
+}
+
 /// Lowest and highest notes of a melody.
 pub fn melody_range(m: &CompactMelody) -> Option<(i32, i32)> {
     let midis = m.notes.iter().filter_map(|n| match n {
@@ -1081,12 +1147,7 @@ pub fn melody_range(m: &CompactMelody) -> Option<(i32, i32)> {
 /// Moves a melody by whole octaves to sit best in `range`; the key and spelling stay. Returns
 /// the number of octaves moved.
 pub fn fit_octaves(m: &mut CompactMelody, range: NoteRange) -> i32 {
-    let Some((lo, hi)) = melody_range(m) else {
-        return 0;
-    };
-    let k = best_octave(lo, hi, range);
-    shift_octaves(m, k);
-    k
+    fit_practice_octaves(m, range)
 }
 
 #[cfg(test)]
@@ -1333,8 +1394,26 @@ mod tests {
         assert!(select(&sorted, &sel, 1).unwrap_err().contains("`nope`"));
 
         let mut m = lib[0].melody(0);
-        assert_eq!(fit_octaves(&mut m, NoteRange::new(43, 64)), -1);
-        assert!(matches!(m.notes[0], CompactNote::Note { note, .. } if note.name() == "C4"));
+        assert_eq!(fit_octaves(&mut m, NoteRange::new(43, 64)), -2);
+        assert!(matches!(m.notes[0], CompactNote::Note { note, .. } if note.name() == "C3"));
+    }
+
+    #[test]
+    fn selection_all_tags_is_an_and() {
+        let mut a = parse_piece(&json!({ "key": "C", "notes": "C4:4" })).unwrap();
+        a.id = "a".into();
+        a.tags = vec!["key.C".into(), "bars.short".into(), "leap.step".into()];
+        let mut b = parse_piece(&json!({ "key": "C", "notes": "D4:4" })).unwrap();
+        b.id = "b".into();
+        b.tags = vec!["key.C".into(), "bars.short".into()];
+        let sel = LibrarySelect {
+            all_tags: vec!["key.C".into(), "leap.step".into()],
+            ..LibrarySelect::default()
+        };
+        let lib = [a, b];
+        let got = select(&lib, &sel, 1).unwrap();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "a");
     }
 
     #[test]

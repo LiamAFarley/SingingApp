@@ -492,8 +492,11 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
         core.ensure_engine()
             .map_err(|e| format!("Audio is not available: {e:#}"))?;
         // Before taking the database: building the context locks it too.
-        let daily_ctx =
-            matches!(request, StartRequest::DailySet { .. }).then(|| core.gen_context());
+        let start_ctx = matches!(
+            request,
+            StartRequest::DailySet { .. } | StartRequest::CourseLevel { .. }
+        )
+        .then(|| core.gen_context());
         let db = core.db.lock();
         let (id, spec) = match request {
             StartRequest::Preset { id, params } => {
@@ -546,7 +549,7 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                 )
             }
             StartRequest::DailySet { category } => {
-                let ctx = daily_ctx.unwrap_or_default();
+                let ctx = start_ctx.unwrap_or_default();
                 let category = category.unwrap_or_else(|| courses::ABSOLUTE_PITCH.into());
                 let mut set =
                     courses::compose_daily_set(&db, &ctx, now(), &category).map_err(anyhow_err)?;
@@ -577,10 +580,21 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                     spec,
                 )
             }
-            StartRequest::CourseLevel { course, level } => {
+            StartRequest::CourseLevel {
+                course,
+                level,
+                minutes,
+                checks,
+            } => {
                 let c = courses::find_course(&course)
                     .ok_or_else(|| format!("unknown course {course}"))?;
-                let mut spec = courses::level_session(&c, level).map_err(anyhow_err)?;
+                let plan = courses::daily_plan(&db).map_err(anyhow_err)?;
+                let entry = plan.courses.iter().find(|p| p.course == c.id);
+                let minutes = minutes.or_else(|| entry.map(|p| p.minutes)).unwrap_or(10.0);
+                let checks = checks.or_else(|| entry.map(|p| p.checks)).unwrap_or(true);
+                let ctx = start_ctx.unwrap_or_default();
+                let mut spec = courses::level_session_for_start(&c, level, minutes, checks, &ctx)
+                    .map_err(anyhow_err)?;
                 courses::apply_session_prefs(
                     &mut spec,
                     &courses::ap_prefs(&db).map_err(anyhow_err)?,
@@ -590,7 +604,8 @@ pub async fn start_session(state: State<'_, AppState>, request: StartRequest) ->
                     &courses::exercise_prefs(&db).map_err(anyhow_err)?,
                 );
                 (
-                    db.start_new_session(&spec, "course").map_err(anyhow_err)?,
+                    db.start_new_session(&spec, if checks { "course" } else { "drill" })
+                        .map_err(anyhow_err)?,
                     spec,
                 )
             }

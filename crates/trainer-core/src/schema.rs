@@ -1155,6 +1155,9 @@ pub struct LibrarySelect {
     /// Pieces with any of these tags.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    /// Pieces with all of these tags. Unlike `tags`, which matches any, this is an AND.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub all_tags: Vec<String>,
     /// Shuffle instead of library order (natural order of ids).
     #[serde(default)]
     pub shuffle: bool,

@@ -3,8 +3,8 @@
 use serde_json::{Value, json};
 
 use crate::courses::{
-    AP_CHORD_COLORS, AP_CONTRAST, AP_NOTE_COLORS, AP_SPEED, Course, ERRORLESS_DEFAULT_TAG, Level,
-    PassRule, SPREAD, STEP, Schedule, block,
+    AP_CHORD_COLORS, AP_CONTRAST, AP_NOTE_COLORS, AP_NOTE_COLORS_SINE, AP_SPEED, Course,
+    ERRORLESS_DEFAULT_TAG, Level, PassRule, SPREAD, STEP, Schedule, block,
 };
 use crate::labels::{self, GERVAIN_NAMES, TANEDA_COLORS};
 
@@ -17,12 +17,11 @@ fn tags(base: &str, errorless: bool) -> Vec<&str> {
 }
 
 pub fn courses() -> Vec<Course> {
-    vec![
-        speed_course(),
-        note_colors_course(),
-        chord_colors_course(),
-        contrast_course(),
-    ]
+    let mut out = vec![speed_course()];
+    out.extend(note_colors_courses());
+    out.push(chord_colors_course());
+    out.push(contrast_course());
+    out
 }
 
 fn speed_course() -> Course {
@@ -75,57 +74,140 @@ const COLOR_ORDER: [&str; 12] = [
     "C", "E", "G", "D", "F", "A", "B", "F#", "C#", "G#", "D#", "A#",
 ];
 
-/// Every colour level spreads over four octaves from the start: in one octave a note's height
-/// stands in for its colour ("the bright one in the middle"), and no category forms.
-fn note_colors_course() -> Course {
+/// The sine course: one partial, so there is no overtone to mistake for a fifth or an octave.
+const SINE_TIMBRES: [&str; 1] = ["synth:sine"];
+/// The curated transfer course: pitched, clear attack and stable sustain. Pads, choirs, organs,
+/// short-decay percussion, bass programs, overdriven guitars and the holdout timbres are left out.
+const RANDOM_TIMBRES: [&str; 11] = [
+    "gm:0",
+    "gm:2",
+    "gm:4",
+    "gm:6",
+    "gm:24",
+    "gm:25",
+    "gm:40",
+    "gm:41",
+    "gm:73",
+    "synth:triangle",
+    "synth:soft_piano",
+];
+/// A sine stays clean and identifiable at the top, so the sine course keeps the four-octave
+/// register. Sampled instruments above C6 stop sounding like themselves. The random course drops
+/// octave 4: with the two-octave step rule, a middle octave has nowhere to step to.
+const SINE_OCTAVES: [i32; 4] = SPREAD;
+const RANDOM_OCTAVES: [i32; 2] = [3, 5];
+
+/// The same colour ladder on two stimulus pools: sine for training, curated timbres for transfer.
+fn note_colors_courses() -> Vec<Course> {
+    vec![
+        color_course(
+            AP_NOTE_COLORS_SINE,
+            "Note colours (sine)",
+            "Colours (sine)",
+            "Taneda's colours on a pure sine: one partial, C3–B6 over four octaves, each tone two octaves from the last. Early levels are errorless: a miss is not marked, the right colour lights up, and that note comes back. The last two levels show ordinary feedback with an answer limit.",
+            "four octaves",
+            &SINE_OCTAVES,
+            &SINE_TIMBRES,
+        ),
+        color_course(
+            AP_NOTE_COLORS,
+            "Note colours (random timbres)",
+            "Colours (random)",
+            "Taneda's colours on eleven pitched timbres — pianos, harpsichord, guitars, violin, viola, flute, triangle and soft piano — in C3–B5. The same errorless early levels and two final feedback levels. This is the transfer course, and the results keep per-timbre accuracy so one instrument standing out is visible.",
+            "C3–B5",
+            &RANDOM_OCTAVES,
+            &RANDOM_TIMBRES,
+        ),
+    ]
+}
+
+fn color_course(
+    id: &str,
+    title: &str,
+    short: &str,
+    description: &str,
+    where_: &str,
+    octaves: &[i32],
+    timbres: &[&str],
+) -> Course {
     let mut levels = Vec::new();
     for n in 1..=10u32 {
         let classes = &COLOR_ORDER[..(n as usize + 2)];
         let errorless = n < 10;
-        let params = color_params(classes, errorless, None);
+        let params = color_params(classes, errorless, None, octaves, timbres);
         levels.push(color_level(
+            id,
             n,
             classes,
             errorless,
             params.clone(),
             params,
-            "four octaves",
+            where_,
         ));
     }
     for (n, deadline) in [(11u32, 3000u32), (12, 2000)] {
-        let practice = color_params(&COLOR_ORDER, false, Some(deadline));
+        let practice = color_params(&COLOR_ORDER, false, Some(deadline), octaves, timbres);
         let mut check = practice.clone();
         check["mask"] = json!("none");
         levels.push(Level {
             module: None,
             title: format!("All twelve, within {} s", deadline / 1000),
             summary: format!(
-                "All twelve colours over four octaves, answered within {:.1} s. The check has no feedback.",
+                "All twelve colours over {where_}, answered within {:.1} s. The check has no feedback.",
                 deadline as f32 / 1000.0
             ),
-            pass: PassRule::Accuracy { min: 0.9, blocks: 2 },
+            pass: PassRule::Accuracy {
+                min: 0.9,
+                blocks: 2,
+            },
             blocks: vec![
-                color_block(n, false, "Name the colour", 24, "after_trial", practice, "Name each note by its colour."),
-                color_block(n, true, "Check: no feedback", 16, "none", check, "No results until the end. Answer from the sound alone."),
+                color_block(
+                    id,
+                    n,
+                    false,
+                    "Name the colour",
+                    24,
+                    "after_trial",
+                    practice,
+                    "Name each note by its colour.",
+                ),
+                color_block(
+                    id,
+                    n,
+                    true,
+                    "Check: no feedback",
+                    16,
+                    "none",
+                    check,
+                    "No results until the end. Answer from the sound alone.",
+                ),
             ],
         });
     }
     Course {
-        id: AP_NOTE_COLORS.into(),
-        title: "Note colours (Taneda)".into(),
-        short: "Colours".into(),
+        id: id.into(),
+        title: title.into(),
+        short: short.into(),
         category: "Absolute pitch".into(),
-        description: "Taneda's colours, starting from C, E and G and adding a key at each level, over four octaves (C3–B6) from the first level so a note's height never stands in for its colour; each tone is two octaves from the last. Early levels are errorless: a miss is not marked, the right colour lights up, and that note comes back. The last two levels show ordinary feedback with an answer limit.".into(),
+        description: description.into(),
         schedule: Schedule::Ladder,
         levels,
     }
 }
 
-/// Colours over four octaves, each tone two octaves from the last, as the naming course does.
-fn color_params(classes: &[&str], errorless: bool, deadline: Option<u32>) -> Value {
+/// Colours over the course's register and timbres, each tone two octaves from the last, as the
+/// naming course does.
+fn color_params(
+    classes: &[&str],
+    errorless: bool,
+    deadline: Option<u32>,
+    octaves: &[i32],
+    timbres: &[&str],
+) -> Value {
     let mut params = json!({
         "classes": classes,
-        "octaves": SPREAD,
+        "octaves": octaves,
+        "timbres": timbres,
         "min_jump_semitones": 13,
         "min_octave_step": STEP,
         "labels": TANEDA_COLORS,
@@ -143,6 +225,7 @@ fn color_params(classes: &[&str], errorless: bool, deadline: Option<u32>) -> Val
 }
 
 fn color_level(
+    course: &str,
     n: u32,
     classes: &[&str],
     errorless: bool,
@@ -172,6 +255,7 @@ fn color_level(
         },
         blocks: vec![
             color_block(
+                course,
                 n,
                 false,
                 "Name the colour",
@@ -185,6 +269,7 @@ fn color_level(
                 "Name each note by its colour.",
             ),
             color_block(
+                course,
                 n,
                 true,
                 "Check: no feedback",
@@ -206,6 +291,7 @@ fn quiet_check(mut params: Value) -> Value {
 }
 
 fn color_block(
+    course: &str,
     level: u32,
     verify: bool,
     title: &str,
@@ -216,7 +302,7 @@ fn color_block(
 ) -> crate::schema::BlockSpec {
     let errorless = feedback == "errorless";
     block(
-        AP_NOTE_COLORS,
+        course,
         level,
         verify,
         json!({
@@ -521,68 +607,112 @@ mod tests {
     }
 
     #[test]
-    fn colours_spread_over_four_octaves_from_the_first_level() {
-        let c = note_colors_course();
+    fn colour_courses_use_their_planned_pools_and_registers() {
         let ctx = GenContext::default();
-        for n in 1..=c.levels.len() as u32 {
-            for b in level_session(&c, n).unwrap().blocks {
-                let crate::schema::Exercise::PitchId(p) = &b.exercise else {
-                    panic!()
-                };
-                assert_eq!(p.octaves, SPREAD.to_vec(), "level {n}");
-                assert_eq!(p.min_jump_semitones, 13);
-                assert_eq!(p.min_octave_step, STEP);
-            }
-        }
-        // Three colours at level 1, still Other and errorless; none of them pinned to one height.
-        let first = level_session(&c, 1).unwrap();
-        let crate::schema::Exercise::PitchId(p) = &first.blocks[0].exercise else {
-            panic!()
-        };
-        assert_eq!(p.classes.classes().len(), 3);
-        assert!(p.out_of_set_rate > 0.0 && p.requeue_misses);
-        assert_eq!(first.blocks[0].feedback, FeedbackMode::Errorless);
-        for n in [1u32, 5, 12] {
-            let mut b = level_session(&c, n).unwrap().blocks[0].clone();
-            b.count = 400;
-            let trials = generate_block(&b, 7, &ctx).unwrap();
-            let tones: Vec<(i64, bool, String, i64)> = trials
-                .iter()
-                .map(|t| {
-                    let TrialSpec::Identify(t) = t else { panic!() };
-                    (
-                        t.stimulus["midi"].as_i64().unwrap(),
-                        t.stimulus.get("constraint_relaxed").is_some(),
-                        t.stimulus["pitch_class"].as_str().unwrap().to_string(),
-                        t.stimulus["octave"].as_i64().unwrap(),
-                    )
-                })
-                .collect();
-            let relaxed = tones.iter().filter(|t| t.1).count();
-            assert!(relaxed * 50 < tones.len(), "level {n}: {relaxed} relaxed");
-            for w in tones.windows(2) {
-                if !w[1].1 {
-                    assert!(
-                        (w[1].0 - w[0].0).abs() >= 13,
-                        "level {n}: {} then {}",
-                        w[0].0,
-                        w[1].0
-                    );
+        let pool = crate::timbre::PoolConfig::default();
+        let cases = [
+            (
+                AP_NOTE_COLORS_SINE,
+                SINE_OCTAVES.to_vec(),
+                SINE_TIMBRES
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+            (
+                AP_NOTE_COLORS,
+                RANDOM_OCTAVES.to_vec(),
+                RANDOM_TIMBRES
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect::<Vec<_>>(),
+            ),
+        ];
+        for (id, octaves, timbres) in cases {
+            let c = note_colors_courses()
+                .into_iter()
+                .find(|c| c.id == id)
+                .unwrap();
+            for n in 1..=c.levels.len() as u32 {
+                for b in level_session(&c, n).unwrap().blocks {
+                    let crate::schema::Exercise::PitchId(p) = &b.exercise else {
+                        panic!()
+                    };
+                    assert_eq!(p.octaves, octaves, "{id} level {n}");
+                    assert_eq!(p.timbres, timbres, "{id} level {n}");
+                    assert_eq!(p.min_jump_semitones, 13);
+                    assert_eq!(p.min_octave_step, STEP);
+                    for t in &p.timbres {
+                        assert!(!pool.is_holdout_timbre(t), "{id} uses holdout {t}");
+                    }
                 }
             }
-            // Each of the level's colours lands in at least three octaves ("Other" tones sit at
-            // the edges of the range on purpose).
-            let set = &COLOR_ORDER[..(n.min(10) as usize + 2)];
-            let mut octaves: std::collections::BTreeMap<&str, std::collections::BTreeSet<i64>> =
-                Default::default();
-            for t in tones.iter().filter(|t| set.contains(&t.2.as_str())) {
-                octaves.entry(&t.2).or_default().insert(t.3);
+            // Three colours at level 1, still Other and errorless; none of them pinned to one
+            // height.
+            let first = level_session(&c, 1).unwrap();
+            let crate::schema::Exercise::PitchId(p) = &first.blocks[0].exercise else {
+                panic!()
+            };
+            assert_eq!(p.classes.classes().len(), 3);
+            assert!(p.out_of_set_rate > 0.0 && p.requeue_misses);
+            assert_eq!(first.blocks[0].feedback, FeedbackMode::Errorless);
+            for n in [1u32, 5, 12] {
+                let mut b = level_session(&c, n).unwrap().blocks[0].clone();
+                b.count = 400;
+                let trials = generate_block(&b, 7, &ctx).unwrap();
+                let tones: Vec<(i64, bool, String, i64, String)> = trials
+                    .iter()
+                    .map(|t| {
+                        let TrialSpec::Identify(t) = t else { panic!() };
+                        (
+                            t.stimulus["midi"].as_i64().unwrap(),
+                            t.stimulus.get("constraint_relaxed").is_some(),
+                            t.stimulus["pitch_class"].as_str().unwrap().to_string(),
+                            t.stimulus["octave"].as_i64().unwrap(),
+                            t.stimulus["timbre"].as_str().unwrap().to_string(),
+                        )
+                    })
+                    .collect();
+                let relaxed = tones.iter().filter(|t| t.1).count();
+                assert!(
+                    relaxed * 50 < tones.len(),
+                    "{id} level {n}: {relaxed} relaxed"
+                );
+                for w in tones.windows(2) {
+                    if !w[1].1 {
+                        assert!(
+                            (w[1].0 - w[0].0).abs() >= 13,
+                            "{id} level {n}: {} then {}",
+                            w[0].0,
+                            w[1].0
+                        );
+                    }
+                }
+                // Each of the level's colours lands in the course's register, and the random
+                // course actually draws every curated timbre.
+                let set = &COLOR_ORDER[..(n.min(10) as usize + 2)];
+                let mut by_class: std::collections::BTreeMap<
+                    &str,
+                    std::collections::BTreeSet<i64>,
+                > = Default::default();
+                for t in tones.iter().filter(|t| set.contains(&t.2.as_str())) {
+                    by_class.entry(&t.2).or_default().insert(t.3);
+                }
+                assert_eq!(by_class.len(), set.len(), "{id} level {n}");
+                assert!(
+                    by_class.values().all(|o| o.len() >= 2),
+                    "{id} level {n}: {by_class:?}"
+                );
+                let seen: std::collections::BTreeSet<&str> =
+                    tones.iter().map(|t| t.4.as_str()).collect();
+                assert!(
+                    seen.iter().all(|t| timbres.iter().any(|x| x == t)),
+                    "{id} level {n} drew an unplanned timbre: {seen:?}"
+                );
+                if id == AP_NOTE_COLORS {
+                    assert_eq!(seen.len(), timbres.len(), "{id} level {n}: {seen:?}");
+                }
             }
-            assert_eq!(octaves.len(), set.len(), "level {n}");
-            assert!(
-                octaves.values().all(|o| o.len() >= 3),
-                "level {n}: {octaves:?}"
-            );
         }
     }
 

@@ -173,7 +173,15 @@ export function ApPage({ sessionActive, onOpenSession }: { sessionActive: boolea
                   busy={busy}
                   starting={starting}
                   onPlan={savePlan}
-                  onStart={(level) => start(`${c.id}-${level}`, { source: "course_level", course: c.id, level })}
+                  onStart={(level, minutes, checks) =>
+                    start(`${c.id}-${level}-${checks ? "level" : "drill"}`, {
+                      source: "course_level",
+                      course: c.id,
+                      level,
+                      minutes,
+                      checks,
+                    })
+                  }
                   onSetLevel={(level) =>
                     api("setCourseLevel", c.id, level)
                       .then(refresh)
@@ -379,18 +387,20 @@ export function LadderCard({
   busy: boolean;
   starting: string | null;
   onPlan: (p: DailyPlan) => void;
-  onStart: (level: number) => void;
+  onStart: (level: number, minutes: number, checks: boolean) => void;
   onSetLevel: (level: number) => void;
 }) {
   const entry = plan.courses.find((p) => p.course === c.id);
   const [minutes, setMinutes] = useState(entry?.minutes ?? 10);
   useEffect(() => setMinutes(entry?.minutes ?? 10), [entry?.minutes]);
-  const update = (active: boolean, m: number) =>
+  const checks = entry?.checks ?? true;
+  const startMinutes = Number.isFinite(minutes) ? Math.min(90, Math.max(1, minutes)) : 10;
+  const update = (active: boolean, m: number, check: boolean) =>
     onPlan({
       ...plan,
       courses: plan.courses.some((p) => p.course === c.id)
-        ? plan.courses.map((p) => (p.course === c.id ? { ...p, active, minutes: m } : p))
-        : [...plan.courses, { course: c.id, active, minutes: m }],
+        ? plan.courses.map((p) => (p.course === c.id ? { ...p, active, minutes: m, checks: check } : p))
+        : [...plan.courses, { course: c.id, active, minutes: m, checks: check }],
     });
   const level = Math.min(c.level, c.levels);
   // Today's set runs the active courses in the plan's order; move this one past its active neighbour.
@@ -424,9 +434,15 @@ export function LadderCard({
       <div className="row wrap" style={{ justifyContent: "space-between", gap: 8 }}>
         <div className="row" style={{ gap: 8 }}>
           <label className="row small" style={{ gap: 6 }}>
-            <input type="checkbox" checked={entry?.active ?? false} onChange={(e) => update(e.target.checked, minutes)} />
+            <input type="checkbox" checked={entry?.active ?? false} onChange={(e) => update(e.target.checked, startMinutes, checks)} />
             Daily
           </label>
+          {c.can_drill && (
+            <label className="row small" style={{ gap: 6 }} title="End the level with its no-feedback check. Off makes Start level a drill: practice blocks only, and nothing counts towards a pass.">
+              <input type="checkbox" checked={checks} onChange={(e) => update(entry?.active ?? false, startMinutes, e.target.checked)} />
+              Check
+            </label>
+          )}
           <input
             className="num"
             type="number"
@@ -435,8 +451,9 @@ export function LadderCard({
             value={minutes}
             style={{ width: 56 }}
             onChange={(e) => setMinutes(Number(e.target.value))}
-            onBlur={() => minutes !== entry?.minutes && update(entry?.active ?? false, Math.min(90, Math.max(1, minutes)))}
-            aria-label="Minutes a day"
+            onBlur={() => minutes !== entry?.minutes && update(entry?.active ?? false, startMinutes, checks)}
+            aria-label="Minutes"
+            title="Minutes a day, and the length when starting a level from this card"
           />
           <span className="small faint">min</span>
           {entry?.active && (
@@ -458,8 +475,13 @@ export function LadderCard({
             <option value={c.levels + 1}>Complete</option>
           </select>
         </div>
-        <button className="btn small" disabled={busy} onClick={() => onStart(level)}>
-          {starting === `${c.id}-${level}` ? "Starting…" : c.complete ? `Level ${level}` : "Start level"}
+        <button
+          className="btn small"
+          disabled={busy}
+          onClick={() => onStart(level, startMinutes, checks)}
+          title={checks ? "Run this level with its no-feedback check" : "Practice only: no no-feedback check, and nothing counts towards a level pass"}
+        >
+          {starting === `${c.id}-${level}-level` || starting === `${c.id}-${level}-drill` ? "Starting…" : c.complete ? `Level ${level}` : checks ? "Start level" : "Drill"}
         </button>
       </div>
     </div>

@@ -44,7 +44,9 @@ calling something learned, and retest after gaps for retention.\n\
 octaves with Other for notes outside the set, a check without feedback per level, the last level needing four checks at 90% \
 with the last one at least 12 h after the third), ap_brady (all twelve notes, C weighted 40% fading to even, paced streams from \
 5 s to 1.4 s apart, starting by singing C from memory), ap_speed (pitch_detect streams, d′ on the last streams), \
-ap_note_colors (Taneda colours, errorless at first), ap_chord_colors (Eguchi's 14 chord colours; the next chord is due only \
+ap_note_colors_sine (Taneda colours on a pure sine over four octaves; the training course), \
+ap_note_colors (the same colours on eleven curated pitched timbres over three octaves; the transfer \
+course, with per-timbre accuracy), ap_chord_colors (Eguchi's 14 chord colours; the next chord is due only \
 after 100% and 14 days), ap_contrast (E♭ against F♯, then the black keys, answered with Gervain names or the user's own set), \
 the tests ap_benchmark (12 notes sung from memory, then 60 piano notes; every 2 weeks), ap_weekly (120 notes, five \
 timbres, on the test day), ap_transfer (60 notes on untrained instruments and 24 Shepard tones; every 4 weeks) and \
@@ -81,9 +83,10 @@ N-back and canon, additive and complementary interval singing), inner hearing an
 melodic updating, bass and guide-tone singing), structure and error detection (single-pass score-against-sound, \
 mislabeled syllables, cadences, singback). Each session passes when every checked part is at 80% in one go. Prefer the \
 core for daily work and the single-exercise workshops for targeted practice where the dashboard shows a weakness: \
-rp_home, rp_patterns, rp_memory, rp_inner, rp_singback, rp_harmony, rp_errors, rp_walk, rp_match, rp_degrees, rp_intervals_key, rp_sing, \
-rp_intervals, rp_compare, rp_chords, rp_inversions, rp_scales, rp_dictation, rp_sight. A course's levels are lessons \
-grouped into modules (get_workshop shows them with scores); one run at 90% passes a lesson (N-back recognition: d′ 2). \
+rp_home, rp_patterns, rp_memory, rp_inner, rp_singback_v2, rp_harmony, rp_errors, rp_walk, rp_match, rp_degrees, rp_intervals_key, rp_sing, \
+rp_intervals, rp_compare, rp_chords, rp_inversions, rp_scales, rp_dictation_v2, rp_sight_v2, melodia. A course's levels are lessons \
+grouped into modules (get_workshop shows them with scores); one run at 90% passes a lesson (N-back recognition: d′ 2; the three \
+generated melody courses use eight trials and a 7/8 pass). \
 The category has its own \"Today's set\" (preview_daily_set with category \"Relative pitch\"); set_daily_plan and \
 set_course_level work as for absolute pitch. To give the user a drill the lessons lack, save it as a custom level of a \
 single-exercise activity (save_custom_level). New exercises: resting_tone, tonal_pattern, pattern_dialogue, n_back, \

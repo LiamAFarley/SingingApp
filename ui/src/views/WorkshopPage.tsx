@@ -99,7 +99,7 @@ export function WorkshopPage({
       ...plan,
       courses: plan.courses.some((p) => p.course === course)
         ? plan.courses.map((p) => (p.course === course ? { ...p, active, minutes: m } : p))
-        : [...plan.courses, { course, active, minutes: m }],
+        : [...plan.courses, { course, active, minutes: m, checks: true }],
     });
   };
 

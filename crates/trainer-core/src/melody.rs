@@ -17,6 +17,7 @@ pub enum NoteValue {
     Half,
     DottedQuarter,
     Quarter,
+    DottedEighth,
     Eighth,
     Sixteenth,
 }
@@ -30,6 +31,7 @@ impl NoteValue {
             NoteValue::Half => 2 * q,
             NoteValue::DottedQuarter => q * 3 / 2,
             NoteValue::Quarter => q,
+            NoteValue::DottedEighth => q * 3 / 4,
             NoteValue::Eighth => q / 2,
             NoteValue::Sixteenth => q / 4,
         }
@@ -61,6 +63,12 @@ pub struct MelodyParams {
     /// Probability that an inner note becomes a rest.
     #[serde(default)]
     pub rest_rate: f32,
+    /// Weight of offbeat-attack cells (an eighth followed by a quarter). 0 leaves them out.
+    #[serde(default)]
+    pub syncopation: f32,
+    /// Extra weight for sixteenth-note cells; 0 leaves the ordinary sixteenth weight.
+    #[serde(default)]
+    pub run_rate: f32,
     /// Scale degrees (1–7) the melody may start on.
     #[serde(default = "d_start_degrees")]
     pub start_degrees: Vec<u8>,
@@ -121,10 +129,11 @@ struct Cell {
     weight: u32,
 }
 
-fn cells_for(beat_ticks: u32) -> Vec<Cell> {
+fn cells_for(beat_ticks: u32, syncopation: f32, run_rate: f32) -> Vec<Cell> {
     use NoteValue::*;
     if beat_ticks == TICKS_PER_QUARTER {
-        vec![
+        let run = (1.0 + 8.0 * run_rate.max(0.0)).round() as u32;
+        let mut cells = vec![
             Cell {
                 values: &[Quarter],
                 weight: 6,
@@ -135,15 +144,15 @@ fn cells_for(beat_ticks: u32) -> Vec<Cell> {
             },
             Cell {
                 values: &[Sixteenth, Sixteenth, Sixteenth, Sixteenth],
-                weight: 1,
+                weight: run,
             },
             Cell {
                 values: &[Eighth, Sixteenth, Sixteenth],
-                weight: 1,
+                weight: run,
             },
             Cell {
                 values: &[Sixteenth, Sixteenth, Eighth],
-                weight: 1,
+                weight: run,
             },
             Cell {
                 values: &[Half],
@@ -154,6 +163,14 @@ fn cells_for(beat_ticks: u32) -> Vec<Cell> {
                 weight: 2,
             },
             Cell {
+                values: &[DottedEighth, Sixteenth],
+                weight: 2,
+            },
+            Cell {
+                values: &[Sixteenth, DottedEighth],
+                weight: 1,
+            },
+            Cell {
                 values: &[DottedHalf],
                 weight: 1,
             },
@@ -161,7 +178,16 @@ fn cells_for(beat_ticks: u32) -> Vec<Cell> {
                 values: &[Whole],
                 weight: 1,
             },
-        ]
+        ];
+        if syncopation > 0.0 {
+            // An eighth on the beat followed by a quarter: the next attack is off the beat.
+            let weight = (2.0 + 6.0 * syncopation).round() as u32;
+            cells.push(Cell {
+                values: &[Eighth, Quarter, Eighth],
+                weight,
+            });
+        }
+        cells
     } else {
         // Eighth-note beats (x/8): groups of a dotted quarter.
         vec![
@@ -190,10 +216,18 @@ fn cell_ticks(c: &Cell) -> u32 {
 }
 
 /// Fills `ticks` starting at bar position `pos` with allowed cells; returns note durations.
-fn fill(ticks: u32, pos: u32, meter: TimeSig, allowed: &[NoteValue], rng: &mut Rng) -> Vec<u32> {
+fn fill(
+    ticks: u32,
+    pos: u32,
+    meter: TimeSig,
+    allowed: &[NoteValue],
+    rng: &mut Rng,
+    syncopation: f32,
+    run_rate: f32,
+) -> Vec<u32> {
     let bt = meter.beat_ticks();
     let group = if bt == TICKS_PER_QUARTER { bt } else { bt * 3 };
-    let cells = cells_for(bt);
+    let cells = cells_for(bt, syncopation, run_rate);
     let mut out = Vec::new();
     let mut at = pos;
     let end = pos + ticks;
@@ -236,12 +270,19 @@ fn fill(ticks: u32, pos: u32, meter: TimeSig, allowed: &[NoteValue], rng: &mut R
 }
 
 /// Rhythm for the whole melody: durations per bar, with a long final note.
-fn rhythm(bars: u32, meter: TimeSig, allowed: &[NoteValue], rng: &mut Rng) -> Vec<Vec<u32>> {
+fn rhythm(
+    bars: u32,
+    meter: TimeSig,
+    allowed: &[NoteValue],
+    rng: &mut Rng,
+    syncopation: f32,
+    run_rate: f32,
+) -> Vec<Vec<u32>> {
     let bar = meter.bar_ticks();
     let mut out = Vec::with_capacity(bars as usize);
     for b in 0..bars {
         if b + 1 < bars {
-            out.push(fill(bar, 0, meter, allowed, rng));
+            out.push(fill(bar, 0, meter, allowed, rng, syncopation, run_rate));
             continue;
         }
         // Final bar: end on a long note, the longest allowed value or the next one down.
@@ -275,7 +316,7 @@ fn rhythm(bars: u32, meter: TimeSig, allowed: &[NoteValue], rng: &mut Rng) -> Ve
                 }
             }
         };
-        let mut v = fill(bar - last, 0, meter, allowed, rng);
+        let mut v = fill(bar - last, 0, meter, allowed, rng, syncopation, run_rate);
         v.push(last);
         out.push(v);
     }
@@ -426,7 +467,10 @@ pub fn generate_melody(
             }
             (n_bars, out)
         }
-        None => (p.bars, rhythm(p.bars, meter, &p.rhythms, rng)),
+        None => (
+            p.bars,
+            rhythm(p.bars, meter, &p.rhythms, rng, p.syncopation, p.run_rate),
+        ),
     };
     let durations: Vec<u32> = bars.iter().flatten().copied().collect();
     let n = durations.len();
@@ -441,7 +485,9 @@ pub fn generate_melody(
         }
     }
     let sung: Vec<usize> = (0..n).filter(|i| !rest[*i]).collect();
-    let degrees = walk(p, &allowed, sung.len(), rng, |d| {
+    let strong_all = strong_beats(&durations, meter);
+    let strong_sung: Vec<bool> = sung.iter().map(|i| strong_all[*i]).collect();
+    let degrees = walk(p, &allowed, sung.len(), rng, &strong_sung, |d| {
         key.degree(d, octave).midi()
     })?;
 
@@ -474,6 +520,30 @@ pub fn generate_melody(
         notes,
         title: None,
     };
+    // Place the finished line in the practice register, by whole octaves only.
+    if let Some((lo, hi)) = score.range() {
+        let mut midis: Vec<i32> = score.pitched().map(|(_, p)| p.midi()).collect();
+        midis.sort_unstable();
+        let median = midis[midis.len() / 2];
+        let k = crate::library::best_practice_octave(lo, hi, median, range) as i8;
+        // The generated line was already inside the singer's range before placement. If the
+        // practice register would take even its lowest or highest note outside that range, keep
+        // the original octave rather than trade a high melody for an unsingable low one.
+        let k = if k != 0 && (lo + 12 * k as i32) < range.low.0
+            || k != 0 && (hi + 12 * k as i32) > range.high.0
+        {
+            0
+        } else {
+            k
+        };
+        if k != 0 {
+            for n in &mut score.notes {
+                if let Some(p) = &mut n.pitch {
+                    p.octave += k;
+                }
+            }
+        }
+    }
     let (lo, hi) = score.range().ok_or("no notes were generated")?;
     score.clef = p.clef.resolve(lo, hi);
     score.validate()?;
@@ -516,13 +586,33 @@ fn plain_interval(a: Pitch, b: Pitch) -> bool {
     )
 }
 
-/// The sequence of scale degrees: a random walk over `allowed`, mostly by step, recovering after
-/// leaps, avoiding tritone leaps and (optionally) ending on the tonic, approached by step.
+/// Which sounding notes fall on a strong beat: beat 1 in 3/4, beats 1 and 3 in 4/4.
+fn strong_beats(durations: &[u32], meter: TimeSig) -> Vec<bool> {
+    let bar = meter.bar_ticks();
+    let half = if meter.beats == 4 {
+        meter.beat_ticks() * 2
+    } else {
+        bar
+    };
+    let mut at = 0u32;
+    durations
+        .iter()
+        .map(|d| {
+            let strong = at % bar % half == 0;
+            at += *d;
+            strong
+        })
+        .collect()
+}
+
+/// The sequence of scale degrees: a phrase-shaped walk over `allowed`, mostly by step, recovering
+/// after leaps, avoiding tritone leaps and (optionally) ending on the tonic, approached by step.
 fn walk(
     p: &MelodyParams,
     allowed: &[i32],
     n: usize,
     rng: &mut Rng,
+    strong: &[bool],
     midi_of: impl Fn(i32) -> i32,
 ) -> Result<Vec<i32>, String> {
     if n == 0 {
@@ -586,30 +676,88 @@ fn walk(
     } else {
         n
     };
+    // A phrase has a direction: an arch, a rise, a fall, or a wave. It keeps the line from
+    // becoming the old aimless walk without turning every melody into a scale.
+    let shape = rng.below(4);
+    let want = |i: usize| -> i32 {
+        match shape {
+            0 => {
+                if i * 2 < body.max(1) {
+                    1
+                } else {
+                    -1
+                }
+            }
+            1 => 1,
+            2 => -1,
+            _ => {
+                if (i / 2) % 2 == 0 {
+                    1
+                } else {
+                    -1
+                }
+            }
+        }
+    };
     for _attempt in 0..200 {
         let first = ranked[rng.below(ranked.len().min(3))];
         let mut out = vec![first];
         let mut last_leap = 0i32;
+        let mut large_leaps = 0u32;
         let mut ok = true;
         while out.len() < body {
             let cur = *out.last().unwrap();
+            let at = out.len();
+
+            // A strong beat leans towards the tonic triad (do, mi, sol).
+            if strong.get(at).copied().unwrap_or(false) && rng.chance(0.45) {
+                let triads: Vec<i32> = allowed
+                    .iter()
+                    .copied()
+                    .filter(|d| {
+                        matches!(d.rem_euclid(7), 0 | 2 | 4)
+                            && *d != cur
+                            && leap_ok(cur, *d)
+                            && !(large_leaps >= 1 && (*d - cur).abs() >= 3)
+                    })
+                    .collect();
+                if !triads.is_empty() {
+                    let next = *triads
+                        .iter()
+                        .min_by_key(|d| ((**d - cur).abs(), (**d - cur).signum() != want(at)))
+                        .unwrap();
+                    out.push(next);
+                    last_leap = if (next - cur).abs() > 1 {
+                        next - cur
+                    } else {
+                        0
+                    };
+                    if (next - cur).abs() >= 3 {
+                        large_leaps += 1;
+                    }
+                    continue;
+                }
+            }
+
             let mut placed = false;
             for _ in 0..20 {
-                let mut step = if last_leap.abs() >= 3 && rng.chance(0.8) {
+                let mut step = if last_leap.abs() >= 3 {
                     // Recover from a large leap by a step the other way.
                     -last_leap.signum()
+                } else if rng.chance(0.08) {
+                    0
                 } else if rng.chance(p.step_rate as f64) {
-                    if rng.chance(0.05) {
-                        0
-                    } else if rng.chance(0.5) {
-                        1
-                    } else {
-                        -1
-                    }
+                    let d = want(at);
+                    if rng.chance(0.2) { -d } else { d }
                 } else {
                     let size = rng.range_i32(2, max_leap.max(2));
-                    if rng.chance(0.5) { size } else { -size }
+                    let d = want(at);
+                    if rng.chance(0.7) { d * size } else { -d * size }
                 };
+                // Only one large leap in a phrase.
+                if step.abs() >= 3 && large_leaps >= 1 {
+                    step = want(at);
+                }
                 // Reflect off the edges of the range.
                 if !inside(cur + step) {
                     step = -step;
@@ -623,6 +771,9 @@ fn walk(
                 }
                 out.push(next);
                 last_leap = if step.abs() > 1 { step } else { 0 };
+                if step.abs() >= 3 {
+                    large_leaps += 1;
+                }
                 placed = true;
                 break;
             }
