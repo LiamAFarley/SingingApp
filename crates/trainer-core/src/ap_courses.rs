@@ -92,10 +92,11 @@ const RANDOM_TIMBRES: [&str; 11] = [
     "synth:soft_piano",
 ];
 /// A sine stays clean and identifiable at the top, so the sine course keeps the four-octave
-/// register. Sampled instruments above C6 stop sounding like themselves. The random course drops
-/// octave 4: with the two-octave step rule, a middle octave has nowhere to step to.
+/// register. Sampled instruments above C6 stop sounding like themselves. The random course uses
+/// octaves 2–5: with the two-octave step rule, every octave in that set still has a legal target
+/// (2→4, 3→5, 4→2, 5→3).
 const SINE_OCTAVES: [i32; 4] = SPREAD;
-const RANDOM_OCTAVES: [i32; 2] = [3, 5];
+const RANDOM_OCTAVES: [i32; 4] = [2, 3, 4, 5];
 
 /// The same colour ladder on two stimulus pools: sine for training, curated timbres for transfer.
 fn note_colors_courses() -> Vec<Course> {
@@ -113,8 +114,8 @@ fn note_colors_courses() -> Vec<Course> {
             AP_NOTE_COLORS,
             "Note colours (random timbres)",
             "Colours (random)",
-            "Taneda's colours on eleven pitched timbres — pianos, harpsichord, guitars, violin, viola, flute, triangle and soft piano — in C3–B5. The same errorless early levels and two final feedback levels. This is the transfer course, and the results keep per-timbre accuracy so one instrument standing out is visible.",
-            "C3–B5",
+            "Taneda's colours on eleven pitched timbres — pianos, harpsichord, guitars, violin, viola, flute, triangle and soft piano — in C2–B5. The same errorless early levels and two final feedback levels. This is the transfer course, and the results keep per-timbre accuracy so one instrument standing out is visible.",
+            "C2–B5",
             &RANDOM_OCTAVES,
             &RANDOM_TIMBRES,
         ),

@@ -34,7 +34,7 @@ Eleven timbres is enough for a transfer check and few enough that no single spec
 ## Registers
 
 - `ap_note_colors_sine`: octaves **3–6**. A sine stays clean and identifiable at the top.
-- `ap_note_colors`: octaves **3 and 5** (C3–B5; the two-octave step rule has no legal target from octave 4). Sampled instruments above C6 stop sounding like themselves, and the learner reports not being able to tell what is happening up there.
+- `ap_note_colors`: octaves **2–5** (C2–B5). With the two-octave step rule every octave still has a legal target (2→4, 3→5, 4→2, 5→3). Sampled instruments above C6 stop sounding like themselves, and the learner reports not being able to tell what is happening up there.
 
 ## Transfer checking
 
@@ -47,6 +47,6 @@ The coach told the learner the draw was "thirteen instruments" on the basis of t
 ## Implementation note (2026-10-28)
 
 - `ap_note_colors_sine` and `ap_note_colors` are separate ladder courses. The sine course uses only `synth:sine`; the random course uses exactly the eleven listed timbres.
-- The sine course keeps octaves 3–6. The random course uses octaves **3 and 5**, not 3, 4, 5: with `min_octave_step: 2`, a middle octave has no legal target and the generator would never use it. This keeps the C3–B5 range and the existing two-octave rule.
+- The sine course keeps octaves 3–6. The random course uses octaves **2–5** (C2–B5). With `min_octave_step: 2`, every listed octave has a legal target: 2→4, 3→5, 4→2, 5→3.
 - `SessionReport.by_timbre` now carries per-timbre accuracy, and the Results page shows it as a table when a session used more than one timbre.
 - Test: `colour_courses_use_their_planned_pools_and_registers` checks both pools, both registers, the jump rule, holdout exclusion, and that the random course draws every listed timbre.
