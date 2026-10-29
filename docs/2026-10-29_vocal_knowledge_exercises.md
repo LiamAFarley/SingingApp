@@ -160,7 +160,7 @@ R&B agility only after weight is stable: 5-note pentatonic run at half speed sta
 
 ## 16. App mapping and video references
 
-Presets under Saved: Vocal straw scales and bumps, Vocal onset patterns, Vocal resonance holds, Vocal weight patterns, Vocal onset land on it, Vocal 10 s holds stability and vibrato. All six now carry feedback none and act as accompaniment. True ungraded reference tracks need the graded false flag in feature requests section 11.
+Presets under Saved: Vocal straw scales and bumps, Vocal onset patterns, Vocal resonance holds, Vocal weight patterns, Vocal onset land on it, Vocal 10 s holds stability and vibrato. All six now carry feedback none and act as accompaniment. True ungraded reference tracks need the graded false flag in feature requests section 11. Four older saved presets predate this set and are superseded, not part of the session: Support even holds, Vibrato check, Onset and held pitch, Light setting holds. Ignore those four.
 
 Off-app by nature: unvoiced /s/ /f/ work, straw setup and bubbling, spoken chains, NEE and twang placement, weight gradients by ear. The microphone cannot grade airflow, pressure, vowel or loudness.
 
