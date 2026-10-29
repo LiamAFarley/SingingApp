@@ -98,7 +98,7 @@ Record for 6.1: which pitch, which vowel, roughly how far into the note anything
 
 ## 7. Articulation — 3 min
 
-Spoken, no reference track needed. Say both phrases at the light placement from section 5, quiet and forward, no added volume. That is the whole task: keep the placement while speaking normally.
+Spoken, no reference track needed. Say both phrases at the ultra-light smooth setting from section 5.1, quiet and forward, no added volume. That is the whole task: keep that setting while speaking normally.
 
 Symbols used here are sounds, not letters. /h/ is h as in heat. /i/ is ee as in see. /f/ is f as in fit. /s/ is s as in sit. /b/ is b as in boy. /m/ is m as in hum, with air going through the nose.
 

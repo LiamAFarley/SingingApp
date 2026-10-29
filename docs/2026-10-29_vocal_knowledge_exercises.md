@@ -4,7 +4,7 @@ Date: 2026-10-29. For Liam. Goals: vocal feminization, lighter tone across the f
 
 This document combines the books in `books/`, the feminization docx, the spectrogram and tutorial reference notes, and the app's diagnostics guide. Every protocol states setup, execution, sensation, pitfall and progression. Sources are cited inline so each item traces to its passage.
 
-How to use it: sections 1 to 7 are knowledge. Sections 8 to 14 are exercises. Section 15 maps each exercise to the app: preset name where one exists, off-app instruction where the microphone cannot grade, feature request number where a capability is missing.
+How to use it: sections 1 to 7 are knowledge. Sections 8 to 15 are exercises. Section 16 maps each exercise to the app: preset name where one exists, off-app instruction where the microphone cannot grade, feature request number where a capability is missing. Section 17 holds web sources that confirm or bound the book claims.
 
 ## 1. Acoustic and aerodynamic foundations
 
