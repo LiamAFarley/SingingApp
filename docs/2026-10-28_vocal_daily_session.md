@@ -22,7 +22,7 @@ Setup for all of 1: 3.0 to 3.5 mm bore straw in air, parallel to the floor. Inha
 
 ## 2. Unvoiced breath control — 5 min
 
-No phonation. Target is steady airflow with the ribs buoyant and the articulators relaxed. Tongue, lips and jaw stay loose; tension there changes the resistance and fakes the result.
+No phonation. Target is steady airflow with the ribs buoyant and the articulators relaxed. Feel for: abdominal wall moving inward progressively, ribs staying expanded without being held out, tongue lips and jaw loose. Too much engagement gives uncontrolled flow, too little leaves the air unmanaged. Tension in the tongue jaw or lips changes the resistance and fakes the result.
 
 | # | Exercise | Pattern | Tempo | Reps |
 |---|---|---|---|---|
@@ -55,9 +55,11 @@ Target for 3.1 to 3.3: pitch set before phonation, released between pulses. Then
 | 4.3 | Vowel chain on one pitch | G3: /i/ → /e/ → /a/ → /o/ → /u/, 5 s each, pitch and level held | free | 2 passes |
 | 4.4 | Twang A/B | G4 on /i/ plain, then with oral twang, then plain again | free | 5 notes, C4 up to G4 |
 
-The reference point for 4.1 to 4.4 is the ease of section 1: if a vowel needs more air than the straw did, it is being pushed.
+The reference point for 4.1 to 4.4 is the ease of section 1: if a vowel needs more air than the straw did, it is being pushed. Feel for vibration in the mask and palate with no extra loudness, tongue high and forward on /i/ with the jaw loose.
 
 ## 5. Weight — 6 min
+
+Feel for chest vibration rising and getting lighter as weight drops, throat staying loose. Hollow and dopey means the resonance dropped out. Buzzy and metallic means the weight stayed heavy.
 
 | #   | Exercise                      | Pitch / pattern                                           | Tempo  | Reps                        |
 | --- | ----------------------------- | --------------------------------------------------------- | ------ | --------------------------- |
@@ -79,6 +81,8 @@ No vibrato drill. Hold steady and record what happens. Vibrato that appears on i
 Record for 6.1: which pitch, which vowel, roughly how far into the note anything started moving. Then 6.2 gives drift, stability and whether vibrato is present. If drift is large with the drone off and small with it on, the hold is a memory problem. If wavering stays high with the drone on, it is production.
 
 ## 7. Articulation — 3 min
+
+Spoken, no reference track needed. These phrases are chosen for their sounds. "Heat from fire" starts with /h/ so airflow begins before the folds close, /i/ puts the tongue high and forward, /f/ keeps the sound at the teeth and lips. "She sees three green trees" is dense /i/ and /s/; make the /s/ with the tongue forward at the ridge, lips unrounded. If the sibilants go dull the placement slipped.
 
 | # | Exercise | Text | Tempo | Reps |
 |---|---|---|---|---|
