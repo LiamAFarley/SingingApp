@@ -20,79 +20,95 @@ Setup for all of 1: 3.0 to 3.5 mm bore straw in air, parallel to the floor. Inha
 | 1.5 | Submerged bubbling | 5.0 mm straw 2 to 5 cm into water. Blow steady bubbles first, then a gentle hum at E3 to A3, then smooth siren glides up and down the full range. Keep bubbling steady and uniform, no eruptive bubbling on the upper glides. | 3 times 5 s plus 2 glides |
 | 1.6 | Prosodic straw speech | Through a 3.0 mm straw, intone "What a great day!" and "I love vocal warm-ups!" with high inflection, letting pitch roam in the upper speaking register. Exaggerated cheerful affect, melody of speech drives the glides. | 3 sentences |
 
-## 2. Onset — 5 min
+## 2. Unvoiced breath control — 5 min
+
+No phonation. Target is steady airflow with the ribs buoyant and the articulators relaxed. Tongue, lips and jaw stay loose; tension there changes the resistance and fakes the result.
+
+| # | Exercise | Pattern | Tempo | Reps |
+|---|---|---|---|---|
+| 2.1 | Sustained /s/ | /s/ as in sit, one breath, airflow even from start to finish | free | 3 times 15 to 20 s |
+| 2.2 | Sustained /f/ | /f/ as in fit, same shape, notice the wall engagement feels different from /s/ | free | 2 times 15 s |
+| 2.3 | Rhythmic patterns on /s/ and /f/ | short-long and long-short patterns, engage on each pulse and release between, detached not abrupt | 60 bpm | 4 patterns times 2 |
+| 2.4 | Alternating pairs /s/-/z/ and /f/-/v/ | alternate each pair at one phoneme per beat, airflow even across the switch from unvoiced to voiced | 60 bpm | 2 rounds per pair |
+
+Move to section 3 when 2.1 runs 20 s steady three times with no rib collapse and no sense of pushing.
+
+## 3. Onset and release — 5 min
+
+The release between pulses matters as much as the engagement. Do not pull in abruptly at the onset; excess pressure at the start creates tension that the rest of the note pays for.
 
 | # | Exercise | Pitch / pattern | Tempo | Reps |
 |---|---|---|---|---|
-| 2.1 | Staccato on /a/ | C3 ×8, then G3 ×8 | 60 bpm | 2 sets |
-| 2.2 | Staccato alternating | C3–G3, 4 each | 60 bpm | 2 rounds |
-| 2.3 | Detached five-note | C3-D3-E3-D3-C3 on /a/ | 72 bpm | 4 rounds |
-| 2.4 | Measurement | app preset **Vocal: onset, land on it** | — | 1 run |
+| 3.1 | Staccato on /a/ with silent /h/ before each onset | C3 times 8, then G3 times 8 | 60 bpm | 2 sets |
+| 3.2 | Staccato alternating | C3 to G3, 4 each | 60 bpm | 2 rounds |
+| 3.3 | Detached five-note | C3-D3-E3-D3-C3 on /a/ | 72 bpm | 4 rounds |
+| 3.4 | Measurement | app preset **Vocal: onset, land on it** | — | 1 run |
 
-Target for 2.1–2.3: the pitch is set before phonation and released between pulses. Nothing abrupt.
+Target for 3.1 to 3.3: pitch set before phonation, released between pulses. Then 3.4 reads `attack_cents` and `correction_cents`. Small attack with small correction means the pitch was set, not slid into.
 
-## 3. Resonance and placement — 8 min
-
-| # | Exercise | Pitch / pattern | Tempo | Reps |
-|---|---|---|---|---|
-| 3.1 | Hum to vowel | C3, E3, G3, A3, C4 — 4 s hum, then same note on /u/ | free | 1 pass |
-| 3.2 | NEE placement, single notes | C4, D4, E4, F4, G4 on /i/, 4 s each | free | 2 passes |
-| 3.3 | Vowel chain on one pitch | G3: /i/ → /e/ → /a/ → /o/ → /u/, 5 s each, pitch and level held | free | 2 passes |
-| 3.4 | Twang A/B | G4 on /i/ plain, then with oral twang, then plain again | free | 5 notes, C4 up to G4 |
-
-The reference point for 3.1–3.4 is the ease of section 1: if a vowel needs more air than the straw did, it is being pushed.
-
-## 4. Weight — 7 min
+## 4. Resonance and placement — 6 min
 
 | # | Exercise | Pitch / pattern | Tempo | Reps |
 |---|---|---|---|---|
-| 4.1 | Messa di voce weight gradient | F4, G4, A4 — swell to moderate, back down | free | 2 each |
-| 4.2 | Heavy-heavy-light | mee-may-mah on G4-E4-C4 descending | 66 bpm | 3 rounds, third round light |
-| 4.3 | Ping-pong | C4-E4-G4-A4-C5 ascending, speech-level weight throughout | 72 bpm | 3 reps |
-| 4.4 | Light phrase | any 2-bar phrase from repertoire, sung deliberately light | free | 3 reps |
+| 4.1 | Hum to vowel | C3, E3, G3, A3, C4 — 4 s hum, then same note on /u/ | free | 1 pass |
+| 4.2 | NEE placement, single notes | C4, D4, E4, F4, G4 on /i/, 4 s each | free | 2 passes |
+| 4.3 | Vowel chain on one pitch | G3: /i/ → /e/ → /a/ → /o/ → /u/, 5 s each, pitch and level held | free | 2 passes |
+| 4.4 | Twang A/B | G4 on /i/ plain, then with oral twang, then plain again | free | 5 notes, C4 up to G4 |
 
-## 5. Long notes and vibrato — 6 min
+The reference point for 4.1 to 4.4 is the ease of section 1: if a vowel needs more air than the straw did, it is being pushed.
+
+## 5. Weight — 6 min
 
 | # | Exercise | Pitch / pattern | Tempo | Reps |
 |---|---|---|---|---|
-| 5.1 | Hunt | 10 s holds on C3, G3, C4, E4, G4, A4 | free | 2 passes |
-| 5.2 | Measurement | app preset **Vocal: 10 s holds, stability and vibrato** | — | 1 run |
-| 5.3 | Messa di voce, pitch steady | G3 and C4 — 6 s swell and fade | free | 3 each |
-| 5.4 | Transition | C4-D4-E4-F4-G4-F4-E4-D4-C4 legato, then C4 up to C5 the same way | 60 bpm | 3 rounds |
-| 5.5 | Vowel repeat | whichever pitch in 5.1 showed movement, sung on /a/, /e/, /i/, /o/, /u/ | free | 1 pass |
+| 5.1 | Messa di voce weight gradient | F4, G4, A4 — swell to moderate, back down | free | 2 each |
+| 5.2 | Heavy-heavy-light | mee-may-mah on G4-E4-C4 descending | 66 bpm | 3 rounds, third round light |
+| 5.3 | Ping-pong | C4-E4-G4-A4-C5 ascending, speech-level weight throughout | 72 bpm | 3 reps |
+| 5.4 | Light phrase | any 2-bar phrase from repertoire, sung deliberately light | free | 3 reps |
 
-Record for 5.1: which pitch, which vowel, and roughly how far into the note anything started moving. That single line is the useful output of the whole session.
+## 6. Long holds as the support readout — 4 min
 
-## 6. Articulation — 4 min
+No vibrato drill. Hold steady and record what happens. Vibrato that appears on its own, usually late in the note or on one pitch-vowel combination, is the support readout.
+
+| # | Exercise | Pitch / pattern | Tempo | Reps |
+|---|---|---|---|---|
+| 6.1 | Holds | 10 s on C3, G3, C4, E4, G4, A4, plain vowels | 1 pass |
+| 6.2 | Measurement | app preset **Vocal: 10 s holds, stability and vibrato** | 1 run |
+| 6.3 | Messa di voce, pitch steady | G3 and C4, 6 s swell and fade | 3 each |
+
+Record for 6.1: which pitch, which vowel, roughly how far into the note anything started moving. Then 6.2 gives drift, stability and whether vibrato is present. If drift is large with the drone off and small with it on, the hold is a memory problem. If wavering stays high with the drone on, it is production.
+
+## 7. Articulation — 3 min
 
 | # | Exercise | Text | Tempo | Reps |
 |---|---|---|---|---|
-| 6.1 | Phonetic chain | "heat from fire, fire from heat" | slow, then faster | 3 + 3 |
-| 6.2 | Sibilant chain | "she sees three green trees" | moderate | 3 |
-| 6.3 | Transfer | one sentence you would actually say, at the same placement | speech | 3 |
+| 7.1 | Phonetic chain | "heat from fire, fire from heat" | slow, then faster | 3 + 3 |
+| 7.2 | Sibilant chain | "she sees three green trees" | moderate | 3 |
+| 7.3 | Transfer | one sentence you would actually say, at the same placement | speech | 3 |
 
-## 7. What to run in the app, and when
+## 8. What runs in the app, and when
 
-- **Vocal: onset, land on it** — after section 2, every session. Watch `attack_cents` and `correction_cents`.
-- **Vocal: 10 s holds, stability and vibrato** — after section 5. Watch drift, stability, and whether vibrato is present and when it starts.
+- **Vocal: onset, land on it** — after section 3, every session. Watch `attack_cents` and `correction_cents`.
+- **Vocal: 10 s holds, stability and vibrato** — after section 6. Watch drift, stability, and whether vibrato is present and when it starts.
 
-Both are saved presets. Total app time about 4 minutes of the 35.
+Both are saved presets. About 4 minutes of the session.
 
-## 8. Progression across weeks
+## 9. Progression across weeks
 
-- **Weeks 1–2:** run as written. The only thing to change is section 5.1 — find one pitch–vowel combination where movement appears.
-- **Weeks 3–4:** move the working pitches from section 5 up and down a fifth. Keep 5.3 at moderate level.
-- **Week 5 on:** replace 5.4 with a direct transition exercise once the C4–C5 legato is smooth at 60 bpm: scale from A3 to E4 and back, 3 rounds, and add a messa di voce at the top of that scale.
+- **Weeks 1–2:** run as written. The change to look for is section 6.1 producing one pitch-vowel combination where movement appears without effort.
+- **Weeks 3–4:** move the working pitches in sections 4 and 6 up and down a fifth. Keep 5.1 at moderate level.
+- **Week 5 on:** once the C4 to C5 legato in section 4 is smooth at 60 bpm, replace it with a scale from A3 to E4 and back, 3 rounds, plus a messa di voce at the top of that scale.
 
-## 9. Accompaniment each section needs
+## 10. Accompaniment each section needs
 
 | Section | Needs |
 |---|---|
-| 1 | Sustained drone at the working pitch; click at 60 bpm for 1.2–1.3 |
-| 2 | Click at 60 and 72 bpm with an accent on the first pulse |
-| 3 | Drone on the working pitch; no click |
-| 4 | Click at 66 and 72 bpm; piano playing the note ladder for 4.1 and 4.3 |
-| 5 | Drone optional for 5.3 only; nothing for 5.1 and 5.2 |
-| 6 | Nothing |
+| 1 | Sustained drone at the working pitch; click at 60 bpm for 1.2 to 1.4 |
+| 2 | Nothing sung against; click at 60 bpm |
+| 3 | Click at 60 and 72 bpm with an accent on the first pulse |
+| 4 | Drone on every working pitch listed; no click |
+| 5 | Click at 66 and 72 bpm; piano playing the note ladder for 5.2 and 5.3 |
+| 6 | Nothing for 6.1 and 6.2; drone optional for 6.3 |
+| 7 | Nothing |
 
 The app supports drone on `sustain` and a piano reference in `pitch_match`. Click, pattern playback at tempo, and a session-level drone are not yet supported; see the feature requests.
