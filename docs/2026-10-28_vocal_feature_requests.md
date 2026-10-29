@@ -23,43 +23,43 @@ Ordered by what blocks the session, then what improves it.
 
 ## 2. Block-level click
 
-**Needed by:** sections 1.2, 1.3, 2.1–2.3, 4.2, 4.3, 5.4 of the session.
+**Needed by:** sections 1.3, 2.3, 3.1–3.3, 5.2, 5.3 of the session.
 
 Tempo, accent on beat one, subdivision (quarter or eighth). The metronome already exists inside `pattern` and `sing_interval`; expose it as a block-level option so any exercise can run against a click, with the option to keep it audible during singing or only during the count-in.
 
 ## 3. Block-level drone
 
-**Needed by:** sections 1, 3, 5.3.
+**Needed by:** sections 1, 4, and 6.3.
 
 A sustained pitch, or a chord, at a stated level, available on any block rather than only `sustain` and `n_back`. Needs: pitch selection, level in dB relative to the stimulus, and on/off per block.
 
 ## 4. Pattern playback at tempo
 
-**Needed by:** sections 2.3, 4.2, 4.3, 5.4.
+**Needed by:** sections 3.3, 5.3.
 
 Play the target line at the stated tempo so the singer can hear it once, sing it with the guide, then sing it alone. `pitch_match` and `sing_interval` play single notes and intervals; what is missing is a short melodic pattern played as a guide track at a tempo, with the guide muted on the final pass.
 
 ## 5. Glide exercise
 
-**Needed by:** section 5.4 in the progression, and by any siren work.
+**Needed by:** section 9 progression, and 1.5 siren glides.
 
 The app has no continuous-pitch exercise. Define one: a target contour over time (octave up and back over 4 beats, or a five-note scale in one glide), graded on maximum deviation in cents, mean absolute deviation, and smoothness (rate of change of the deviation). Discrete-note grading cannot score this. Without it, sirens stay off-app.
 
 ## 6. Messa di voce report
 
-**Needed by:** sections 1.4, 4.1, 5.3.
+**Needed by:** sections 1.3, 5.1, 6.3.
 
 The trace already stores per-frame level (`rms_db`) and pitch. Add a report: level contour over the hold, time to reach peak, symmetry of swell against fade, and whether pitch stayed inside a stated tolerance throughout. The failure this catches is the one that matters — a swell that also drags the pitch, or a fade that is really the support collapsing.
 
 ## 7. Staccato pulse drill
 
-**Needed by:** sections 2.1–2.3.
+**Needed by:** sections 1.4, 3.1–3.3.
 
 A pulse train at a stated tempo where each pulse is graded separately: onset (after the fix in §1), separation between pulses, and pitch centre per pulse. Currently a sustained exercise cannot express this and `pitch_match` grades one note at a time.
 
 ## 8. Vowel as a first-class field
 
-**Needed by:** sections 3.2–3.4, 5.5.
+**Needed by:** sections 4.2–4.4.
 
 Sung blocks should take a vowel, show it in the prompt, and store it on the trial so results can be filtered by vowel. The session asks for the same pitch on five vowels and expects different results; without the field there is nothing to compare.
 
@@ -89,6 +89,6 @@ Every block type in the app grades the microphone. Unvoiced consonants have no p
 
 ## Notes on what already exists
 
-- `sustain` reads centre error, drift, stability and vibrato, and has `drone`, `hold_ms`, `range`, `timbre` — sections 5.1, 5.2 and 5.3 can run on it today except for the level report.
-- `pitch_match` has `delay_ms`, `distractor_tones`, `reference_ms`, `response_ms`, `timbres` and `grading.grade_on: attack` — section 2.4 runs today.
-- The metronome and the trace data that §2, §3, §6 and §7 need are already in the engine; the work is exposure and reporting, not new synthesis.
+- `sustain` reads centre error, drift, stability and vibrato, and has `drone`, `hold_ms`, `range`, `timbre` — sections 6.1, 6.2 and 6.3 can run on it today except for the level report.
+- `pitch_match` has `delay_ms`, `distractor_tones`, `reference_ms`, `response_ms`, `timbres` and `grading.grade_on: attack` — section 3.4 runs today.
+- The metronome and the trace data that §§2, 3, 5 and §6 need are already in the engine; the work is exposure and reporting, not new synthesis.
