@@ -22,20 +22,30 @@ Setup for all of 1: 3.0 to 3.5 mm bore straw in air, parallel to the floor. Inha
 
 ## 2. Unvoiced breath control — 5 min
 
-No phonation. Target is steady airflow with the ribs buoyant and the articulators relaxed. Feel for: abdominal wall moving inward progressively, ribs staying expanded without being held out, tongue lips and jaw loose. Too much engagement gives uncontrolled flow, too little leaves the air unmanaged. Tension in the tongue jaw or lips changes the resistance and fakes the result.
+Purpose: train steady airflow and abdominal engagement without phonation, so pressure control exists before voice is added. Ragan 3.3 states the exercise develops control of the antagonistic respiratory muscles for optimal airflow without the added factor of phonation. Bickel states breath control in singing is primarily exhalation control with diaphragmatic-costal breathing.
+
+Setup: standing with lifted sternum and stretched spine, shoulders down and relaxed. Inhale with outward abdominal release and active lateral rib expansion as one gesture. Ribs 8 to 10 widen sideways, no shoulder lift, no neck tension.
 
 | # | Exercise | Pattern | Tempo | Reps |
 |---|---|---|---|---|
 | 2.1 | Sustained /s/ | /s/ as in sit, one breath, airflow even from start to finish | free | 3 times 15 to 20 s |
-| 2.2 | Sustained /f/ | /f/ as in fit, same shape, notice the wall engagement feels different from /s/ | free | 2 times 15 s |
+| 2.2 | Sustained /f/ | /f/ as in fit, same shape, notice the wall engagement feels different from /s/ and whether airflow feels faster or slower | free | 2 times 15 s |
 | 2.3 | Rhythmic patterns on /s/ and /f/ | short-long and long-short patterns, engage on each pulse and release between, detached not abrupt | 60 bpm | 4 patterns times 2 |
 | 2.4 | Alternating pairs /s/-/z/ and /f/-/v/ | alternate each pair at one phoneme per beat, airflow even across the switch from unvoiced to voiced | 60 bpm | 2 rounds per pair |
 
-Move to section 3 when 2.1 runs 20 s steady three times with no rib collapse and no sense of pushing.
+Sensation: abdominal wall engages subtly at the outset then progressively inward through the phrase, ribs stay buoyantly expanded without being held out. Ragan states holding the ribs out creates tension. Bickel states the sternum stays lifted up and forward even when lung capacity is depleted, with the lower abdomen drawing inward at the end and intercostal effort holding the ribs out.
+
+Focus: evenness of airflow and release between pulses. The release matters as much as the engagement.
+
+Pitfalls: holding the ribs out produces tension in multiple muscles. Tensing tongue, lips or jaw changes the resistance and fakes the result, so keep them loose. Pushing the abdomen out on purpose or pulling it in abruptly creates excess subglottal pressure and tension.
+
+Move to section 3 when 2.1 runs 20 s steady three times with no rib collapse and no sense of pushing. Ragan 3.5 states these coordinations come before further complexities of singing.
 
 ## 3. Onset and release — 5 min
 
-The release between pulses matters as much as the engagement. Do not pull in abruptly at the onset; excess pressure at the start creates tension that the rest of the note pays for.
+Purpose: set pitch before phonation and release between pulses. Ragan states efficient voicing is coordination of fold closure, air pressure, airflow and tract shaping, and that staccato trains onsets and offsets with the abdominal wall moving at the same rate as the folds close and open. The release between notes matters as much as the engagement, and there is never a feeling of bearing down.
+
+Setup: same posture as section 2. Start single-pitch staccato on /ba/ since the consonant avoids glottal challenges while learning the abdominal gesture, then move to vowel-initiated words with a silent /h/ image for balance between airflow and engagement.
 
 | # | Exercise | Pitch / pattern | Tempo | Reps |
 |---|---|---|---|---|
@@ -44,9 +54,13 @@ The release between pulses matters as much as the engagement. Do not pull in abr
 | 3.3 | Detached five-note | C3-D3-E3-D3-C3 on /a/ | 72 bpm | 4 rounds |
 | 3.4 | Measurement | app preset **Vocal: onset, land on it** | — | 1 run |
 
-Target for 3.1 to 3.3: pitch set before phonation, released between pulses. Then 3.4 reads `attack_cents` and `correction_cents`. Small attack with small correction means the pitch was set, not slid into.
+Target for 3.1 to 3.3: pitch set before phonation with precise pitch and no scooping, equal resonance throughout, released between pulses. Ragan states the staccato note onsets with precise pitch and equal resonant quality, progressing to triad and arpeggio once coordinated. Then 3.4 reads `attack_cents` and `correction_cents`. Small attack with small correction means the pitch was set, not slid into.
 
 ## 4. Resonance and placement — 6 min
+
+Purpose: keep resonance free so phonation stays easy. Malde states the head must be balanced at the joint for resonance structures to function freely, with throat neither stretched nor tensed and jaw slightly open. Balance the skull without the jaw, then let the jaw hang as an appendage. Neck release indicates balance.
+
+Each item runs against a drone on its working pitch.
 
 | # | Exercise | Pitch / pattern | Tempo | Reps |
 |---|---|---|---|---|
@@ -59,7 +73,7 @@ The reference point for 4.1 to 4.4 is the ease of section 1: if a vowel needs mo
 
 ## 5. Weight — 6 min
 
-Feel for chest vibration rising and getting lighter as weight drops, throat staying loose. Hollow and dopey means the resonance dropped out. Buzzy and metallic means the weight stayed heavy.
+Purpose: thin the folds without losing edge contact, before condensing resonance. The doc orders weight first because resonance-first pulls the folds heavy. Weight is fold mass per cycle and closed quotient. Light means higher open quotient without breathy hypoadduction.
 
 | #   | Exercise                      | Pitch / pattern                                           | Tempo  | Reps                        |
 | --- | ----------------------------- | --------------------------------------------------------- | ------ | --------------------------- |
@@ -69,6 +83,8 @@ Feel for chest vibration rising and getting lighter as weight drops, throat stay
 | 5.4 | Light phrase                  | any 2-bar phrase from repertoire, sung deliberately light | free   | 3 reps                      |
 
 ## 6. Long holds as the support readout — 4 min
+
+Purpose: read support steadiness, not drill vibrato. Malde lists six causes of vibrato trouble with uneven breath pressure among them, and states vibrato appears when the intrinsics meet subglottic pressure with the body springy. The entry point is finding where movement already occurs, usually a resonant pitch-vowel combination or the tail of a long note, then recreating those conditions. Ragan trains the airflow that makes that possible. No book here prescribes an oscillation drill.
 
 No vibrato drill. Hold steady and record what happens. Vibrato that appears on its own, usually late in the note or on one pitch-vowel combination, is the support readout.
 
