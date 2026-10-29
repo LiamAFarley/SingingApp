@@ -132,7 +132,7 @@ Lip trill arpeggio from comfortably low range ascending by half steps to top of 
 
 ## 12. Weight thinning in order
 
-Do weight before resonance. Resonance-first pulls folds heavy.
+Do weight before resonance work in any session. Resonance-first pulls folds heavy into Overfull. If the daily session runs resonance items first for warm-up ease, keep them at speech-level weight only and treat section 5 as the weight session proper.
 
 1. Pitch-anchor scaling. Comfortable baseline note matched through the day until found without reference. Ascending scales on soft hum or straw in head-dominant mix, not chest voice. Chest vibration rises and lightens toward hard palate. If it flips into disconnected airy falsetto, use 3.5 mm straw or soft /m/ hum. (Docx lines 103 to 107.)
 2. Messa di voce weight gradients. Single vowel ee eh or ah on comfortable mid pitch, slide heavy buzzy forte down to ultra-light smooth pianissimo and back without changing pitch or vowel size. Listen for buzz dissolving into flute-like smooth tone with minimum throat effort. If the vowel darkens into a yawn, smile slightly or anchor tongue high. (Docx lines 108 to 112.)
@@ -182,8 +182,9 @@ Vocaltechnique coordinated onset. Three onsets: aspirate with airflow first, glo
 
 Video references with direct links. Seattle Voice Lab complete resonance guide, 40 minutes covering husky feminine voices, masculine vowel placement, head voice while singing, mixed voice: https://www.youtube.com/watch?v=Yxha0jl1C40. Feminine vocal weight short: https://www.youtube.com/watch?v=utO8F3qki8g. Heat from fire as taught by Zheanna Erose: https://www.youtube.com/watch?v=ynIoNPnX538. Bozeman vowel migration and modification paper: https://www.academia.edu/38807736/VOWEL_MIGRATION_AND_MODIFICATION. Voice Study Centre passaggi session review covering chiaroscuro, passive tuning, active modification and Pavarotti open to close timbre: https://voicestudycentre.com/news/after-the-session-training-the-passaggi-of-classical-genre-voices-with-ken-bozeman/.
 
-## 18. Dose gaps: where the sources state no reps
+Video appendix by section. Whoop versus hey timbre and F1-H1 against F1-H2 coupling for sections 3 and 13: Ken Bozeman Whoop It Up Part 1 https://www.youtube.com/watch?v=OfihqBqITKs. Chiaroscuro whisper over-vowel and under-vowel tuning with affects for sections 3 and 13: Episode 375 https://www.youtube.com/watch?v=ilAZ8JaOQMA. Acoustic registers with Bozeman for section 3: BAST episode 172. Toys and props straw and cup cues for section 8 and 11: BAST episode 159. Oral twang ladder 67 to 74 to 88 dB with wae nyeah neeyeow dialed back 70 percent for sections 5 and 11: Seattle Voice Lab Exploring Twang September 2024 PDF. Vocal fullness too buzzy or too hollow diagnosis for sections 2 and 12: TransVoiceLessons Patreon post 64964891. Three daily exercises dose model for section 12 and 18: Renee Yoxon blog three daily exercises. Absolute beginner weight lightening sequence for section 12: https://www.youtube.com/watch?v=BfCS01MkbIY. Temporary head-voice access cue for section 13: https://www.youtube.com/watch?v=_dzAEq2Y-uU. Chiaroscuro whisper vowel modeling PDF with F2 over-vowel targets and singer sample files for sections 3 and 13: Bozeman resources page. Safe calibration with brown noise audit and ha Ha HA HAPPY phonation test for sections 2 and 12: docx line 127.
 
+## 18. Dose gaps: where the sources state no reps
 Rep counts in the daily session for these items are coaching judgment, not source. The sources give no numbers:
 
 - Feminization weight protocols: no reps, durations, or daily schemes stated. Messa gradients, ping-ponging, Patrick Star, and pitch-anchor scaling give cues and pitfalls only.
@@ -193,3 +194,9 @@ Rep counts in the daily session for these items are coaching judgment, not sourc
 - Ragan does state doses where this document quotes them: q=60 for rhythmic patterns and voiceless staccato, 10 to 20 seconds for sustained consonants, 3 to 4 inch ball elevation, 5 to 10 second empty hold 2 to 3 times, fry 2 to 3 seconds, tempo about 110 for staccato to legato.
 
 Where a source is silent, the session picks a small fixed dose and the move-on criterion carries the progression instead.
+
+## 19. Safety and stop rules
+
+Check before singing: voice feels normal, no new hoarseness, no pain, no unusual fatigue, no heavy voice use yesterday, comfortable speaking. Mild fatigue means cut high range, loud singing and long holds. Discomfort means listening and gentle straw only. Pain, major voice change, persistent hoarseness or loss of normal function means stop demanding practice and seek clinical assessment if it persists. Never diagnose from microphone audio.
+
+During practice: stop any drill that hurts or turns the voice hoarse. Do not train through discomfort. Cap water depth at 5 cm and twang at conversational level, never sustained high twang near 88 dB in practice. Keep 2 to 4 mm straws and deep water out with swelling or insufficient closure. After any distortion or grit work, run a clean siren within 2 minutes with no cough urge and vibration high behind the palate, or stop for the day. Spectrogram cutoffs that trigger referral rather than more drills: CPPS below 14.47 dB sustained, AVQI above 2.35, high breathiness index with irregularity.
