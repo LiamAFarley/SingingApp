@@ -11,14 +11,14 @@ The straw work sits in section 1: six protocols taken from the feminization doc,
 
 Setup for all of 1: 3.0 to 3.5 mm bore straw in air, parallel to the floor. Inhale through the nose or mouth, never through the straw. Lips sealed gently, no perioral tension. Cue throughout: rib cage stays buoyantly expanded, abdominal wall moves inward progressively through the phrase.
 
-| # | Protocol | How | Reps |
-|---|---|---|---|
+| #   | Protocol                                 | How                                                                                                                                                                                                                                                                                               | Reps                                   |
+| --- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
 | 1.1 | Pure straw calibration and vowel shaping | Sustain a comfortable middle pitch through the straw, then alternate every other phrase between straw and open mouth. Shape the inside of the mouth as /i/ or a /b/ posture, not /m/. Pinch the nose at intervals to check for zero nasal leak. Pretend the lips end at the far tip of the straw. | 6 sustains, alternating straw and open |
-| 1.2 | Variable-resistance multi-straw | Ascending 5-note scales, starting with two straws lengthwise or a single 3.5 mm straw, then two straws side by side, then three side by side. Cheeks puff slightly as pressure builds. Attention on ease of vibration in the mask and palate, not loudness. | 1 pass per resistance |
-| 1.3 | Bumps in the road | Two adjacent pitches a major or minor second apart in the middle to upper transition. Oscillate between them while swelling quiet LOUD quiet LOUD without breaking the air stream. Pitch must not sharpen on the loud swells, airflow must not stall in the quiet valleys. | 4 pairs |
-| 1.4 | Burst-sustain onset | 4 rapid staccato bursts through the straw followed at once by 2 long sustains on the same pitch, on the same airstream. Bursts start from gentle abdominal engagement, no hard glottal click. Repeat across resistances. | 4 rounds |
-| 1.5 | Submerged bubbling | 5.0 mm straw 2 to 5 cm into water. Blow steady bubbles first, then a gentle hum at E3 to A3, then smooth siren glides up and down the full range. Keep bubbling steady and uniform, no eruptive bubbling on the upper glides. | 3 times 5 s plus 2 glides |
-| 1.6 | Prosodic straw speech | Through a 3.0 mm straw, intone "What a great day!" and "I love vocal warm-ups!" with high inflection, letting pitch roam in the upper speaking register. Exaggerated cheerful affect, melody of speech drives the glides. | 3 sentences |
+| 1.2 | Variable-resistance multi-straw          | Ascending 5-note scales, starting with two straws lengthwise or a single 3.5 mm straw, then two straws side by side, then three side by side. Cheeks puff slightly as pressure builds. Attention on ease of vibration in the mask and palate, not loudness.                                       | 1 pass per resistance                  |
+| 1.3 | Bumps in the road                        | Two adjacent pitches a major or minor second apart in the middle to upper transition. Oscillate between them while swelling quiet LOUD quiet LOUD without breaking the air stream. Pitch must not sharpen on the loud swells, airflow must not stall in the quiet valleys.                        | 4 pairs                                |
+| 1.4 | Burst-sustain onset                      | 4 rapid staccato bursts through the straw followed at once by 2 long sustains on the same pitch, on the same airstream. Bursts start from gentle abdominal engagement, no hard glottal click. Repeat across resistances.                                                                          | 4 rounds                               |
+| 1.5 | Submerged bubbling                       | 5.0 mm straw 2 to 5 cm into water. Blow steady bubbles first, then a gentle hum at E3 to A3, then smooth siren glides up and down the full range. Keep bubbling steady and uniform, no eruptive bubbling on the upper glides.                                                                     | 3 times 5 s plus 2 glides              |
+| 1.6 | Prosodic straw speech                    | Through a 3.0 mm straw, intone "What a great day!" and "I love vocal warm-ups!" with high inflection, letting pitch roam in the upper speaking register. Exaggerated cheerful affect, melody of speech drives the glides.                                                                         | 3 sentences                            |
 
 ## 2. Unvoiced breath control — 5 min
 
@@ -59,12 +59,12 @@ The reference point for 4.1 to 4.4 is the ease of section 1: if a vowel needs mo
 
 ## 5. Weight — 6 min
 
-| # | Exercise | Pitch / pattern | Tempo | Reps |
-|---|---|---|---|---|
-| 5.1 | Messa di voce weight gradient | F4, G4, A4 — swell to moderate, back down | free | 2 each |
-| 5.2 | Heavy-heavy-light | mee-may-mah on G4-E4-C4 descending | 66 bpm | 3 rounds, third round light |
-| 5.3 | Ping-pong | C4-E4-G4-A4-C5 ascending, speech-level weight throughout | 72 bpm | 3 reps |
-| 5.4 | Light phrase | any 2-bar phrase from repertoire, sung deliberately light | free | 3 reps |
+| #   | Exercise                      | Pitch / pattern                                           | Tempo  | Reps                        |
+| --- | ----------------------------- | --------------------------------------------------------- | ------ | --------------------------- |
+| 5.1 | Messa di voce weight gradient | F4, G4, A4 — swell to moderate, back down                 | free   | 2 each                      |
+| 5.2 | Heavy-heavy-light             | mee-may-mah on G4-E4-C4 descending                        | 66 bpm | 3 rounds, third round light |
+| 5.3 | Ascending speech-level | C4-E4-G4-A4-C5 ascending, speech-level weight throughout | 72 bpm | 3 reps |
+| 5.4 | Light phrase                  | any 2-bar phrase from repertoire, sung deliberately light | free   | 3 reps                      |
 
 ## 6. Long holds as the support readout — 4 min
 
