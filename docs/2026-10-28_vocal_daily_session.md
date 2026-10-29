@@ -5,18 +5,20 @@
 
 One session, run daily, top to bottom. Everything below specifies pitches, tempo, vowel and rep count so it can be run against a click and a drone without deciding anything in the moment. Where the app already does the job, the preset or course is named. Where it doesn't, the feature is named and specified in `2026-10-28_vocal_feature_requests.md`.
 
-The straw work sits in section 1 only: it is four different straw exercises, not one exercise repeated. Nothing later reuses them.
+The straw work sits in section 1: six protocols taken from the feminization doc, not one exercise repeated. Nothing later reuses them.
 
-## 1. Airflow through the straw — 6 min
+## 1. Airflow through the straw — 10 min
 
-Cue throughout: rib cage stays buoyantly expanded, abdominal wall moves inward progressively through the phrase. No holding the ribs out.
+Setup for all of 1: 3.0 to 3.5 mm bore straw in air, parallel to the floor. Inhale through the nose or mouth, never through the straw. Lips sealed gently, no perioral tension. Cue throughout: rib cage stays buoyantly expanded, abdominal wall moves inward progressively through the phrase.
 
-| # | Exercise | Pitch / pattern | Tempo | Reps |
-|---|---|---|---|---|
-| 1.1 | Straw, sustained | C3, E3, G3, A3, C4 — 8 s each | free | 2 passes |
-| 1.2 | Straw, quarter-note pulses | C3 only | 60 bpm | 8 pulses ×2 |
-| 1.3 | Straw, long-short-short | C3, then G3 | 60 bpm | 4 patterns ×2 |
-| 1.4 | Straw, messa di voce | C3, E3, G3 — slow swell and fade | free | 1 each |
+| # | Protocol | How | Reps |
+|---|---|---|---|
+| 1.1 | Pure straw calibration and vowel shaping | Sustain a comfortable middle pitch through the straw, then alternate every other phrase between straw and open mouth. Shape the inside of the mouth as /i/ or a /b/ posture, not /m/. Pinch the nose at intervals to check for zero nasal leak. Pretend the lips end at the far tip of the straw. | 6 sustains, alternating straw and open |
+| 1.2 | Variable-resistance multi-straw | Ascending 5-note scales, starting with two straws lengthwise or a single 3.5 mm straw, then two straws side by side, then three side by side. Cheeks puff slightly as pressure builds. Attention on ease of vibration in the mask and palate, not loudness. | 1 pass per resistance |
+| 1.3 | Bumps in the road | Two adjacent pitches a major or minor second apart in the middle to upper transition. Oscillate between them while swelling quiet LOUD quiet LOUD without breaking the air stream. Pitch must not sharpen on the loud swells, airflow must not stall in the quiet valleys. | 4 pairs |
+| 1.4 | Burst-sustain onset | 4 rapid staccato bursts through the straw followed at once by 2 long sustains on the same pitch, on the same airstream. Bursts start from gentle abdominal engagement, no hard glottal click. Repeat across resistances. | 4 rounds |
+| 1.5 | Submerged bubbling | 5.0 mm straw 2 to 5 cm into water. Blow steady bubbles first, then a gentle hum at E3 to A3, then smooth siren glides up and down the full range. Keep bubbling steady and uniform, no eruptive bubbling on the upper glides. | 3 times 5 s plus 2 glides |
+| 1.6 | Prosodic straw speech | Through a 3.0 mm straw, intone "What a great day!" and "I love vocal warm-ups!" with high inflection, letting pitch roam in the upper speaking register. Exaggerated cheerful affect, melody of speech drives the glides. | 3 sentences |
 
 ## 2. Onset — 5 min
 
