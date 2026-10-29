@@ -759,7 +759,7 @@ Two coordinations from the support section return here with new meaning. The bel
 - **Sensation.** The felt center of the tone migrates from the chest toward the soft palate and the bridge of the nose across the repetitions, arriving forward and ringing without extra push.
 - **Pitfall plus correction.** Dryness, tickling, or hoarseness after the drill means the attacks were pressed, with the folds slamming rather than meeting. Stop the drill for the day if hoarseness appears, because pressed onsets injure with repetition, and resume next session at a gentler effort.
 - **Dose plus move-on.** Four rounds, advancing when the tone stays clean through all syllables, is coaching judgment. Move on when the sustained note blooms from the same easy mechanism as the staccato notes.
-- **Source.** Spectrogram reference notes with the Liepe compression pattern; the stop-by-pausing-exhalation cue comes from there.
+- **Source.** `docs/spectrogram-references.md` Compression section (Glottal Adduction, Flow Phonation, Onset Calibration) with the Liepe compression pattern; the stop-by-pausing-exhalation cue comes from there.
 
 ### 10.5 Fry-to-modal slide
 
@@ -769,7 +769,7 @@ Two coordinations from the support section return here with new meaning. The bel
 - **Sensation.** Closure is felt as a gentle meeting of the folds rather than a squeeze, and the vowel that follows sounds clearer than the same vowel begun cold.
 - **Pitfall plus correction.** Pressing, which feels like pushing air or gripping in the throat during the creak, defeats the drill by replacing slackness with force. Reset to a softer quieter creak, even a barely audible one, and slide only from that.
 - **Dose plus move-on.** Four rounds is coaching judgment. Move on when the Mmmm-ah after the fry sounds cleanly adducted with no throat effort.
-- **Source.** Spectrogram reference notes, fry-to-modal pattern; the two-to-three-second fry and the no-pressure cue follow Ragan Exercise 4.13 as background.
+- **Source.** `docs/spectrogram-references.md` Compression section, fry-to-modal slide; the two-to-three-second fry and the no-pressure cue follow Ragan Exercise 4.13 as background.
 
 ### 10.6 Silent laugh into flow siren
 
@@ -779,7 +779,7 @@ Two coordinations from the support section return here with new meaning. The bel
 - **Sensation.** The sides of the throat feel wide and uninvolved while the tone flows, with no clamp at the moment vibration starts.
 - **Pitfall plus correction.** If the throat clamps at the siren's start, the old glottal-stop habit has reasserted itself. Return to the silent laugh, re-establish the widening, and begin the siren more gently, even breathier at first, until the clamp stops appearing.
 - **Dose plus move-on.** Three rounds is coaching judgment. Move on when the siren starts without any catch in the throat three times in a row.
-- **Source.** Spectrogram reference notes, silent-laugh to flow-siren pattern.
+- **Source.** `docs/spectrogram-references.md` Compression section, silent-laugh false-fold retraction to flow-siren pattern.
 
 ### 10.7 Silent-H method (coordinated onset)
 
@@ -1143,7 +1143,7 @@ The tonal goal is a synthesized mix of two couplings. Whoop timbre is F1 tuned t
 - Sensation: Correct engagement feels like a narrow, tall column behind the palate with side-wall presence at the pillars — often described as a "pharyngeal grin" high in the back room — while the throat front stays quiet and the larynx rides level. Sound feels larger than its effort: moderate breath produces a ringing, slightly reedy core with sympathetic buzz at the bridge of the nose and hard palate, and chest-wall vibration increases modestly at the forte peak without the sternum thud of dragged chest. The pianissimo ends feel thread-like but unbroken, the same voice made smaller. Wrong engagement feels like a squeeze at the front of the throat, ache at the sides of the neck after the set, or a louder-but-duller tone — all signs the false folds joined and the outlet collapsed into whole-throat constriction rather than the two precise narrowings.
 - Pitfall plus correction: The dominant failure is building the peak with pressure: louder, pressed phonation that raises the whole spectrum including noise, feels effortful, and leaves hoarseness. The correction is to halve the volume, return to the "wae" finder at pianissimo, and rebuild the swell slower — brilliance must bloom on a steady core, never arrive as a shove. The second failure is losing the walls on vowel change, typically /a/ keeping the core while /u/ goes hooty because lip rounding widened the outlet. The correction is to form /u/ and /o/ with the upper lip only, no pucker, keep tongue edges on the molars, and think the back room tall while the front stays small. The third failure is breathy falsetto that never adducts: walls approximated but folds apart, so air pours through with no peak. The correction is a firmer "wae" edge — adduction first, then walls — or one preceding bright "nay" for closure memory before re-entering the sustained vowel. Any soreness, urge to cough or clear, or loss of upper pianissimo ends the drill for the day; straw phonation only afterward.
 - Dose plus move-on: The docx gives the voce faringea definition and spectrum data but no dose, so dose is coaching judgment. Use three wall-finder alternations per vowel (/a/, /o/, /u/), two pinpoint messa swells per vowel, and two slow fifth-crossings per vowel per session — roughly 10–12 minutes. Advance when the forte peak on all three vowels carries audible core with no ache and the fifth-crossing keeps the core unbroken, at which point retire the "wae" finder and enter scales on plain vowels with walls pre-set. If a spectrogram is available, advance when the 1400–1800 Hz band on the messa forte peak sits within a few dB of your own chest-voice reference on the same vowel; if no analyzer is available, advance on the ear criterion of a listener mistaking the top for chest at moderate volume with zero throat cost.
-- Source: Feminization docx lines 80–82 (voce faringea definition as adducted falsetto-dominant mix with lateral wall approximation plus aryepiglottic narrowing; third-peak LTAS data −51 vs −52 dB); docx lines 84–87 (bratty finder sounds, pinpoint messa loading); Bozeman chiaroscuro PDF (back-room vs fore-mouth orientation; minimal visible articulation, tall pharynx).
+- Source: Feminization docx lines 80–82 (voce faringea definition as adducted falsetto-dominant mix with lateral wall approximation plus aryepiglottic narrowing; third-peak long-term average spectrum (LTAS) data −51 vs −52 dB); docx lines 84–87 (bratty finder sounds, pinpoint messa loading); Bozeman chiaroscuro PDF (back-room vs fore-mouth orientation; minimal visible articulation, tall pharynx).
 
 ### 13.10 Curbing expansion — restraint-to-release ladder out of the first bridge
 
@@ -1366,14 +1366,14 @@ Off-app by nature: unvoiced /s/ /f/ work, straw setup and bubbling, spoken chain
 | 12.1 anchor, 12.2 messa, 12.3 Patrick Star, 12.4 ping-pong, 12.5 phrase | Vocal weight patterns for 12.4 shapes; the rest off-app by ear | Weight and buzz-to-smooth are not gradable; messa level contour needs feature request section 6 |
 | 13.1–13.6 bridging | Vocal weight patterns for slide shapes; the rest off-app | Pharyngeal narrowing and curbing restraint are not gradable |
 | 13.7 whisper | Off-app | Whisper has no pitch tracking |
-| 13.9 faringea, 13.10 curbing, 13.11 staircase, 13.12 twang ignition, 13.13 whistle siren | Off-app | No LTAS, AES, or whistle exercise types; siren smoothness needs feature request section 5 glide |
+| 13.9 faringea, 13.10 curbing, 13.11 staircase, 13.12 twang ignition, 13.13 whistle siren | Off-app | No long-term-average-spectrum, AES, or whistle exercise types; siren smoothness needs feature request section 5 glide |
 | 14.1–14.5 chains and prosody | Off-app | Spoken; no grading exists |
 | 15.1 holds, 15.2 drone pairs | Vocal 10 s holds, stability and vibrato | Direct match |
 | 15.3 agility, 15.4 isolation | Vocal onset patterns for shapes; speed and connection by ear | Per-note timing at speed needs feature request section 7 |
 | 15.5 calibration, 15.6 decay ladder | Off-app with phone recorder | No spectrum or freeze-gain calibration in the app |
 | 20.1–20.14 stretches | Off-app | No sound involved |
 
-Videos named in the books and notes, all with direct links in section 17: TransVoiceLessons fullness post and weight short, Seattle Voice Lab resonance guide and twang PDF, Renee Yoxon dose model, Bozeman whoop part 1 and episode 375 and whisper modeling PDF and resources page, BAST episodes 159 and 172, beginner weight sequence, head-voice cue, passaggi review. The docx works cited lines 193 to 270 in the sibling books directory and the two reference markdown files there hold the full lists.
+Videos named in the books and notes, all with direct links in section 17: TransVoiceLessons fullness post and weight short, Seattle Voice Lab resonance guide and twang PDF, Renee Yoxon dose model, Bozeman whoop part 1 and episode 375 and whisper modeling PDF and resources page, BAST episodes 159 and 172, beginner weight sequence, head-voice cue, passaggi review. The docx works cited lines 193 to 270 in the sibling books directory and the sibling reference files `spectogram analysis and youtube references.md` and `youtube tutorial references.md`, both now copied to `docs/` as `spectrogram-references.md` and `youtube-tutorial-references.md`, hold the full lists.
 
 ## 17. Web supplement, 2026-10-29
 
