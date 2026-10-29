@@ -123,7 +123,7 @@ Both are saved presets. About 4 minutes of the session.
 
 - **Weeks 1–2:** run as written. The change to look for is section 6.1 producing one pitch-vowel combination where movement appears without effort.
 - **Weeks 3–4:** move the working pitches in sections 4 and 6 up and down a fifth. Keep 5.1 at moderate level.
-- **Week 5 on:** once the C4 to C5 legato in section 4 is smooth at 60 bpm, replace it with a scale from A3 to E4 and back, 3 rounds, plus a messa di voce at the top of that scale.
+- **Week 5 on:** once the C4 to C5 ascending line in section 5.3 is smooth at 72 bpm, replace it with a scale from A3 to E4 and back, 3 rounds, plus a messa di voce at the top of that scale.
 
 ## 10. Accompaniment each section needs
 
