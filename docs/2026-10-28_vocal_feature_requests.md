@@ -75,6 +75,18 @@ Allow a block to play an audio file from the library — a drone-plus-click mix,
 
 A saved preset should be startable from the home screen without editing settings, with the option to run it on a fixed daily schedule. Currently a preset is a session spec; there is no notion of "my daily session".
 
+## 11. Ungraded reference tracks, including for unvoiced work
+
+**Needed by:** section 1 setups, all of section 2, and anything else used as a play-along rather than a test.
+
+Every block type in the app grades the microphone. Unvoiced consonants have no pitch to grade, and straw setups and spoken chains do not need a score either. What those items need is a reference track: click with accent and subdivision, count-in bars, drone or pattern playback at tempo, with nothing recorded as right or wrong.
+
+**What to change.** Add one of the following; the first is the smaller change:
+
+1. A `graded: false` flag on `pattern`, `sustain` and `pitch_match`. When set, the block plays its reference, backing, click and drone exactly as now, shows the same lane, but records no score and writes no accuracy. The session report lists the block as reference only.
+2. Rhythmic patterns without pitch: a click track that plays short-long and long-short patterns at the stated tempo with a count-in, so /s/ and /f/ work has something to follow. No microphone input.
+3. Count-in bars on every sung block, so a pattern starts on a known beat rather than after an arbitrary pause.
+
 ## Notes on what already exists
 
 - `sustain` reads centre error, drift, stability and vibrato, and has `drone`, `hold_ms`, `range`, `timbre` — sections 5.1, 5.2 and 5.3 can run on it today except for the level report.
