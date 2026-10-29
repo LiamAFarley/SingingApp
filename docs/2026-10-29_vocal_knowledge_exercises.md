@@ -4,7 +4,7 @@ Date: 2026-10-29. For Liam. Goals: vocal feminization, lighter tone across the f
 
 This document combines the books in `books/`, the feminization docx, the spectrogram and tutorial reference notes, and the app's diagnostics guide. Every protocol states setup, execution, sensation, pitfall and progression. Sources are cited inline so each item traces to its passage.
 
-How to use it: sections 1 to 7 are knowledge. Sections 8 to 15 are exercises. Section 16 maps each exercise to the app: preset name where one exists, off-app instruction where the microphone cannot grade, feature request number where a capability is missing. Section 17 holds web sources that confirm or bound the book claims.
+How to use it: sections 1 to 7 are knowledge. Sections 8 to 15 are exercises. Section 16 maps each exercise to the app: preset name where one exists, off-app instruction where the microphone cannot grade, feature request number where a capability is missing. Section 17 holds web sources that confirm or bound the book claims. Section 18 marks where the sources state no reps, so those doses are coaching judgment.
 
 ## 1. Acoustic and aerodynamic foundations
 
@@ -181,3 +181,15 @@ SingWise breath management. Appoggio means support from inspiratory muscles via 
 Vocaltechnique coordinated onset. Three onsets: aspirate with airflow first, glottal with folds closed first, coordinated with both together giving the most speech-like connection. Method: start saying hah as in heart, then make the H quieter until inaudible while still thinking it. Then put it on a 12321 pattern transposed up by semitone. Never start beginners on glottal onset or they push from a closed throat and scoop. Onset work is little and often like gym work. Use: the silent /h/ method behind section 3 and the no-scoop target in section 10. https://vocaltechnique.co.uk/coordinated-onset/
 
 Video references with direct links. Seattle Voice Lab complete resonance guide, 40 minutes covering husky feminine voices, masculine vowel placement, head voice while singing, mixed voice: https://www.youtube.com/watch?v=Yxha0jl1C40. Feminine vocal weight short: https://www.youtube.com/watch?v=utO8F3qki8g. Heat from fire as taught by Zheanna Erose: https://www.youtube.com/watch?v=ynIoNPnX538. Bozeman vowel migration and modification paper: https://www.academia.edu/38807736/VOWEL_MIGRATION_AND_MODIFICATION. Voice Study Centre passaggi session review covering chiaroscuro, passive tuning, active modification and Pavarotti open to close timbre: https://voicestudycentre.com/news/after-the-session-training-the-passaggi-of-classical-genre-voices-with-ken-bozeman/.
+
+## 18. Dose gaps: where the sources state no reps
+
+Rep counts in the daily session for these items are coaching judgment, not source. The sources give no numbers:
+
+- Feminization weight protocols: no reps, durations, or daily schemes stated. Messa gradients, ping-ponging, Patrick Star, and pitch-anchor scaling give cues and pitfalls only.
+- NEE, twang, pinched-nose, chiaroscuro whisper: no reps or durations stated.
+- Bickel chapters 3 and 4: no metronome marks, no seconds-long durations, no daily rep schemes stated anywhere. Only minimums exist: hissing and counting minimum three breath cycles.
+- Malde: no numeric move-ons. Repeat until mapped, continue until the spine gathers with every inhalation, rib excursion may take several months.
+- Ragan does state doses where this document quotes them: q=60 for rhythmic patterns and voiceless staccato, 10 to 20 seconds for sustained consonants, 3 to 4 inch ball elevation, 5 to 10 second empty hold 2 to 3 times, fry 2 to 3 seconds, tempo about 110 for staccato to legato.
+
+Where a source is silent, the session picks a small fixed dose and the move-on criterion carries the progression instead.
